@@ -10,6 +10,9 @@ out/
 .env.local
 .env.*.local
 
+# MCP server config — contains the Supabase access token
+.mcp.json
+
 # Large binary assets — serve from CDN or object storage instead
 *.fbx
 *.glb
