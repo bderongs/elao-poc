@@ -13,7 +13,7 @@
  *      low-confidence word here.
  *   2. Azure free-speech assessment — kept as a second, acoustic signal:
  *      per-word accuracy + phoneme scores + error flags.
- *   3. Claude as judge — receives the live transcript (what the UI shows),
+ *   3. Mistral as judge — receives the live transcript (what the UI shows),
  *      both engines' evidence, and the examiner's question, then rates each
  *      word the way a human examiner would: engines agree + high confidence
  *      → good; engines disagree on a word ("think" vs "sink") → work out the
@@ -22,13 +22,11 @@
  * Fallbacks: if the judge or Deepgram fail, the Azure acoustic result is
  * returned (worst case = previous behaviour, never worse).
  *
- * AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, ANTHROPIC_API_KEY never leave the server.
+ * AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, MISTRAL_API_KEY never leave the server.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { mistralComplete, mistralPronunciationModel } from "@/lib/mistral";
 import { discreteWordConfidence, wordAccuracy } from "@/lib/pronunciation-scoring";
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ─── Evidence collectors ──────────────────────────────────────────────────────
 
@@ -226,13 +224,15 @@ async function judge(
       : "\nACOUSTIC scores: unavailable\n");
 
   try {
-    const res = await anthropic.messages.create({
-      model: process.env.ANTHROPIC_PRONUNCIATION_MODEL ?? "claude-opus-4-8",
-      max_tokens: 2000,
-      system: JUDGE_SYSTEM,
-      messages: [{ role: "user", content: evidence }],
-    });
-    const text = (res.content[0]?.type === "text" ? res.content[0].text : "").trim();
+    const text = (
+      await mistralComplete({
+        model: mistralPronunciationModel(),
+        system: JUDGE_SYSTEM,
+        messages: [{ role: "user", content: evidence }],
+        maxTokens: 2000,
+        json: true,
+      })
+    ).trim();
     const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();
     const parsed = JSON.parse(cleaned) as JudgeResult;
     if (typeof parsed.turn_score !== "number" || !Array.isArray(parsed.words)) return null;

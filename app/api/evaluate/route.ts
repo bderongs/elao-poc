@@ -1,12 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import {
   CEFR_SYSTEM_PROMPT,
   buildEvaluationUserMessage,
 } from "@/lib/cefr-prompt";
 import type { ConvLang } from "@/lib/conversation-prompts";
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+import { mistralComplete, mistralModel } from "@/lib/mistral";
 
 interface SttContext {
   pronunciation: number;
@@ -32,17 +30,18 @@ export async function POST(req: Request) {
   }
 
   try {
-    const res = await anthropic.messages.create({
-      model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
-      max_tokens: 1500,
+    const text = await mistralComplete({
+      model: mistralModel(),
       system: CEFR_SYSTEM_PROMPT,
       messages: [
-        { role: "user", content: buildEvaluationUserMessage(language, userTurns, azureContext ?? undefined) },
+        {
+          role: "user",
+          content: buildEvaluationUserMessage(language, userTurns, azureContext ?? undefined),
+        },
       ],
+      maxTokens: 1500,
+      json: true,
     });
-
-    const text =
-      res.content[0].type === "text" ? res.content[0].text : "";
 
     // Strip any accidental markdown fences and parse
     const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();

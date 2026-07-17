@@ -1,9 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { getSystemPrompt, type ConvLang } from "@/lib/conversation-prompts";
+import { mistralModel, mistralStreamText } from "@/lib/mistral";
 
 export const runtime = "nodejs";
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 interface ChatRequest {
   language: ConvLang;
@@ -160,22 +158,17 @@ export async function POST(req: Request) {
       };
 
       try {
-        const claudeStream = await anthropic.messages.stream({
-          model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5",
-          max_tokens: 300,
+        const llmStream = mistralStreamText({
+          model: mistralModel(),
           system: getSystemPrompt(language),
           messages: [
             ...history.map(({ role, content }) => ({ role, content })),
             { role: "user", content: userMessage },
           ],
+          maxTokens: 300,
         });
 
-        for await (const event of claudeStream) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            const piece = event.delta.text;
+        for await (const piece of llmStream) {
 
             if (headResolved) {
               emit(piece);
@@ -210,7 +203,6 @@ export async function POST(req: Request) {
               head = "";
             }
             // else: partial tag, wait for more deltas.
-          }
         }
 
         // Flush any unresolved head (e.g. a lone partial tag at end of stream).

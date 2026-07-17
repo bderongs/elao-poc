@@ -22,3 +22,8 @@ tsconfig.tsbuildinfo
 
 # graphify generated knowledge graph (not part of the app)
 graphify-out/
+
+# Internal project planning (not for client repo)
+SCOPE.md
+DEV-PLAN.md
+.cursor/
