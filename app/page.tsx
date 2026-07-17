@@ -6,7 +6,6 @@ import { AzureSTT, type PronunciationResult, type WordScore } from "@/lib/azure-
 import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
-import { getSupabase } from "@/lib/supabase";
 import type { LiveAvatarHandle } from "@/components/LiveAvatar";
 
 const Avatar = dynamic(
@@ -431,39 +430,59 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elapsed]);
 
-  // ── save session to Supabase ──
+  // ── save session via the server API (no direct Supabase access from the browser) ──
   const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult) => {
     if (sessionSavedRef.current) return;
     sessionSavedRef.current = true;
 
-    let audioUrl: string | null = null;
+    const form = new FormData();
+    form.append("language", language);
+    form.append("durationSeconds", String(elapsed));
+    if (result?.level) form.append("cefrLevel", result.level);
+    if (result?.score_percent != null) form.append("globalScore", String(result.score_percent));
+    form.append("scores", JSON.stringify(result?.dimensions ?? null));
+    form.append("evaluation", JSON.stringify(result ?? null));
+    form.append("azureScores", JSON.stringify(azureAvg));
 
     if (audioBlob && audioBlob.size > 0) {
       const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
-      const sessionId = crypto.randomUUID();
-      const path = `${language}/${new Date().toISOString().slice(0, 10)}/${sessionId}.${ext}`;
-      const { error } = await getSupabase().storage
-        .from("recordings")
-        .upload(path, audioBlob, { contentType: audioBlob.type });
-      if (!error) {
-        const { data } = getSupabase().storage.from("recordings").getPublicUrl(path);
-        audioUrl = data.publicUrl;
-      } else {
-        console.error("Audio upload error:", error.message);
-      }
+      form.append("sessionAudio", audioBlob, `session.${ext}`);
     }
 
-    const { error } = await getSupabase().from("sessions").insert({
-      language,
-      duration_seconds: elapsed,
-      cefr_level: result?.level ?? null,
-      global_score: result?.score_percent ?? null,
-      scores: result?.dimensions ?? null,
-      transcript: historyRef.current,
-      audio_url: audioUrl,
-      azure_scores: azureAvg,
-    });
-    if (error) console.error("Session save error:", error.message);
+    // Per-turn audio only exists as blob: object URLs (set once pass-2
+    // pronunciation assessment finishes) — re-fetch each one to recover the
+    // underlying Blob for upload, since blob: URLs don't survive past this tab.
+    const turns = historyRef.current;
+    const turnsMeta: Array<{ role: string; content: string; pronunciation: unknown | null; hasAudio: boolean }> = [];
+    for (let i = 0; i < turns.length; i++) {
+      const m = turns[i];
+      let hasAudio = false;
+      if (m.role === "user" && m.audioUrl?.startsWith("blob:")) {
+        try {
+          const blob = await (await fetch(m.audioUrl)).blob();
+          if (blob.size > 0) {
+            form.append(`turnAudio_${i}`, blob, `turn-${i}.wav`);
+            hasAudio = true;
+          }
+        } catch (e) {
+          console.warn(`[save] could not read turn ${i} audio blob:`, e);
+        }
+      }
+      turnsMeta.push({
+        role: m.role,
+        content: m.content,
+        pronunciation: m.role === "user" ? m.pronunciation ?? null : null,
+        hasAudio,
+      });
+    }
+    form.append("turns", JSON.stringify(turnsMeta));
+
+    try {
+      const res = await fetch("/api/sessions", { method: "POST", body: form });
+      if (!res.ok) console.error("Session save error:", await res.text());
+    } catch (e) {
+      console.error("Session save error:", e);
+    }
   };
 
   // ── per-turn recorder helpers ──────────────────────────────────────────────
