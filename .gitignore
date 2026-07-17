@@ -27,3 +27,6 @@ graphify-out/
 SCOPE.md
 DEV-PLAN.md
 .cursor/
+
+# Supabase CLI local cache
+supabase/.temp/
