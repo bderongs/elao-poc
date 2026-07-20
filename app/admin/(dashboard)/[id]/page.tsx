@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getSessionDetail } from "@/lib/sessions-service";
 import { CefrPanel, UserWords, UtteranceBadges, wordColor } from "@/components/ScoreDisplay";
 import { EvalLabPanel } from "@/components/EvalLabPanel";
+import { AudioPlayer } from "@/components/AudioPlayer";
 import { listProviders } from "@/lib/llm/registry";
 import styles from "@/components/admin.module.css";
 
@@ -46,7 +47,7 @@ export default async function AdminSessionDetailPage({
           {session.audio_url && (
             <div className={styles.audioBlock}>
               <div className={styles.audioLabel}>Full session recording</div>
-              <audio controls src={session.audio_url} style={{ width: "100%" }} />
+              <AudioPlayer src={session.audio_url} />
             </div>
           )}
 
@@ -65,9 +66,7 @@ export default async function AdminSessionDetailPage({
                     : t.content}
                 </div>
                 {t.role === "user" && t.pronunciation_json && <UtteranceBadges p={t.pronunciation_json} />}
-                {t.role === "user" && t.audio_url && (
-                  <audio controls src={t.audio_url} style={{ width: "100%", marginTop: 6, height: 30 }} />
-                )}
+                {t.role === "user" && t.audio_url && <AudioPlayer src={t.audio_url} compact />}
               </div>
             ))}
           </div>
