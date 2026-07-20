@@ -4,6 +4,7 @@ import { getSessionDetail } from "@/lib/sessions-service";
 import { CefrPanel, UserWords, UtteranceBadges, wordColor } from "@/components/ScoreDisplay";
 import { EvalLabPanel } from "@/components/EvalLabPanel";
 import { listProviders } from "@/lib/llm/registry";
+import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
 
@@ -21,58 +22,44 @@ export default async function AdminSessionDetailPage({
   const providerOptions = listProviders().map((p) => ({ id: p.id, label: p.label }));
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0f172a", color: "#e5e7eb", fontFamily: "system-ui, sans-serif", padding: 24 }}>
-      <Link href="/admin" style={{ color: "#93c5fd", fontSize: 13, textDecoration: "none" }}>
+    <div>
+      <Link href="/admin" className={styles.backLink}>
         &larr; All sessions
       </Link>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 24, marginTop: 16 }}>
+      <div className={styles.detailGrid}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
+          <div className={styles.detailHeaderRow}>
+            <h1 className={styles.pageTitle} style={{ marginBottom: 0 }}>
               {session.language ?? "—"} · {new Date(session.created_at).toLocaleString()}
             </h1>
             {session.cefr_level && (
-              <span
-                style={{
-                  background: wordColor(session.global_score ?? 0),
-                  color: "#000",
-                  borderRadius: 4,
-                  padding: "1px 8px",
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
+              <span className={styles.badge} style={{ background: wordColor(session.global_score ?? 0) }}>
                 {session.cefr_level}
               </span>
             )}
           </div>
-          <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 16 }}>
+          <div className={styles.detailMeta}>
             Duration: {session.duration_seconds ? `${Math.round(session.duration_seconds / 60)} min` : "—"}
           </div>
 
           {session.audio_url && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Full session recording</div>
+            <div className={styles.audioBlock}>
+              <div className={styles.audioLabel}>Full session recording</div>
               <audio controls src={session.audio_url} style={{ width: "100%" }} />
             </div>
           )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className={styles.turnList}>
             {turns.map((t) => (
               <div
                 key={t.id}
-                style={{
-                  padding: 10,
-                  borderRadius: 6,
-                  background: t.role === "user" ? "#1e293b" : "#111827",
-                  border: "1px solid #1e293b",
-                }}
+                className={`${styles.turnCard} ${t.role === "user" ? styles.turnCardUser : styles.turnCardAssistant}`}
               >
-                <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 4, textTransform: "uppercase" }}>
+                <div className={styles.turnMeta}>
                   {t.role} · turn {t.turn_index + 1}
                 </div>
-                <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                <div className={styles.turnText}>
                   {t.role === "user" && t.pronunciation_json?.words?.length
                     ? <UserWords words={t.pronunciation_json.words} />
                     : t.content}
@@ -90,7 +77,7 @@ export default async function AdminSessionDetailPage({
           {session.evaluation_json ? (
             <CefrPanel result={session.evaluation_json} azureAvg={session.azure_scores} />
           ) : (
-            <div style={{ fontSize: 12, color: "#9ca3af" }}>No evaluation recorded for this session.</div>
+            <div className={styles.emptyState}>No evaluation recorded for this session.</div>
           )}
         </div>
       </div>

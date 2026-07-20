@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { EvaluationRow } from "@/lib/types";
+import styles from "./admin.module.css";
 
 export type { EvaluationRow };
 
@@ -54,76 +55,67 @@ export function EvalLabPanel({
   };
 
   return (
-    <div style={{ marginTop: 20, borderTop: "1px solid #1e293b", paddingTop: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Eval lab — replay this transcript</div>
+    <div className={styles.evalLab}>
+      <div className={styles.evalLabTitle}>Eval lab — replay this transcript</div>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+      <div className={styles.evalLabControls}>
         {providers.map((p) => (
-          <label key={p.id} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+          <label key={p.id} className={styles.checkboxLabel}>
             <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
             {p.label}
           </label>
         ))}
-        <button
-          onClick={run}
-          disabled={running || !selected.size}
-          style={{
-            padding: "4px 12px",
-            borderRadius: 4,
-            border: "none",
-            background: running ? "#334155" : "#4f46e5",
-            color: "#fff",
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: running ? "default" : "pointer",
-          }}
-        >
+        <button onClick={run} disabled={running || !selected.size} className={styles.runButton}>
           {running ? "Running…" : "Run"}
         </button>
       </div>
 
-      {runError && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>{runError}</div>}
+      {runError && <div className={styles.errorBox} style={{ marginBottom: 10 }}>{runError}</div>}
 
       {evaluations.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#9ca3af" }}>No replay evaluations yet — pick model(s) and run.</div>
+        <div className={styles.emptyState} style={{ padding: "12px 0" }}>
+          No replay evaluations yet — pick model(s) and run.
+        </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <div className={styles.evalTableWrap}>
+          <table className={styles.table}>
             <thead>
-              <tr style={{ textAlign: "left", color: "#9ca3af", borderBottom: "1px solid #334155" }}>
-                <th style={{ padding: "4px 6px" }}>Model</th>
-                <th style={{ padding: "4px 6px" }}>Prompt</th>
-                <th style={{ padding: "4px 6px" }}>Level</th>
-                <th style={{ padding: "4px 6px" }}>Score</th>
-                <th style={{ padding: "4px 6px" }}>Fluency</th>
-                <th style={{ padding: "4px 6px" }}>Vocab/Gram</th>
-                <th style={{ padding: "4px 6px" }}>Comm.</th>
-                <th style={{ padding: "4px 6px" }}>Confidence</th>
-                <th style={{ padding: "4px 6px" }}>ms</th>
-                <th style={{ padding: "4px 6px" }}>When</th>
+              <tr>
+                <th>Model</th>
+                <th>Prompt</th>
+                <th>Level</th>
+                <th>Score</th>
+                <th>Fluency</th>
+                <th>Vocab/Gram</th>
+                <th>Comm.</th>
+                <th>Confidence</th>
+                <th>ms</th>
+                <th>When</th>
               </tr>
             </thead>
             <tbody>
               {evaluations.map((e) => (
-                <tr key={e.id} style={{ borderBottom: "1px solid #1e293b" }}>
-                  <td style={{ padding: "4px 6px", fontWeight: 600 }}>{e.model_id}</td>
-                  <td style={{ padding: "4px 6px" }}>{e.prompt_version}</td>
+                <tr key={e.id}>
+                  <td data-label="Model" style={{ fontWeight: 600 }}>{e.model_id}</td>
+                  <td data-label="Prompt">{e.prompt_version}</td>
                   {e.error ? (
-                    <td colSpan={6} style={{ padding: "4px 6px", color: "#f87171" }}>
+                    <td data-label="Error" colSpan={6} style={{ color: "#f87171" }}>
                       {e.error}
                     </td>
                   ) : (
                     <>
-                      <td style={{ padding: "4px 6px" }}>{e.result_json?.level ?? "—"}</td>
-                      <td style={{ padding: "4px 6px" }}>{e.result_json?.score_percent ?? "—"}</td>
-                      <td style={{ padding: "4px 6px" }}>{e.result_json?.dimensions.fluency ?? "—"}</td>
-                      <td style={{ padding: "4px 6px" }}>{e.result_json?.dimensions.vocabulary_grammar ?? "—"}</td>
-                      <td style={{ padding: "4px 6px" }}>{e.result_json?.dimensions.communication ?? "—"}</td>
-                      <td style={{ padding: "4px 6px" }}>{e.result_json?.confidence ?? "—"}</td>
+                      <td data-label="Level">{e.result_json?.level ?? "—"}</td>
+                      <td data-label="Score">{e.result_json?.score_percent ?? "—"}</td>
+                      <td data-label="Fluency">{e.result_json?.dimensions.fluency ?? "—"}</td>
+                      <td data-label="Vocab/Gram">{e.result_json?.dimensions.vocabulary_grammar ?? "—"}</td>
+                      <td data-label="Comm.">{e.result_json?.dimensions.communication ?? "—"}</td>
+                      <td data-label="Confidence">{e.result_json?.confidence ?? "—"}</td>
                     </>
                   )}
-                  <td style={{ padding: "4px 6px" }}>{e.duration_ms ?? "—"}</td>
-                  <td style={{ padding: "4px 6px", color: "#6b7280" }}>{new Date(e.created_at).toLocaleTimeString()}</td>
+                  <td data-label="ms">{e.duration_ms ?? "—"}</td>
+                  <td data-label="When" style={{ color: "#6b7280" }}>
+                    {new Date(e.created_at).toLocaleTimeString()}
+                  </td>
                 </tr>
               ))}
             </tbody>
