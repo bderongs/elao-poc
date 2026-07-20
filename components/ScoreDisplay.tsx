@@ -1,35 +1,12 @@
 import type { PronunciationResult, WordScore } from "@/lib/azure-stt";
+import type { CefrResult, AzureAvg } from "@/lib/types";
 
 // Shared between the live conversation UI (app/page.tsx) and the admin
 // replay view (app/admin/[id]/page.tsx) so both render scores identically —
 // no hooks/browser APIs here, so this is safe to import from server
 // components too.
 
-export interface CefrResult {
-  candidate: string;
-  language: string;
-  level: string;
-  score_percent: number;
-  confidence: "high" | "medium" | "low";
-  dimensions: {
-    fluency: number | null;
-    vocabulary_grammar: number | null;
-    communication: number | null;
-  };
-  strengths: string[];
-  areas_for_improvement: string[];
-  notable_errors: string[];
-  summary: string;
-}
-
-export interface AzureAvg {
-  pronunciation: number;
-  wpm: number;
-  score: number;
-  count: number;
-  /** Turns with < 6 words — each deducts 0.5 from the fluency dimension. */
-  shortTurns: number;
-}
+export type { CefrResult, AzureAvg };
 
 // ─── colour helpers ──────────────────────────────────────────────────────────
 

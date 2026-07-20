@@ -1,21 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { CefrResult } from "./ScoreDisplay";
+import type { EvaluationRow } from "@/lib/types";
+
+export type { EvaluationRow };
 
 export interface ProviderOption {
   id: string;
   label: string;
-}
-
-export interface EvaluationRow {
-  id: string;
-  model_id: string;
-  prompt_version: string;
-  result_json: CefrResult | null;
-  error: string | null;
-  duration_ms: number | null;
-  created_at: string;
 }
 
 export function EvalLabPanel({

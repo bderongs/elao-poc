@@ -1,4 +1,5 @@
 import { getSupabaseServer } from "@/lib/supabase-server";
+import { getSessionDetail } from "@/lib/sessions-service";
 import { getProvider } from "@/lib/llm/registry";
 import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage } from "@/lib/cefr-prompt";
 import type { ConvLang } from "@/lib/conversation-prompts";
@@ -25,35 +26,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return Response.json({ error: "No providers specified" }, { status: 400 });
   }
 
-  const supabase = getSupabaseServer();
-
-  const [{ data: session, error: sessionError }, { data: turns, error: turnsError }] = await Promise.all([
-    supabase.from("sessions").select("language, azure_scores").eq("id", sessionId).single(),
-    supabase
-      .from("session_turns")
-      .select("content, role")
-      .eq("session_id", sessionId)
-      .eq("role", "user")
-      .order("turn_index", { ascending: true }),
-  ]);
-
-  if (sessionError || !session) {
-    return Response.json({ error: sessionError?.message ?? "session not found" }, { status: 404 });
-  }
-  if (turnsError) {
-    return Response.json({ error: turnsError.message }, { status: 500 });
+  const detail = await getSessionDetail(sessionId);
+  if (!detail) {
+    return Response.json({ error: "session not found" }, { status: 404 });
   }
 
-  const userTurns = (turns ?? []).map((t) => t.content as string);
+  const userTurns = detail.turns.filter((t) => t.role === "user").map((t) => t.content);
   if (!userTurns.length) {
     return Response.json({ error: "No user turns stored for this session" }, { status: 400 });
   }
 
   const userMessage = buildEvaluationUserMessage(
-    session.language as ConvLang,
+    detail.session.language as ConvLang,
     userTurns,
-    (session.azure_scores as { pronunciation: number; wpm: number; count: number; shortTurns?: number } | null) ?? undefined,
+    detail.session.azure_scores ?? undefined,
   );
+
+  const supabase = getSupabaseServer();
 
   const results = await Promise.all(
     providers.map(async (providerId) => {

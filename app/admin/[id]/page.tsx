@@ -1,33 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSupabaseServer } from "@/lib/supabase-server";
-import type { PronunciationResult } from "@/lib/azure-stt";
-import { CefrPanel, UserWords, UtteranceBadges, type AzureAvg, type CefrResult } from "@/components/ScoreDisplay";
-import { EvalLabPanel, type EvaluationRow } from "@/components/EvalLabPanel";
+import { getSessionDetail } from "@/lib/sessions-service";
+import { CefrPanel, UserWords, UtteranceBadges, wordColor } from "@/components/ScoreDisplay";
+import { EvalLabPanel } from "@/components/EvalLabPanel";
 import { listProviders } from "@/lib/llm/registry";
 
 export const dynamic = "force-dynamic";
-
-interface SessionDetail {
-  id: string;
-  created_at: string;
-  language: string | null;
-  cefr_level: string | null;
-  global_score: number | null;
-  duration_seconds: number | null;
-  audio_url: string | null;
-  evaluation_json: CefrResult | null;
-  azure_scores: AzureAvg | null;
-}
-
-interface TurnRow {
-  id: string;
-  turn_index: number;
-  role: "user" | "assistant";
-  content: string;
-  audio_url: string | null;
-  pronunciation_json: PronunciationResult | null;
-}
 
 export default async function AdminSessionDetailPage({
   params,
@@ -35,32 +13,11 @@ export default async function AdminSessionDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = getSupabaseServer();
 
-  const [{ data: session, error: sessionError }, { data: turns, error: turnsError }, { data: evaluations }] =
-    await Promise.all([
-      supabase
-        .from("sessions")
-        .select("id, created_at, language, cefr_level, global_score, duration_seconds, audio_url, evaluation_json, azure_scores")
-        .eq("id", id)
-        .single(),
-      supabase
-        .from("session_turns")
-        .select("id, turn_index, role, content, audio_url, pronunciation_json")
-        .eq("session_id", id)
-        .order("turn_index", { ascending: true }),
-      supabase
-        .from("session_evaluations")
-        .select("id, model_id, prompt_version, result_json, error, duration_ms, created_at")
-        .eq("session_id", id)
-        .order("created_at", { ascending: false }),
-    ]);
+  const detail = await getSessionDetail(id);
+  if (!detail) notFound();
 
-  if (sessionError || !session) notFound();
-
-  const sessionRow = session as SessionDetail;
-  const turnRows = (turns ?? []) as TurnRow[];
-  const evaluationRows = (evaluations ?? []) as EvaluationRow[];
+  const { session, turns, evaluations } = detail;
   const providerOptions = listProviders().map((p) => ({ id: p.id, label: p.label }));
 
   return (
@@ -71,24 +28,38 @@ export default async function AdminSessionDetailPage({
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 24, marginTop: 16 }}>
         <div>
-          <h1 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>
-            {sessionRow.language ?? "—"} · {new Date(sessionRow.created_at).toLocaleString()}
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
+              {session.language ?? "—"} · {new Date(session.created_at).toLocaleString()}
+            </h1>
+            {session.cefr_level && (
+              <span
+                style={{
+                  background: wordColor(session.global_score ?? 0),
+                  color: "#000",
+                  borderRadius: 4,
+                  padding: "1px 8px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {session.cefr_level}
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 16 }}>
-            Duration: {sessionRow.duration_seconds ? `${Math.round(sessionRow.duration_seconds / 60)} min` : "—"}
+            Duration: {session.duration_seconds ? `${Math.round(session.duration_seconds / 60)} min` : "—"}
           </div>
 
-          {sessionRow.audio_url && (
+          {session.audio_url && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>Full session recording</div>
-              <audio controls src={sessionRow.audio_url} style={{ width: "100%" }} />
+              <audio controls src={session.audio_url} style={{ width: "100%" }} />
             </div>
           )}
 
-          {turnsError && <div style={{ color: "#f87171", marginBottom: 12 }}>Failed to load turns: {turnsError.message}</div>}
-
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {turnRows.map((t) => (
+            {turns.map((t) => (
               <div
                 key={t.id}
                 style={{
@@ -116,15 +87,15 @@ export default async function AdminSessionDetailPage({
         </div>
 
         <div>
-          {sessionRow.evaluation_json ? (
-            <CefrPanel result={sessionRow.evaluation_json} azureAvg={sessionRow.azure_scores} />
+          {session.evaluation_json ? (
+            <CefrPanel result={session.evaluation_json} azureAvg={session.azure_scores} />
           ) : (
             <div style={{ fontSize: 12, color: "#9ca3af" }}>No evaluation recorded for this session.</div>
           )}
         </div>
       </div>
 
-      <EvalLabPanel sessionId={sessionRow.id} providers={providerOptions} initialEvaluations={evaluationRows} />
+      <EvalLabPanel sessionId={session.id} providers={providerOptions} initialEvaluations={evaluations} />
     </div>
   );
 }
