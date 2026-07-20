@@ -302,6 +302,7 @@
   border: 1px solid #1e293b;
   border-radius: 8px;
   padding: 8px 12px;
+  max-width: 420px;
 }
 
 .audioPlayerCompact {
@@ -309,6 +310,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+  max-width: 360px;
 }
 
 .audioPlayButton {
