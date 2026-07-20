@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import type { PronunciationResult } from "@/lib/azure-stt";
 import { CefrPanel, UserWords, UtteranceBadges, type AzureAvg, type CefrResult } from "@/components/ScoreDisplay";
+import { EvalLabPanel, type EvaluationRow } from "@/components/EvalLabPanel";
+import { listProviders } from "@/lib/llm/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -35,23 +37,31 @@ export default async function AdminSessionDetailPage({
   const { id } = await params;
   const supabase = getSupabaseServer();
 
-  const [{ data: session, error: sessionError }, { data: turns, error: turnsError }] = await Promise.all([
-    supabase
-      .from("sessions")
-      .select("id, created_at, language, cefr_level, global_score, duration_seconds, audio_url, evaluation_json, azure_scores")
-      .eq("id", id)
-      .single(),
-    supabase
-      .from("session_turns")
-      .select("id, turn_index, role, content, audio_url, pronunciation_json")
-      .eq("session_id", id)
-      .order("turn_index", { ascending: true }),
-  ]);
+  const [{ data: session, error: sessionError }, { data: turns, error: turnsError }, { data: evaluations }] =
+    await Promise.all([
+      supabase
+        .from("sessions")
+        .select("id, created_at, language, cefr_level, global_score, duration_seconds, audio_url, evaluation_json, azure_scores")
+        .eq("id", id)
+        .single(),
+      supabase
+        .from("session_turns")
+        .select("id, turn_index, role, content, audio_url, pronunciation_json")
+        .eq("session_id", id)
+        .order("turn_index", { ascending: true }),
+      supabase
+        .from("session_evaluations")
+        .select("id, model_id, prompt_version, result_json, error, duration_ms, created_at")
+        .eq("session_id", id)
+        .order("created_at", { ascending: false }),
+    ]);
 
   if (sessionError || !session) notFound();
 
   const sessionRow = session as SessionDetail;
   const turnRows = (turns ?? []) as TurnRow[];
+  const evaluationRows = (evaluations ?? []) as EvaluationRow[];
+  const providerOptions = listProviders().map((p) => ({ id: p.id, label: p.label }));
 
   return (
     <div style={{ minHeight: "100vh", background: "#0f172a", color: "#e5e7eb", fontFamily: "system-ui, sans-serif", padding: 24 }}>
@@ -113,6 +123,8 @@ export default async function AdminSessionDetailPage({
           )}
         </div>
       </div>
+
+      <EvalLabPanel sessionId={sessionRow.id} providers={providerOptions} initialEvaluations={evaluationRows} />
     </div>
   );
 }

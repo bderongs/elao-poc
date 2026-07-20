@@ -6,6 +6,11 @@
 
 import type { ConvLang } from "@/lib/conversation-prompts";
 
+// Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
+// every session_evaluations row with it, so scoring drift across prompt
+// edits stays distinguishable from drift across models.
+export const CEFR_PROMPT_VERSION = "v1";
+
 export const CEFR_SYSTEM_PROMPT = `You are an expert oral language assessor with extensive experience evaluating spoken language proficiency in interview settings.
 
 Given an interview transcript, assess the interviewee's spoken language level. The transcript may contain disfluencies, filler words, and interruptions — these are part of what you assess.
