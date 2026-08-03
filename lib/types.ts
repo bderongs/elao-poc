@@ -30,6 +30,13 @@ export interface AzureAvg {
   shortTurns: number;
 }
 
+/** Session-level scores as Speechace reports them, translated to our 0-100 scale — no per-turn breakdown, by design. */
+export interface SpeechaceScores {
+  fluency: number | null;
+  pronunciation: number | null;
+  overall: number | null;
+}
+
 export interface SessionSummary {
   id: string;
   created_at: string;
@@ -37,12 +44,21 @@ export interface SessionSummary {
   cefr_level: string | null;
   global_score: number | null;
   duration_seconds: number | null;
+  /** 'conversation' = real live session, 'upload' = created from an uploaded audio file, 'speechace' = imported from a competitor report. */
+  source: "conversation" | "upload" | "speechace";
+  /** Present only for 'conversation' sessions — the live flow is the only writer of this column. */
+  evaluation_json: CefrResult | null;
+  azure_scores: AzureAvg | null;
+  speechace_scores: SpeechaceScores | null;
+  /** listSessions-only: latest successful eval-lab run, for sessions where evaluation_json is empty — see lib/cefr-score.ts's resolveCefrResult. */
+  latest_eval_json?: CefrResult | null;
+  /** Owning account, set by claimSession(); null until claimed (or for admin-created upload/speechace sessions). */
+  user_id: string | null;
 }
 
 export interface SessionDetailRow extends SessionSummary {
   audio_url: string | null;
-  evaluation_json: CefrResult | null;
-  azure_scores: AzureAvg | null;
+  source_url: string | null;
 }
 
 export interface TurnRow {
@@ -59,6 +75,16 @@ export interface EvaluationRow {
   model_id: string;
   prompt_version: string;
   result_json: CefrResult | null;
+  error: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface TurnEvaluationRow {
+  id: string;
+  turn_id: string;
+  provider_id: string;
+  result_json: PronunciationResult | null;
   error: string | null;
   duration_ms: number | null;
   created_at: string;

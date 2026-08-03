@@ -23,6 +23,9 @@ tsconfig.tsbuildinfo
 # OS
 .DS_Store
 
+# structured server logs (Mistral call timing/errors) — local debugging only
+logs/
+
 # graphify generated knowledge graph (not part of the app)
 graphify-out/
 

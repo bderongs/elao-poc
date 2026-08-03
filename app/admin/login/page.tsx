@@ -1,4 +1,4 @@
-import { login } from "./actions";
+import { AdminLoginForm } from "@/components/AdminLoginForm";
 
 export default async function AdminLoginPage({
   searchParams,
@@ -19,8 +19,7 @@ export default async function AdminLoginPage({
         fontFamily: "system-ui, sans-serif",
       }}
     >
-      <form
-        action={login}
+      <div
         style={{
           background: "#1e293b",
           padding: 32,
@@ -32,45 +31,8 @@ export default async function AdminLoginPage({
         }}
       >
         <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>ELAO Admin</h1>
-        <input type="hidden" name="next" value={next} />
-        <input
-          type="password"
-          name="password"
-          placeholder="Password"
-          autoFocus
-          style={{
-            padding: "8px 10px",
-            borderRadius: 4,
-            border: "1px solid #334155",
-            background: "#0f172a",
-            color: "#e5e7eb",
-            fontSize: 14,
-          }}
-        />
-        {error === "1" && (
-          <div style={{ color: "#f87171", fontSize: 12 }}>Wrong password.</div>
-        )}
-        {error === "config" && (
-          <div style={{ color: "#f87171", fontSize: 12 }}>
-            ADMIN_PASSWORD is not set on the server.
-          </div>
-        )}
-        <button
-          type="submit"
-          style={{
-            padding: "8px 10px",
-            borderRadius: 4,
-            border: "none",
-            background: "#4f46e5",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: 14,
-            cursor: "pointer",
-          }}
-        >
-          Sign in
-        </button>
-      </form>
+        <AdminLoginForm next={next} error={error} />
+      </div>
     </div>
   );
 }

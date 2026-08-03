@@ -28,8 +28,9 @@ export interface PronunciationResult {
    * Which engine produced these scores.
    * 'deepgram' = initial word-confidence proxy (shown while Azure is pending).
    * 'azure'    = server-side Azure Pronunciation Assessment REST result.
+   * 'voxtral'  = single-call direct audio assessment (lib/pronunciation/providers/voxtral.ts).
    */
-  source?: "deepgram" | "azure";
+  source?: "deepgram" | "azure" | "voxtral";
 }
 
 export interface SttCallbacks {

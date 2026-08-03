@@ -6,6 +6,6 @@ export const mistralProvider: LlmProvider = {
   label: "Mistral",
   defaultModel: mistralModel(),
   async complete(params) {
-    return mistralComplete(params);
+    return mistralComplete({ ...params, context: "eval-lab" });
   },
 };

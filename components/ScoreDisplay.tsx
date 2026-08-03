@@ -1,5 +1,8 @@
 import type { PronunciationResult, WordScore } from "@/lib/azure-stt";
 import type { CefrResult, AzureAvg } from "@/lib/types";
+import { scoreToLevel, computeCompositeCefrScore } from "@/lib/cefr-score";
+
+export { scoreToLevel };
 
 // Shared between the live conversation UI (app/page.tsx) and the admin
 // replay view (app/admin/[id]/page.tsx) so both render scores identically —
@@ -21,22 +24,6 @@ export function scoreBarColor(score: number): string {
   if (score >= 80) return "#4ade80";
   if (score >= 60) return "#facc15";
   return "#fb923c";
-}
-
-/** Derive CEFR level from composite score (5-point bands). */
-export function scoreToLevel(score: number): string {
-  if (score >= 90) return "C2";
-  if (score >= 85) return "C1+";
-  if (score >= 80) return "C1";
-  if (score >= 75) return "B2+";
-  if (score >= 70) return "B2";
-  if (score >= 65) return "B1+";
-  if (score >= 60) return "B1";
-  if (score >= 55) return "A2+";
-  if (score >= 50) return "A2";
-  if (score >= 45) return "A1+";
-  if (score >= 40) return "A1";
-  return "A0";
 }
 
 export const CONFIDENCE_COLOR: Record<string, string> = {
@@ -76,32 +63,79 @@ export function Bar({
   );
 }
 
+// ─── explainer card (accent dot + anchorable id) ──────────────────────────────
+// Shared by /admin/scoring (the methodology writeup) and the session detail
+// page's per-category score breakdown, so both render the same card style.
+
+const explainerCardStyle: React.CSSProperties = {
+  background: "#111827",
+  border: "1px solid #1e293b",
+  borderRadius: 10,
+  padding: "14px 18px",
+  marginBottom: 14,
+  scrollMarginTop: 20,
+};
+
+export function ExplainerCard({
+  id,
+  accent,
+  title,
+  children,
+}: {
+  id?: string;
+  accent?: string;
+  title: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div id={id} style={{ ...explainerCardStyle, borderLeft: `3px solid ${accent ?? "#334155"}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        {accent && <span style={{ width: 8, height: 8, borderRadius: "50%", background: accent, flexShrink: 0 }} />}
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb" }}>{title}</div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ─── CEFR panel ────────────────────────────────────────────────────────────
 
-export function CefrPanel({ result, azureAvg }: { result: CefrResult; azureAvg: AzureAvg | null }) {
+const DEFAULT_CEFR_LABELS = {
+  eyebrow: "ORAL ASSESSMENT",
+  score: "Score",
+  strengths: "Strengths",
+  toImprove: "To improve",
+  notableErrors: "Notable errors",
+  confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
+};
+
+export type CefrPanelLabels = Partial<typeof DEFAULT_CEFR_LABELS>;
+
+export function CefrPanel({
+  result,
+  azureAvg,
+  sourceLabel,
+  pronunciationSourceLabel,
+  showDetails = true,
+  labels,
+}: {
+  result: CefrResult;
+  azureAvg: AzureAvg | null;
+  sourceLabel?: string;
+  pronunciationSourceLabel?: string;
+  /** Strengths/to-improve/notable-errors/summary — off on the admin detail page, where lib/score-breakdown.ts's panel covers that ground per-category instead. */
+  showDetails?: boolean;
+  /** Overrides for the handful of hardcoded structural labels — defaults keep the admin view's English copy unchanged. */
+  labels?: CefrPanelLabels;
+}) {
+  const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   // All 4 components on a 0-10 scale for uniform bar display
   const pronScore  = azureAvg  ? azureAvg.pronunciation / 10 : null;
   const fluency    = result.dimensions.fluency;
   const vocabGram  = result.dimensions.vocabulary_grammar;
   const comm       = result.dimensions.communication;
 
-  // Use the evaluator's score and level directly — it already accounts for all
-  // dimensions holistically.
-  const baseScore = result.score_percent;
-
-  // Excellence bonus: when at least 2 of the 4 criteria reach 9/10, pull the
-  // overall score up by 5%. Two standout dimensions signal a stronger candidate
-  // than a flat profile at the same average — reward that. Counts 9 and 10.
-  const highCount = [pronScore, fluency, vocabGram, comm].filter(
-    (v): v is number => v !== null && v >= 9
-  ).length;
-  const compositeScore = highCount >= 2
-    ? Math.min(100, Math.round(baseScore * 1.05))
-    : baseScore;
-  // Recompute the level from the boosted score so the label and number agree.
-  const compositeLevel = compositeScore !== baseScore
-    ? scoreToLevel(compositeScore)
-    : (result.level ?? scoreToLevel(compositeScore));
+  const { score: compositeScore, level: compositeLevel } = computeCompositeCefrScore(result, azureAvg);
 
   const dim4: [string, number | null][] = [
     ["Pronunciation", pronScore],
@@ -122,12 +156,15 @@ export function CefrPanel({ result, azureAvg }: { result: CefrResult; azureAvg: 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
         <div>
           <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 700, letterSpacing: 1 }}>
-            ORAL ASSESSMENT
+            {t.eyebrow}
           </div>
           <div style={{ fontSize: 36, fontWeight: 800, lineHeight: 1.1 }}>{compositeLevel}</div>
           <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>
-            Score {compositeScore}/100
+            {t.score} {compositeScore}/100
           </div>
+          {sourceLabel && (
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>via {sourceLabel}</div>
+          )}
         </div>
         <span
           style={{
@@ -140,7 +177,7 @@ export function CefrPanel({ result, azureAvg }: { result: CefrResult; azureAvg: 
             marginTop: 4,
           }}
         >
-          {result.confidence.toUpperCase()}
+          {t.confidence[result.confidence] ?? result.confidence.toUpperCase()}
         </span>
       </div>
 
@@ -157,42 +194,51 @@ export function CefrPanel({ result, azureAvg }: { result: CefrResult; azureAvg: 
           )
         )}
       </div>
-
-      {/* Strengths */}
-      {result.strengths?.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>Strengths</div>
-          <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5 }}>
-            {result.strengths.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
-          </ul>
+      {azureAvg && pronunciationSourceLabel && (
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: -4, marginBottom: 8 }}>
+          Pronunciation via {pronunciationSourceLabel}
         </div>
       )}
 
-      {/* Areas for improvement */}
-      {result.areas_for_improvement?.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>To improve</div>
-          <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5 }}>
-            {result.areas_for_improvement.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
-          </ul>
-        </div>
-      )}
+      {showDetails && (
+        <>
+          {/* Strengths */}
+          {result.strengths?.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{t.strengths}</div>
+              <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5 }}>
+                {result.strengths.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
 
-      {/* Notable errors */}
-      {result.notable_errors?.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>Notable errors</div>
-          <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5, color: "#fca5a5" }}>
-            {result.notable_errors.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
-          </ul>
-        </div>
-      )}
+          {/* Areas for improvement */}
+          {result.areas_for_improvement?.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{t.toImprove}</div>
+              <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5 }}>
+                {result.areas_for_improvement.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
 
-      {/* Summary */}
-      {result.summary && (
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.5, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 6 }}>
-          {result.summary}
-        </div>
+          {/* Notable errors */}
+          {result.notable_errors?.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{t.notableErrors}</div>
+              <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5, color: "#fca5a5" }}>
+                {result.notable_errors.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {/* Summary */}
+          {result.summary && (
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.5, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 6 }}>
+              {result.summary}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

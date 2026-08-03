@@ -7,9 +7,11 @@ import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import type { LiveAvatarHandle } from "@/components/LiveAvatar";
+import { ThinkingIndicator } from "@/components/ThinkingIndicator";
+import { EvaluatingScreen } from "@/components/EvaluatingScreen";
+import { SessionResultsScreen } from "@/components/SessionResultsScreen";
+import { AuthNavLink } from "@/components/AuthNavLink";
 import {
-  Bar,
-  CefrPanel,
   UserWords,
   UtteranceBadges,
   wordColor,
@@ -29,7 +31,26 @@ const LiveAvatar = dynamic(
 
 const USE_HEYGEN = process.env.NEXT_PUBLIC_HEYGEN_ENABLED === "true";
 
+/** Best-effort: ships a client-side failure to logs/server-*.log. Never throws, never blocks the caller. */
+function logClientEvent(event: string, data: Record<string, unknown>) {
+  fetch("/api/client-log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, data }),
+  }).catch(() => {});
+}
+
 type Lang = "fr" | "en" | "nl-BE" | "es" | "it" | "de";
+
+const LANGUAGES: Array<{ code: Lang; label: string; flag: string }> = [
+  { code: "fr", label: "Français", flag: "🇫🇷" },
+  { code: "en", label: "English", flag: "🇬🇧" },
+  { code: "nl-BE", label: "Nederlands (BE)", flag: "🇧🇪" },
+  { code: "es", label: "Español", flag: "🇪🇸" },
+  { code: "it", label: "Italiano", flag: "🇮🇹" },
+  { code: "de", label: "Deutsch", flag: "🇩🇪" },
+];
+
 type Msg = {
   role: "user" | "assistant";
   content: string;
@@ -48,7 +69,18 @@ export default function Home() {
   const [amplitude, setAmplitude] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [cefrResult, setCefrResult] = useState<CefrResult | null>(null);
-  const [evaluating, setEvaluating] = useState(false);
+  /** "active": conversation + single end button. "evaluating": full-screen takeover. "done": results. */
+  const [phase, setPhase] = useState<"active" | "evaluating" | "done">("active");
+  /** Flips once /api/evaluate + saveSession have both settled (success or failure). */
+  const [evalDone, setEvalDone] = useState(false);
+  /** True only if /api/evaluate itself errored — session is still saved either way. */
+  const [evalFailed, setEvalFailed] = useState(false);
+  /** Id returned by POST /api/sessions, once the save succeeds — lets the results screen offer claiming the session on sign-up. */
+  const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
+  /** True while waiting on the avatar's reply — from end-of-speech until the first reply token streams in. */
+  const [isThinking, setIsThinking] = useState(false);
+  /** Set when /api/chat fails outright (after retries) so the user isn't left staring at silence. */
+  const [chatError, setChatError] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const audioBlobUrlRef = useRef<string | null>(null);
 
@@ -63,16 +95,35 @@ export default function Home() {
   /** Set at 4 min — causes the next onFinal to trigger __END__ after the user's sentence. */
   const pendingEndRef = useRef(false);
   const endTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Resolver for waitForPlaybackToFinish() — set while waiting for the current TTS to finish. */
+  const playbackDoneWaiterRef = useRef<(() => void) | null>(null);
+  /** Guards against overlapping endSession() calls (double-click, or a manual click racing the 3-min auto-close). */
+  const endSessionInFlightRef = useRef(false);
+  /**
+   * Mirrors the latest endSession() closure, same pattern as processBufferedRef
+   * below — onFinal and the 3-min timeout are created once and never
+   * recreated, so calling endSession directly from them would close over
+   * stale `elapsed`/`azureAvg` state instead of the current render's.
+   */
+  const endSessionRef = useRef<() => Promise<void>>(async () => {});
   const historyRef = useRef<Msg[]>([]);
   historyRef.current = history;
   /** Queue of turns spoken while avatar was responding — processed in order after avatar finishes. */
-  const bufferedTurnsRef = useRef<Array<{ text: string; pronunciation: PronunciationResult }>>([]);
+  const bufferedTurnsRef = useRef<
+    Array<{ text: string; pronunciation: PronunciationResult; recordingPromise: Promise<{ blob: Blob } | null> }>
+  >([]);
+  /**
+   * The previous turn's pronunciation-assessment call (its own Mistral judge
+   * request), if still in flight. handleUserTurn awaits this before starting
+   * the next /api/chat call, so the two Mistral calls per turn never overlap
+   * across turns — overlap was creating request bursts that tripped the
+   * account's rate limit.
+   */
+  const pronunciationInFlightRef = useRef<Promise<void> | null>(null);
   /** Flush function stored in a ref so the amplitude callback can call it without stale closures. */
   const processBufferedRef = useRef<() => void>(() => {});
   /** Per-turn MediaRecorder — one recording per user utterance, restarted after each turn. */
   const turnRecorderRef = useRef<MediaRecorder | null>(null);
-  const turnChunksRef = useRef<Blob[]>([]);
-  const turnMimeRef = useRef<string>("audio/webm");
   /**
    * Dedicated mic stream for per-turn and session recording.
    * AzureSTT manages its own internal getUserMedia — this stream is for
@@ -110,33 +161,34 @@ export default function Home() {
     };
   }, [history]);
 
-  // ── timer ──
+  // ── timer ── freezes the instant phase leaves "active" (evaluation starting).
   useEffect(() => {
-    if (!sessionStarted) return;
+    if (!sessionStarted || phase !== "active") return;
     const id = setInterval(() => {
       if (startedAtRef.current)
         setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000));
     }, 1000);
     return () => clearInterval(id);
-  }, [sessionStarted]);
+  }, [sessionStarted, phase]);
 
-  // Auto-evaluate and close conversation at 3 min.
+  // Close the conversation gracefully at 3 min, then end the session.
   // Don't interrupt mid-sentence: set a flag so onFinal triggers __END__
   // after the user finishes speaking. Safety timeout fires after 20 s in
-  // case the user is already silent.
+  // case the user is already silent. endSession() itself stops STT
+  // synchronously, so it must only run AFTER the closing turn completes —
+  // never call it directly from here.
   useEffect(() => {
-    if (elapsed === 180 && !cefrResult && !evaluating) {
-      runEvaluation();
+    if (elapsed === 180 && phase === "active" && !pendingEndRef.current) {
       pendingEndRef.current = true;
       endTimeoutRef.current = setTimeout(() => {
         if (pendingEndRef.current) {
           pendingEndRef.current = false;
-          handleUserTurn("__END__");
+          deliverClosingRemarkAndEnd();
         }
       }, 20_000);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [elapsed]);
+  }, [elapsed, phase]);
 
   // ── save session via the server API (no direct Supabase access from the browser) ──
   const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult) => {
@@ -169,7 +221,14 @@ export default function Home() {
         try {
           const blob = await (await fetch(m.audioUrl)).blob();
           if (blob.size > 0) {
-            form.append(`turnAudio_${i}`, blob, `turn-${i}.wav`);
+            // Usually the conditioned WAV from callPronunciationAPI, but falls
+            // back to the raw recording (webm/mp4) when that conversion failed
+            // — name it by its actual type, not a hardcoded ".wav", so a
+            // provider that can't read the fallback format (e.g. Voxtral) gets
+            // a clean, expected rejection instead of a confusing generic one,
+            // and so the file in storage isn't mislabeled for future debugging.
+            const ext = blob.type.includes("wav") ? "wav" : blob.type.includes("mp4") ? "m4a" : "webm";
+            form.append(`turnAudio_${i}`, blob, `turn-${i}.${ext}`);
             hasAudio = true;
           }
         } catch (e) {
@@ -187,13 +246,27 @@ export default function Home() {
 
     try {
       const res = await fetch("/api/sessions", { method: "POST", body: form });
-      if (!res.ok) console.error("Session save error:", await res.text());
+      if (!res.ok) {
+        console.error("Session save error:", await res.text());
+        return;
+      }
+      const { id } = (await res.json()) as { id: string };
+      setSavedSessionId(id);
     } catch (e) {
       console.error("Session save error:", e);
     }
   };
 
   // ── per-turn recorder helpers ──────────────────────────────────────────────
+  // Each MediaRecorder owns its own chunk buffer (attached to the instance,
+  // not a shared ref) — onFinal calls stopTurnRecording() immediately followed
+  // by startTurnRecording() for the next turn, and MediaRecorder.stop() only
+  // flushes its final chunk + fires onstop asynchronously, after that next
+  // recorder has already started. A shared buffer got reset/reused by the new
+  // recorder before the old one's onstop read it, silently building every
+  // turn's blob out of the wrong (or no) audio.
+  type TurnRecorder = MediaRecorder & { _chunks: Blob[] };
+
   const startTurnRecording = () => {
     if (turnRecorderRef.current) return; // already recording
     const stream = micStreamRef.current;
@@ -206,12 +279,11 @@ export default function Home() {
       "";
     if (!mimeType) { console.warn("startTurnRecording: no supported mimeType"); return; }
     try {
-      turnMimeRef.current = mimeType;
-      turnChunksRef.current = [];
       // 256 kbps opus: extra spectral headroom before the 16 kHz downsample in
       // blobToWav16kMono — costs nothing, preserves consonant detail.
-      const mr = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 256_000 });
-      mr.ondataavailable = (e) => { if (e.data.size > 0) turnChunksRef.current.push(e.data); };
+      const mr = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 256_000 }) as TurnRecorder;
+      mr._chunks = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) mr._chunks.push(e.data); };
       mr.onerror = (e) => console.error("TurnRecorder error:", e);
       mr.start(500); // collect chunks every 500 ms
       turnRecorderRef.current = mr;
@@ -221,13 +293,12 @@ export default function Home() {
   };
 
   const stopTurnRecording = (): Promise<{ blob: Blob } | null> => {
-    const mr = turnRecorderRef.current;
+    const mr = turnRecorderRef.current as TurnRecorder | null;
     turnRecorderRef.current = null;
     if (!mr || mr.state === "inactive") return Promise.resolve(null);
     return new Promise((resolve) => {
       mr.onstop = () => {
-        const blob = new Blob(turnChunksRef.current, { type: turnMimeRef.current });
-        turnChunksRef.current = [];
+        const blob = new Blob(mr._chunks, { type: mr.mimeType });
         if (blob.size === 0) { resolve(null); return; }
         // No object URL here — the transcript player uses the conditioned WAV
         // created in callPronunciationAPI, not the raw webm.
@@ -259,9 +330,27 @@ export default function Home() {
     try {
       audio = await blobToWav16kMono(blob);
       filename = "turn.wav";
-    } catch (e) {
-      // Decode failure — send the original container and let the server try.
-      console.warn("[pronunciation] WAV conversion failed, sending raw blob:", e);
+    } catch (firstError) {
+      // A single decode can fail transiently (e.g. a timing race on the
+      // shared AudioContext — see lib/audio-wav.ts) — retry once before
+      // falling back to the raw recording, which strict-format providers
+      // (e.g. Voxtral, wav/mp3 only) can't process at all.
+      try {
+        audio = await blobToWav16kMono(blob);
+        filename = "turn.wav";
+      } catch (secondError) {
+        console.warn("[pronunciation] WAV conversion failed twice, sending raw blob:", secondError);
+        // This failure was previously only ever visible in the browser
+        // console — send it server-side so it's diagnosable from
+        // logs/server-*.log without needing a live repro.
+        logClientEvent("wav_conversion_failed", {
+          turnIndex,
+          blobType: blob.type,
+          blobSize: blob.size,
+          firstError: String(firstError instanceof Error ? firstError.message : firstError),
+          secondError: String(secondError instanceof Error ? secondError.message : secondError),
+        });
+      }
     }
 
     // The transcript's per-turn player gets the CONDITIONED WAV, not the raw
@@ -319,6 +408,10 @@ export default function Home() {
     // coloured transcript words visible during the entire new session (every
     // `cefrResult &&` display gate passes from the first second).
     setCefrResult(null);
+    setPhase("active");
+    setEvalDone(false);
+    setEvalFailed(false);
+    endSessionInFlightRef.current = false;
     setHistory([]);
     // historyRef is normally synced on render — but handleUserTurn("__START__")
     // below runs before the next render, so clear the ref directly or the new
@@ -327,7 +420,10 @@ export default function Home() {
     setPartialUser("");
     setStreamingAssistant("");
     setElapsed(0);
+    setChatError(null);
+    setIsThinking(false);
     bufferedTurnsRef.current = [];
+    pronunciationInFlightRef.current = null;
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current);
       audioBlobUrlRef.current = null;
@@ -349,6 +445,8 @@ export default function Home() {
         // so flushing from the SSE callback would overlap with playback.
         if (wasSpeaking && amp === 0) {
           processBufferedRef.current();
+          playbackDoneWaiterRef.current?.();
+          playbackDoneWaiterRef.current = null;
         }
       });
       playerRef.current.init();
@@ -367,21 +465,29 @@ export default function Home() {
         // Azure SDK returns per-phoneme scores directly — no secondary REST call needed.
         const pronunciation: PronunciationResult = { ...azurePron, source: "azure" };
 
-        // Avatar is still talking or processing a previous turn — queue this turn.
-        // All queued turns are replayed in order once the avatar finishes speaking.
+        // Always close out THIS utterance's recording the instant STT
+        // recognizes it, regardless of whether the avatar is busy — the
+        // recorder must be scoped to when the user actually spoke, not to
+        // whenever a buffered turn eventually gets flushed. Deferring the
+        // stop/start to flush time (the old behaviour) made the recorded
+        // window the gap between two flushes — often under a second — instead
+        // of the real utterance, producing near-empty recordings for any
+        // turn that got buffered.
+        const recordingPromise = stopTurnRecording();
+        startTurnRecording();
+
+        // Avatar is still talking or processing a previous turn — queue this
+        // turn (its audio is already correctly captured above). All queued
+        // turns are replayed in order once the avatar finishes speaking.
         if (isProcessingRef.current || isSpeakingRef.current) {
-          bufferedTurnsRef.current.push({ text, pronunciation });
+          bufferedTurnsRef.current.push({ text, pronunciation, recordingPromise });
           return;
         }
 
         setPartialUser("");
         if (USE_HEYGEN) liveAvatarRef.current?.stopListening();
 
-        // Stop current turn recorder (captures this utterance's audio),
-        // then immediately restart for the next turn.
         const turnIndex = historyRef.current.length;
-        const recordingPromise = stopTurnRecording();
-        startTurnRecording();
 
         // Capture and clear the pending-end flag before any await.
         const shouldEnd = pendingEndRef.current;
@@ -416,13 +522,21 @@ export default function Home() {
 
         // Kick off the assessment. callPronunciationAPI also attaches the
         // conditioned WAV to the transcript player (the raw webm is recorded
-        // with AGC off and can be inaudibly quiet).
-        recordingPromise.then((recording) => {
-          if (!recording) return;
-          callPronunciationAPI(recording.blob, turnIndex, azurePron.wpm, text, questionContext);
-        });
+        // with AGC off and can be inaudibly quiet). Tracked in
+        // pronunciationInFlightRef so the next turn's /api/chat call waits for
+        // this turn's Mistral judge call instead of overlapping it.
+        pronunciationInFlightRef.current = recordingPromise
+          .then((recording) => {
+            if (!recording) return;
+            return callPronunciationAPI(recording.blob, turnIndex, azurePron.wpm, text, questionContext);
+          })
+          .finally(() => {
+            pronunciationInFlightRef.current = null;
+          });
 
-        if (shouldEnd) await handleUserTurn("__END__");
+        if (shouldEnd) {
+          await deliverClosingRemarkAndEnd();
+        }
       },
       onError: (e) => console.error("Azure STT error:", e),
     });
@@ -487,10 +601,17 @@ export default function Home() {
 
   const handleUserTurn = async (userText: string, pronunciation?: PronunciationResult) => {
     isProcessingRef.current = true;
+    setIsThinking(true);
+    setChatError(null);
     const isStart = userText === "__START__";
     const isEnd   = userText === "__END__";
 
     try {
+      // Never let this turn's /api/chat call overlap the previous turn's
+      // still-in-flight pronunciation-judge call — both hit the same Mistral
+      // rate limit, and the overlap was creating request bursts that tripped it.
+      if (pronunciationInFlightRef.current) await pronunciationInFlightRef.current;
+
       const newHistory: Msg[] = (isStart || isEnd)
         ? historyRef.current
         : [...historyRef.current, { role: "user", content: userText, pronunciation }];
@@ -514,6 +635,8 @@ export default function Home() {
 
       if (!res.body) {
         isProcessingRef.current = false;
+        setIsThinking(false);
+        setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
         return;
       }
 
@@ -542,6 +665,7 @@ export default function Home() {
             const { delta } = JSON.parse(data);
             assistantText += delta;
             setStreamingAssistant(assistantText);
+            setIsThinking(false);
           } else if (type === "audio") {
             if (USE_HEYGEN) {
               liveAvatarRef.current?.sendAudio(data);
@@ -550,11 +674,20 @@ export default function Home() {
             }
           } else if (type === "done") {
             const { fullText } = JSON.parse(data);
-            setHistory((h) => [...h, { role: "assistant", content: fullText }]);
+            // Defense in depth: an empty-content assistant message stuck in
+            // history gets sent back to Mistral on every future turn, which
+            // rejects it outright — never let one in, regardless of what the
+            // server sends.
+            if (fullText.trim()) {
+              setHistory((h) => [...h, { role: "assistant", content: fullText }]);
+            }
             setStreamingAssistant("");
+            setIsThinking(false);
             if (USE_HEYGEN) liveAvatarRef.current?.speakEnd();
           } else if (type === "error") {
             console.error("Stream error:", data);
+            setIsThinking(false);
+            setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
           }
         }
       }
@@ -573,6 +706,8 @@ export default function Home() {
       // buffers and nothing ever flushes, making the system appear deaf.
       console.error("handleUserTurn failed:", err);
       isProcessingRef.current = false;
+      setIsThinking(false);
+      setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
       processBufferedRef.current();
     }
   };
@@ -585,78 +720,170 @@ export default function Home() {
     const buffered = bufferedTurnsRef.current.shift();
     if (!buffered) return;
     const turnIndex = historyRef.current.length;
-    const recordingPromise = stopTurnRecording();
-    startTurnRecording();
+    // This turn's audio was already correctly captured live, in onFinal, at
+    // the moment STT recognized it — the recorder is NOT touched here, which
+    // would only span the (near-instant) gap between flushes instead of the
+    // actual utterance.
     // Examiner's question — captured before handleUserTurn appends the reply.
     const questionContext =
       [...historyRef.current].reverse().find((m) => m.role === "assistant")?.content ?? "";
     await handleUserTurn(buffered.text, buffered.pronunciation);
-    recordingPromise.then((recording) => {
-      if (!recording) return;
-      callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext);
-    });
+    pronunciationInFlightRef.current = buffered.recordingPromise
+      .then((recording) => {
+        if (!recording) return;
+        return callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext);
+      })
+      .finally(() => {
+        pronunciationInFlightRef.current = null;
+      });
   };
 
-  const runEvaluation = async () => {
-    setEvaluating(true);
+  // ── end the session: stop everything, show the full-screen evaluating
+  // takeover immediately, then evaluate and ALWAYS persist — this is now the
+  // one and only way a session ends, so a failed evaluation must never
+  // strand the user without a saved session.
+  // TODO: under USE_HEYGEN, this never tears down the HeyGen-side avatar
+  // session (liveAvatarRef) — pre-existing gap, not addressed here.
+  const endSession = async () => {
+    if (endSessionInFlightRef.current) return;
+    endSessionInFlightRef.current = true;
 
-    await stopTurnRecording();
-    sttRef.current?.stop();
-    micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    micStreamRef.current = null;
-    const blob = await recorderRef.current?.stop() ?? null;
-    if (blob && blob.size > 0) {
-      // Revoke previous object URL to avoid memory leaks
-      if (audioBlobUrlRef.current) {
-        URL.revokeObjectURL(audioBlobUrlRef.current);
-      }
-      audioBlobUrlRef.current = URL.createObjectURL(blob);
-      setAudioBlob(blob);
-    }
-
-    const userTurns = historyRef.current
-      .filter((m) => m.role === "user")
-      .map((m) => m.content);
-
-    const res = await fetch("/api/evaluate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ language, userTurns, azureContext: azureAvg }),
-    });
-    const data = await res.json();
-    setCefrResult(data);
-    setEvaluating(false);
-  };
-
-  const stopSession = async () => {
     pendingEndRef.current = false;
     if (endTimeoutRef.current) {
       clearTimeout(endTimeoutRef.current);
       endTimeoutRef.current = null;
     }
+
+    setPhase("evaluating"); // flip the UI before any awaits
+
     await stopTurnRecording();
     sttRef.current?.stop();
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
-    // Stop session recorder BEFORE closing the player's AudioContext.
-    // The combined stream is sourced from the player's MediaStreamDestinationNode —
-    // closing the AudioContext first cuts the stream before the recorder can flush
-    // its final buffered chunk. stop() is safe to call twice (returns null if
-    // the MediaRecorder was already stopped by runEvaluation).
-    const freshBlob = await recorderRef.current?.stop() ?? null;
+    // Stop session recorder BEFORE closing the player's AudioContext — the
+    // combined stream is sourced from the player's MediaStreamDestinationNode,
+    // so closing the AudioContext first would cut the stream before the
+    // recorder can flush its final buffered chunk.
+    const blob = await recorderRef.current?.stop() ?? null;
     if (!USE_HEYGEN) playerRef.current?.stop();
-    // Show the listen-back player even when stopping without evaluating.
-    if (freshBlob && freshBlob.size > 0) {
+    if (blob && blob.size > 0) {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current);
-      audioBlobUrlRef.current = URL.createObjectURL(freshBlob);
-      setAudioBlob(freshBlob);
+      audioBlobUrlRef.current = URL.createObjectURL(blob);
+      setAudioBlob(blob);
     }
-    await saveSession(freshBlob ?? audioBlob, cefrResult ?? undefined);
-    setSessionStarted(false);
+
+    let result: CefrResult | null = null;
+    try {
+      const userTurns = historyRef.current
+        .filter((m) => m.role === "user")
+        .map((m) => m.content);
+
+      const res = await fetch("/api/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language, userTurns, azureContext: azureAvg }),
+      });
+      if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
+      result = await res.json();
+    } catch (e) {
+      console.error("Evaluation failed:", e);
+      setEvalFailed(true);
+    }
+    setCefrResult(result);
+
+    // Persist regardless of whether evaluation succeeded — this is the only
+    // place a session is ever saved, so it must always run.
+    await saveSession(blob ?? audioBlob, result ?? undefined);
+
+    setEvalDone(true); // EvaluatingScreen takes it from here (min-visible-duration, then phase -> "done")
+  };
+  endSessionRef.current = endSession;
+
+  /**
+   * Resolves once the avatar's current TTS has actually finished playing (or
+   * immediately, if it already has) — capped by a safety timeout so a missed
+   * amplitude event (e.g. no audio was ever scheduled) can never hang the
+   * ending flow indefinitely.
+   */
+  const waitForPlaybackToFinish = (timeoutMs = 8000): Promise<void> => {
+    if (!isSpeakingRef.current) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        playbackDoneWaiterRef.current = null;
+        resolve();
+      };
+      playbackDoneWaiterRef.current = finish;
+      setTimeout(finish, timeoutMs);
+    });
+  };
+
+  /** Speak the closing remark, let it fully play out, THEN end the session. */
+  const deliverClosingRemarkAndEnd = async () => {
+    await handleUserTurn("__END__");
+    await waitForPlaybackToFinish();
+    await endSessionRef.current();
   };
 
   const mm = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const ss = (elapsed % 60).toString().padStart(2, "0");
+
+  // Shared between the "active" sidebar and the full-width "done" panel —
+  // identical markup either way; `cefrResult` (null during "active") is what
+  // gates the pronunciation colouring/badges/audio on.
+  const transcriptPanel = (
+    <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, color: "#475569", fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
+        TRANSCRIPT
+      </div>
+      {history.length === 0 && (
+        <p style={{ color: "#334155", fontSize: 13 }}>La conversation s&apos;affichera ici…</p>
+      )}
+      {history.map((m, i) => (
+        <div
+          key={i}
+          style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            background: m.role === "user" ? "#1e293b" : "#1e1b4b",
+            borderRadius: 6,
+            borderLeft: `3px solid ${m.role === "user" ? "#334155" : "#4f46e5"}`,
+          }}
+        >
+          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4 }}>
+            {m.role === "user" ? "Vous" : "Avatar"}
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+            {/* Coloured pronunciation words appear only after the CEFR
+                evaluation — during the session the transcript stays plain. */}
+            {cefrResult && m.role === "user" && m.pronunciation?.words?.length ? (
+              <UserWords words={m.pronunciation.words} />
+            ) : (
+              m.content
+            )}
+          </div>
+          {cefrResult && m.role === "user" && m.pronunciation && (
+            <UtteranceBadges p={m.pronunciation} />
+          )}
+          {m.role === "user" && m.audioUrl && cefrResult && (
+            <audio
+              controls
+              src={m.audioUrl}
+              onError={(e) => {
+                // A bad blob source would otherwise render a broken
+                // player; hide it and log instead of surfacing an error.
+                console.warn(`[playback] turn ${i} audio failed to load`);
+                (e.currentTarget as HTMLAudioElement).style.display = "none";
+              }}
+              style={{ width: "100%", height: 28, marginTop: 6, accentColor: "#4f46e5", display: "block" }}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <main style={{ display: "flex", height: "100vh", flexDirection: "column", background: "#0f172a", color: "#f1f5f9" }}>
@@ -673,64 +900,109 @@ export default function Home() {
       >
         <h1 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>ELAO Speaking POC</h1>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <AuthNavLink />
           {sessionStarted && (
             <span style={{ fontFamily: "monospace", fontSize: 13, color: elapsed >= 180 ? "#4ade80" : "#94a3b8" }}>
               {mm}:{ss} {elapsed >= 180 ? "✓" : ""}
             </span>
           )}
-          {!sessionStarted ? (
-            <>
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value as Lang)}
-                style={{ padding: "5px 8px", background: "#1e293b", color: "#f1f5f9", border: "1px solid #334155", borderRadius: 4 }}
-              >
-                <option value="fr">Français</option>
-                <option value="en">English</option>
-                <option value="nl-BE">Nederlands (BE)</option>
-                <option value="es">Español</option>
-                <option value="it">Italiano</option>
-                <option value="de">Deutsch</option>
-              </select>
-              <button onClick={startSession} style={btn("#4f46e5")}>
-                Démarrer
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={runEvaluation} disabled={evaluating} style={btn("#10b981")}>
-                {evaluating ? "Évaluation…" : "Évaluer (Claude)"}
-              </button>
-              <button onClick={stopSession} style={btn("#ef4444")}>
-                Arrêter
-              </button>
-            </>
+          {sessionStarted && phase === "active" && (
+            <button onClick={endSession} style={btn("#10b981")}>
+              Terminer et évaluer
+            </button>
+          )}
+          {sessionStarted && phase === "done" && (
+            <button onClick={() => setSessionStarted(false)} style={btn("#4f46e5")}>
+              Nouvelle session
+            </button>
           )}
         </div>
       </header>
 
+      {/* ── pre-session: language picker + Start ── */}
+      {!sessionStarted && (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflow: "auto" }}>
+          <div style={{ width: "100%", maxWidth: 560, textAlign: "center" }}>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>🎙️</div>
+            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 600 }}>Choisis ta langue</h2>
+            <p style={{ margin: "0 0 28px", color: "#94a3b8", fontSize: 14 }}>
+              Sélectionne la langue de l&apos;évaluation orale, puis démarre la session.
+            </p>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 10,
+                marginBottom: 32,
+              }}
+            >
+              {LANGUAGES.map((l) => (
+                <button
+                  key={l.code}
+                  onClick={() => setLanguage(l.code)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "16px 10px",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    background: language === l.code ? "#312e81" : "#1e293b",
+                    border: `2px solid ${language === l.code ? "#6366f1" : "#334155"}`,
+                    color: "#f1f5f9",
+                    transition: "background 0.15s, border-color 0.15s",
+                  }}
+                >
+                  <span style={{ fontSize: 28 }}>{l.flag}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{l.label}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={startSession}
+              style={{
+                padding: "14px 48px",
+                background: "#4f46e5",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontSize: 16,
+                fontWeight: 600,
+                letterSpacing: 0.3,
+                boxShadow: "0 4px 14px rgba(79, 70, 229, 0.4)",
+              }}
+            >
+              ▶ Démarrer
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── body ──
-          During the session: avatar left + results sidebar right.
-          Once the CEFR assessment is in: the avatar section is removed and
-          the analysis (panels, listen-back audio, transcript) goes full screen. */}
-      <div style={{ display: "grid", gridTemplateColumns: cefrResult ? "1fr" : "1fr 520px", flex: 1, overflow: "hidden" }}>
-        {/* Avatar — hidden once the assessment is complete */}
-        {!cefrResult && (
+          "active": avatar left + transcript sidebar right.
+          "evaluating": full-screen takeover, no avatar/sidebar.
+          "done": avatar is gone, the analysis (panels, listen-back audio,
+          transcript) goes full screen. */}
+      {sessionStarted && phase === "active" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 520px", flex: 1, overflow: "hidden" }}>
           <div style={{ position: "relative", overflow: "hidden" }}>
-            {sessionStarted ? (
-              USE_HEYGEN ? (
-                <LiveAvatar ref={liveAvatarRef} onAmplitude={(amp) => setAmplitude(amp)} />
-              ) : (
-                <Avatar amplitude={amplitude} />
-              )
+            {USE_HEYGEN ? (
+              <LiveAvatar ref={liveAvatarRef} onAmplitude={(amp) => setAmplitude(amp)} />
             ) : (
-              <div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center", color: "#334155", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontSize: 48 }}>🎙️</div>
-                <div>Démarre une session pour voir l&apos;avatar</div>
+              <Avatar amplitude={amplitude} />
+            )}
+            {/* Overlay: "thinking" cue while waiting on the avatar's reply —
+                the gap between end-of-speech and the first streamed token
+                previously had zero visual feedback. */}
+            {isThinking && (
+              <div style={{ position: "absolute", top: 16, right: 16 }}>
+                <ThinkingIndicator variant="badge" label="…" />
               </div>
             )}
             {/* Overlay: live captions */}
-            {sessionStarted && (partialUser || streamingAssistant) && (
+            {(partialUser || streamingAssistant || chatError) && (
               <div
                 style={{
                   position: "absolute",
@@ -751,107 +1023,33 @@ export default function Home() {
                 {streamingAssistant && (
                   <div style={{ color: "#e2e8f0", fontSize: 14 }}>{streamingAssistant}</div>
                 )}
+                {chatError && !streamingAssistant && (
+                  <div style={{ color: "#f87171", fontSize: 14 }}>{chatError}</div>
+                )}
               </div>
             )}
           </div>
-        )}
 
-        {/* Results panel — sidebar during the session, full screen afterwards */}
-        <aside
-          style={{
-            borderLeft: cefrResult ? "none" : "1px solid #1e293b",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            ...(cefrResult ? { maxWidth: 1100, width: "100%", margin: "0 auto" } : {}),
-          }}
-        >
-          {/* Score panel — shown only once the evaluation completes. The raw
-              acoustic panel (QUALITÉ DE PRONONCIATION) was removed: the CEFR
-              card already carries the pronunciation dimension, and the raw
-              acoustic average duplicated it confusingly. */}
-          {cefrResult && (
-            <div style={{ padding: 12, borderBottom: "1px solid #1e293b", flexShrink: 0 }}>
-              <CefrPanel result={cefrResult} azureAvg={azureAvg} />
-            </div>
-          )}
+          <aside style={{ borderLeft: "1px solid #1e293b", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {transcriptPanel}
+          </aside>
+        </div>
+      )}
 
-          {/* Listen-back player — shown once the recording has been captured */}
-          {audioBlob && audioBlobUrlRef.current && (
-            <div
-              style={{
-                padding: "10px 12px",
-                borderBottom: "1px solid #1e293b",
-                flexShrink: 0,
-                background: "#0f172a",
-              }}
-            >
-              <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>
-                LISTEN BACK
-              </div>
-              <audio
-                controls
-                src={audioBlobUrlRef.current}
-                style={{ width: "100%", height: 32, accentColor: "#4f46e5" }}
-              />
-              <div style={{ fontSize: 10, color: "#475569", marginTop: 4 }}>
-                Coloured words in the transcript below show pronunciation quality.
-              </div>
-            </div>
-          )}
+      {sessionStarted && phase === "evaluating" && (
+        <EvaluatingScreen done={evalDone} onDone={() => setPhase("done")} />
+      )}
 
-          {/* Transcript */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-            <div style={{ fontSize: 11, color: "#475569", fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
-              TRANSCRIPT
-            </div>
-            {history.length === 0 && (
-              <p style={{ color: "#334155", fontSize: 13 }}>La conversation s&apos;affichera ici…</p>
-            )}
-            {history.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  marginBottom: 10,
-                  padding: "8px 10px",
-                  background: m.role === "user" ? "#1e293b" : "#1e1b4b",
-                  borderRadius: 6,
-                  borderLeft: `3px solid ${m.role === "user" ? "#334155" : "#4f46e5"}`,
-                }}
-              >
-                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4 }}>
-                  {m.role === "user" ? "Vous" : "Avatar"}
-                </div>
-                <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-                  {/* Coloured pronunciation words appear only after the CEFR
-                      evaluation — during the session the transcript stays plain. */}
-                  {cefrResult && m.role === "user" && m.pronunciation?.words?.length ? (
-                    <UserWords words={m.pronunciation.words} />
-                  ) : (
-                    m.content
-                  )}
-                </div>
-                {cefrResult && m.role === "user" && m.pronunciation && (
-                  <UtteranceBadges p={m.pronunciation} />
-                )}
-                {m.role === "user" && m.audioUrl && cefrResult && (
-                  <audio
-                    controls
-                    src={m.audioUrl}
-                    onError={(e) => {
-                      // A bad blob source would otherwise render a broken
-                      // player; hide it and log instead of surfacing an error.
-                      console.warn(`[playback] turn ${i} audio failed to load`);
-                      (e.currentTarget as HTMLAudioElement).style.display = "none";
-                    }}
-                    style={{ width: "100%", height: 28, marginTop: 6, accentColor: "#4f46e5", display: "block" }}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </aside>
-      </div>
+      {sessionStarted && phase === "done" && (
+        <SessionResultsScreen
+          cefrResult={cefrResult}
+          azureAvg={azureAvg}
+          evalFailed={evalFailed}
+          audioBlobUrl={audioBlob ? audioBlobUrlRef.current : null}
+          transcriptPanel={transcriptPanel}
+          sessionId={savedSessionId}
+        />
+      )}
     </main>
   );
 }

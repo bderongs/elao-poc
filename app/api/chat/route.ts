@@ -166,6 +166,7 @@ export async function POST(req: Request) {
             { role: "user", content: userMessage },
           ],
           maxTokens: 300,
+          context: "chat",
         });
 
         for await (const piece of llmStream) {
@@ -239,7 +240,16 @@ export async function POST(req: Request) {
         }
       }
 
-      send("done", JSON.stringify({ fullText }));
+      // Only send "done" (which the client appends to conversation history as
+      // the assistant's turn) when something was actually generated. Sending
+      // it unconditionally — even after the LLM call failed outright — used
+      // to push an empty-content assistant message into history; Mistral then
+      // rejects EVERY subsequent turn with 400 "Assistant message must have
+      // either content or tool_calls, but not none", permanently breaking the
+      // rest of the session over one transient failure.
+      if (fullText.trim()) {
+        send("done", JSON.stringify({ fullText }));
+      }
       controller.close();
     },
   });

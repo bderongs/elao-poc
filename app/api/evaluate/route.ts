@@ -41,6 +41,7 @@ export async function POST(req: Request) {
       ],
       maxTokens: 1500,
       json: true,
+      context: "cefr-eval",
     });
 
     // Strip any accidental markdown fences and parse

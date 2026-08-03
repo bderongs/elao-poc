@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listSessions } from "@/lib/sessions-service";
-import { wordColor } from "@/components/ScoreDisplay";
+import { SessionScoreCell } from "@/components/SessionScoreCell";
+import { formatDateTime } from "@/lib/format-date";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,12 @@ export default async function AdminSessionsPage({
 
   return (
     <div>
-      <h1 className={styles.pageTitle}>Sessions ({total})</h1>
+      <div className={styles.detailHeaderRow} style={{ justifyContent: "space-between" }}>
+        <h1 className={styles.pageTitle} style={{ marginBottom: 0 }}>Sessions ({total})</h1>
+        <Link href="/admin/upload" className={styles.rowLink}>
+          + Upload recording
+        </Link>
+      </div>
 
       {loadError && <div className={styles.errorBox}>Failed to load sessions: {loadError}</div>}
 
@@ -54,8 +60,8 @@ export default async function AdminSessionsPage({
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Source</th>
                   <th>Language</th>
-                  <th>Level</th>
                   <th>Score</th>
                   <th>Duration</th>
                 </tr>
@@ -65,20 +71,26 @@ export default async function AdminSessionsPage({
                   <tr key={s.id}>
                     <td data-label="Date">
                       <Link href={`/admin/${s.id}`} className={styles.rowLink}>
-                        {new Date(s.created_at).toLocaleString()}
+                        {formatDateTime(s.created_at)}
                       </Link>
                     </td>
-                    <td data-label="Language">{s.language ?? "—"}</td>
-                    <td data-label="Level">
-                      {s.cefr_level ? (
-                        <span className={styles.badge} style={{ background: wordColor(s.global_score ?? 0) }}>
-                          {s.cefr_level}
+                    <td data-label="Source">
+                      {s.source === "upload" ? (
+                        <span className={styles.badge} style={{ background: "#60a5fa", color: "#000" }}>
+                          upload
+                        </span>
+                      ) : s.source === "speechace" ? (
+                        <span className={styles.badge} style={{ background: "#f59e0b", color: "#000" }}>
+                          speechace
                         </span>
                       ) : (
-                        "—"
+                        <span style={{ color: "#6b7280" }}>conversation</span>
                       )}
                     </td>
-                    <td data-label="Score">{s.global_score ?? "—"}</td>
+                    <td data-label="Language">{s.language ?? "—"}</td>
+                    <td data-label="Score">
+                      <SessionScoreCell session={s} />
+                    </td>
                     <td data-label="Duration">
                       {s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : "—"}
                     </td>
