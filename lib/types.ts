@@ -89,3 +89,13 @@ export interface TurnEvaluationRow {
   duration_ms: number | null;
   created_at: string;
 }
+
+export interface UserRow {
+  id: string;
+  email: string | null;
+  role: "user" | "admin";
+  displayName: string | null;
+  createdAt: string;
+  /** Count of sessions with sessions.user_id = this account — 0 means "signed up, never claimed/took a test". */
+  sessionCount: number;
+}

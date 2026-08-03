@@ -52,5 +52,6 @@ export const config = {
     "/api/sessions/:id/turns",
     "/api/sessions/:id/turns/:turnId/assess",
     "/api/sessions/:id/assess-all",
+    "/api/users/:path*",
   ],
 };
