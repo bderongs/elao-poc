@@ -89,6 +89,13 @@ export default async function AdminSessionDetailPage({
     .filter((p) => isEvalProviderPending(evaluations, p.id))
     .map((p) => p.id);
 
+  // Whether a fresh azure-ensemble pronunciation-lab re-run exists for every
+  // recorded turn — i.e. there's something to promote over the live flow's
+  // original azure_scores (see PromoteHeadlineButton / promoteConversationRollup).
+  const canPromoteHeadline =
+    session.source === "conversation" &&
+    pronunciationProviderFullyCovered(turnEvaluations, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID, turnsWithAudioIds);
+
   return (
     <div>
       <Link href="/admin" className={styles.backLink}>
@@ -152,6 +159,7 @@ export default async function AdminSessionDetailPage({
               alreadyScoredEvalIds={alreadyScoredEvalIds}
               pendingPronunciationIds={pendingPronunciationIds}
               pendingEvalIds={pendingEvalIds}
+              canPromoteHeadline={canPromoteHeadline}
             />
           ) : undefined
         }

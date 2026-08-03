@@ -49,6 +49,7 @@ export const config = {
     "/api/sessions/:id",
     "/api/sessions/:id/evaluate",
     "/api/sessions/:id/recompute",
+    "/api/sessions/:id/promote-rollup",
     "/api/sessions/:id/turns",
     "/api/sessions/:id/turns/:turnId/assess",
     "/api/sessions/:id/assess-all",

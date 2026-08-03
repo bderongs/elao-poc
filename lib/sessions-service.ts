@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { computeAzureAvg } from "@/lib/pronunciation-rollup";
+import { computeAzureAvg, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/azure-stt";
 
@@ -599,5 +599,77 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
     .from("sessions")
     .update({ azure_scores: computeAzureAvg(results) })
     .eq("id", sessionId);
+  if (updateError) throw new Error(updateError.message);
+}
+
+/**
+ * Overwrites a live-conversation session's headline `azure_scores` with its
+ * latest azure-ensemble pronunciation-lab re-run — the one deliberate way to
+ * let a fresh replay (e.g. after adding DEEPGRAM_API_KEY, since
+ * azure-ensemble silently falls back to Azure-only when Deepgram is
+ * unavailable) become the number shown on the session, bypassing the
+ * protection in recomputeSessionRollup. Unlike that function, this never
+ * touches session_turns.content — the live transcript stays exactly what the
+ * assistant actually replied to; only the score changes.
+ *
+ * Requires every recorded (audio) turn to already have a successful
+ * azure-ensemble run — run it from the "run full evaluation" gear first.
+ */
+export async function promoteConversationRollup(sessionId: string): Promise<void> {
+  const supabase = getSupabaseServer();
+
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("source")
+    .eq("id", sessionId)
+    .single();
+  if (sessionError || !session) throw new Error(sessionError?.message ?? "session not found");
+  if (session.source !== "conversation") throw new Error("promote-rollup is only for conversation sessions");
+
+  const { data: turns, error: turnsError } = await supabase
+    .from("session_turns")
+    .select("id")
+    .eq("session_id", sessionId)
+    .not("audio_url", "is", null);
+  if (turnsError) throw new Error(turnsError.message);
+  const turnIds = (turns ?? []).map((t) => t.id as string);
+  if (!turnIds.length) throw new Error("no recorded turns to promote");
+
+  const { data: evals, error: evalsError } = await supabase
+    .from("session_turn_evaluations")
+    .select("turn_id, result_json, error, created_at")
+    .in("turn_id", turnIds)
+    .eq("provider_id", LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID)
+    .order("created_at", { ascending: false });
+  if (evalsError) throw new Error(evalsError.message);
+
+  // Newest-first, so the first row seen per turn_id is that turn's latest run.
+  const latestByTurn = new Map<string, { result_json: PronunciationResult | null; error: string | null }>();
+  for (const row of evals ?? []) {
+    const turnId = row.turn_id as string;
+    if (!latestByTurn.has(turnId)) {
+      latestByTurn.set(turnId, {
+        result_json: row.result_json as PronunciationResult | null,
+        error: row.error as string | null,
+      });
+    }
+  }
+
+  const results: PronunciationResult[] = [];
+  for (const turnId of turnIds) {
+    const latest = latestByTurn.get(turnId);
+    if (!latest || latest.error || !latest.result_json) {
+      throw new Error(
+        "every recorded turn needs a successful azure-ensemble pronunciation-lab run before promoting — run it from the gear first",
+      );
+    }
+    results.push(latest.result_json);
+  }
+
+  const { error: updateError } = await supabase
+    .from("sessions")
+    .update({ azure_scores: computeAzureAvg(results) })
+    .eq("id", sessionId)
+    .eq("source", "conversation");
   if (updateError) throw new Error(updateError.message);
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { SessionSummary } from "@/lib/types";
 import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { RecomputeRollupButton } from "@/components/RecomputeRollupButton";
+import { PromoteHeadlineButton } from "@/components/PromoteHeadlineButton";
 import styles from "./admin.module.css";
 
 export interface ProviderOption {
@@ -20,9 +21,12 @@ interface TurnResult {
 /**
  * One provider's row: a checkbox (selectable, default), a "running" badge
  * (a launch is in flight — not selectable, nothing to configure mid-run), or
- * a "scored" badge (already has a result for this session — not selectable,
- * avoids an accidental re-billed re-run). Pending always wins over
- * already-scored — the two are mutually exclusive by construction (see
+ * a "scored" badge (already has a result for this session — not selectable
+ * by default, avoids an accidental re-billed re-run) with a small "re-run"
+ * link that unlocks it back into a checkbox for a deliberate re-run (e.g.
+ * after adding DEEPGRAM_API_KEY, to redo a provider that silently ran
+ * degraded without it). Pending always wins over already-scored — the two
+ * are mutually exclusive by construction (see
  * pronunciationProviderPending/isEvalProviderPending), but pending is the
  * more useful thing to show if both were ever true.
  */
@@ -31,13 +35,17 @@ function ProviderRow({
   checked,
   pending,
   alreadyScored,
+  unlocked,
   onToggle,
+  onUnlock,
 }: {
   provider: ProviderOption;
   checked: boolean;
   pending: boolean;
   alreadyScored: boolean;
+  unlocked: boolean;
   onToggle: () => void;
+  onUnlock: () => void;
 }) {
   if (pending) {
     return (
@@ -47,11 +55,28 @@ function ProviderRow({
       </span>
     );
   }
-  if (alreadyScored) {
+  if (alreadyScored && !unlocked) {
     return (
       <span className={styles.scoredBadge} title="Already has a result for this session — re-running replaces it with a fresh (paid) call">
         <span className={styles.scoredCheck}>✓</span>
         {provider.label}
+        <button
+          type="button"
+          onClick={onUnlock}
+          title="Unlock to select this provider for a fresh re-run"
+          style={{
+            marginLeft: 6,
+            fontSize: 10,
+            color: "#9ca3af",
+            background: "none",
+            border: "none",
+            textDecoration: "underline",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          re-run
+        </button>
       </span>
     );
   }
@@ -79,6 +104,7 @@ export function FullEvaluationPanel({
   alreadyScoredEvalIds,
   pendingPronunciationIds,
   pendingEvalIds,
+  canPromoteHeadline,
 }: {
   sessionId: string;
   sessionSource: SessionSummary["source"];
@@ -88,6 +114,7 @@ export function FullEvaluationPanel({
   alreadyScoredEvalIds: string[];
   pendingPronunciationIds: string[];
   pendingEvalIds: string[];
+  canPromoteHeadline: boolean;
 }) {
   const router = useRouter();
   // Only providers without an existing (or in-flight) result are selected/
@@ -104,6 +131,10 @@ export function FullEvaluationPanel({
   const [selectedEval, setSelectedEval] = useState<Set<string>>(
     new Set(evalProviders.filter((p) => !alreadyScoredEvalIds.includes(p.id) && !pendingEvalIds.includes(p.id)).map((p) => p.id))
   );
+  // Providers explicitly unlocked (via the "re-run" link) back into a
+  // selectable checkbox despite already having a result — see ProviderRow.
+  const [unlockedPron, setUnlockedPron] = useState<Set<string>>(new Set());
+  const [unlockedEval, setUnlockedEval] = useState<Set<string>>(new Set());
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
@@ -128,6 +159,20 @@ export function FullEvaluationPanel({
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setter(next);
+  };
+
+  // Unlocking swaps the badge for a checkbox AND pre-checks it — a bare
+  // unlock with nothing selected would just leave the row looking identical
+  // to "not selected", forcing an extra click to notice and check it.
+  const unlock = (
+    unlockedSet: Set<string>,
+    setUnlocked: (s: Set<string>) => void,
+    selectedSet: Set<string>,
+    setSelected: (s: Set<string>) => void,
+    id: string,
+  ) => {
+    setUnlocked(new Set(unlockedSet).add(id));
+    setSelected(new Set(selectedSet).add(id));
   };
 
   const run = async () => {
@@ -204,12 +249,17 @@ export function FullEvaluationPanel({
             checked={selectedPron.has(p.id)}
             pending={pendingPronunciationIds.includes(p.id)}
             alreadyScored={alreadyScoredPronunciationIds.includes(p.id)}
+            unlocked={unlockedPron.has(p.id)}
             onToggle={() => toggle(selectedPron, setSelectedPron, p.id)}
+            onUnlock={() => unlock(unlockedPron, setUnlockedPron, selectedPron, setSelectedPron, p.id)}
           />
         ))}
       </div>
+      {canPromoteHeadline && <PromoteHeadlineButton sessionId={sessionId} />}
 
-      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6 }}>Transcript (CEFR eval)</div>
+      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6, marginTop: canPromoteHeadline ? 10 : 0 }}>
+        Transcript (CEFR eval)
+      </div>
       <div className={styles.evalLabControls} style={{ marginBottom: 12 }}>
         {evalProviders.map((p) => (
           <ProviderRow
@@ -218,7 +268,9 @@ export function FullEvaluationPanel({
             checked={selectedEval.has(p.id)}
             pending={pendingEvalIds.includes(p.id)}
             alreadyScored={alreadyScoredEvalIds.includes(p.id)}
+            unlocked={unlockedEval.has(p.id)}
             onToggle={() => toggle(selectedEval, setSelectedEval, p.id)}
+            onUnlock={() => unlock(unlockedEval, setUnlockedEval, selectedEval, setSelectedEval, p.id)}
           />
         ))}
       </div>

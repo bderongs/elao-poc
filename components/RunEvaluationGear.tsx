@@ -20,6 +20,7 @@ export function RunEvaluationGear({
   alreadyScoredEvalIds,
   pendingPronunciationIds,
   pendingEvalIds,
+  canPromoteHeadline,
 }: {
   sessionId: string;
   sessionSource: SessionSummary["source"];
@@ -29,6 +30,7 @@ export function RunEvaluationGear({
   alreadyScoredEvalIds: string[];
   pendingPronunciationIds: string[];
   pendingEvalIds: string[];
+  canPromoteHeadline: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const anyPending = pendingPronunciationIds.length > 0 || pendingEvalIds.length > 0;
@@ -71,6 +73,7 @@ export function RunEvaluationGear({
             alreadyScoredEvalIds={alreadyScoredEvalIds}
             pendingPronunciationIds={pendingPronunciationIds}
             pendingEvalIds={pendingEvalIds}
+            canPromoteHeadline={canPromoteHeadline}
           />
         </div>
       )}
