@@ -1,6 +1,7 @@
 import { listUsers } from "@/lib/users-service";
 import { getCurrentUser } from "@/lib/current-user";
 import { UserRoleControl } from "@/components/UserRoleControl";
+import { UserPasswordControl } from "@/components/UserPasswordControl";
 import { formatDateTime } from "@/lib/format-date";
 import styles from "@/components/admin.module.css";
 
@@ -83,7 +84,10 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   <td data-label="Sessions">{u.sessionCount}</td>
                   <td data-label="Joined">{formatDateTime(u.createdAt)}</td>
                   <td data-label="">
-                    <UserRoleControl userId={u.id} role={u.role} isSelf={u.id === currentUser?.id} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+                      <UserRoleControl userId={u.id} role={u.role} isSelf={u.id === currentUser?.id} />
+                      <UserPasswordControl userId={u.id} />
+                    </div>
                   </td>
                 </tr>
               ))}
