@@ -1,5 +1,6 @@
 import { getSystemPrompt, type ConvLang } from "@/lib/conversation-prompts";
 import { mistralModel, mistralStreamText } from "@/lib/mistral";
+import { logServerEvent } from "@/lib/server-log";
 
 export const runtime = "nodejs";
 
@@ -7,6 +8,10 @@ interface ChatRequest {
   language: ConvLang;
   history: { role: "user" | "assistant"; content: string }[];
   userMessage: string;
+  /** H-01 latency-instrumentation id, set by app/page.tsx — echoed into every
+   *  log line below so a turn's client + server timeline can be reconstructed
+   *  from logs/server-YYYY-MM-DD.log by grepping for the id. */
+  turnLogId?: string;
 }
 
 function escapeXml(text: string): string {
@@ -119,7 +124,10 @@ async function startTTS(
  *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage } = (await req.json()) as ChatRequest;
+  const { language, history, userMessage, turnLogId } = (await req.json()) as ChatRequest;
+  const logId = turnLogId ?? "unknown";
+  const requestReceivedAt = Date.now();
+  logServerEvent("chat_request_received", { turnLogId: logId });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -129,6 +137,10 @@ export async function POST(req: Request) {
 
       let fullText = "";
       let pending = "";
+      // H-01 latency instrumentation — each logged once per turn.
+      let loggedFirstToken = false;
+      let loggedFirstTtsFired = false;
+      let loggedFirstTtsReady = false;
 
       // Speaking rate for this reply. The avatar prefixes each reply with a
       // level tag ⟦A1⟧…⟦C1⟧ (its presumed level for the speaker); we strip it
@@ -152,6 +164,10 @@ export async function POST(req: Request) {
         send("text", JSON.stringify({ delta: chunk }));
         let m;
         while ((m = pending.match(/^([\s\S]*?[.!?…])\s/))) {
+          if (!loggedFirstTtsFired) {
+            loggedFirstTtsFired = true;
+            logServerEvent("chat_first_tts_fired", { turnLogId: logId });
+          }
           ttsQueue.push(startTTS(m[1], language, rate));
           pending = pending.slice(m[0].length);
         }
@@ -166,10 +182,14 @@ export async function POST(req: Request) {
             { role: "user", content: userMessage },
           ],
           maxTokens: 300,
-          context: "chat",
+          context: `chat:${logId}`,
         });
 
         for await (const piece of llmStream) {
+            if (!loggedFirstToken) {
+              loggedFirstToken = true;
+              logServerEvent("chat_first_llm_token", { turnLogId: logId });
+            }
 
             if (headResolved) {
               emit(piece);
@@ -209,6 +229,10 @@ export async function POST(req: Request) {
         // Flush any unresolved head (e.g. a lone partial tag at end of stream).
         if (!headResolved && head) emit(head);
         if (pending.trim()) {
+          if (!loggedFirstTtsFired) {
+            loggedFirstTtsFired = true;
+            logServerEvent("chat_first_tts_fired", { turnLogId: logId });
+          }
           ttsQueue.push(startTTS(pending, language, rate));
         }
       } catch (e) {
@@ -224,6 +248,10 @@ export async function POST(req: Request) {
       // buffering adds no meaningful latency.
       for (const readerPromise of ttsQueue) {
         const reader = await readerPromise;
+        if (!loggedFirstTtsReady) {
+          loggedFirstTtsReady = true;
+          logServerEvent("chat_first_tts_ready", { turnLogId: logId, ok: !!reader });
+        }
         if (!reader) continue;
         try {
           const chunks: Buffer[] = [];
@@ -250,6 +278,7 @@ export async function POST(req: Request) {
       if (fullText.trim()) {
         send("done", JSON.stringify({ fullText }));
       }
+      logServerEvent("chat_stream_done", { turnLogId: logId, durationMs: Date.now() - requestReceivedAt });
       controller.close();
     },
   });

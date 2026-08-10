@@ -110,16 +110,16 @@ export default function Home() {
   historyRef.current = history;
   /** Queue of turns spoken while avatar was responding — processed in order after avatar finishes. */
   const bufferedTurnsRef = useRef<
-    Array<{ text: string; pronunciation: PronunciationResult; recordingPromise: Promise<{ blob: Blob } | null> }>
+    Array<{
+      text: string;
+      pronunciation: PronunciationResult;
+      recordingPromise: Promise<{ blob: Blob } | null>;
+      turnLogId: string;
+    }>
   >([]);
-  /**
-   * The previous turn's pronunciation-assessment call (its own Mistral judge
-   * request), if still in flight. handleUserTurn awaits this before starting
-   * the next /api/chat call, so the two Mistral calls per turn never overlap
-   * across turns — overlap was creating request bursts that tripped the
-   * account's rate limit.
-   */
-  const pronunciationInFlightRef = useRef<Promise<void> | null>(null);
+  /** Latency-instrumentation turn counter (H-01) — each real user turn gets a short id so its
+   *  client + server log lines (logs/server-YYYY-MM-DD.log) can be correlated end to end. */
+  const turnCounterRef = useRef(0);
   /** Flush function stored in a ref so the amplitude callback can call it without stale closures. */
   const processBufferedRef = useRef<() => void>(() => {});
   /** Per-turn MediaRecorder — one recording per user utterance, restarted after each turn. */
@@ -423,7 +423,6 @@ export default function Home() {
     setChatError(null);
     setIsThinking(false);
     bufferedTurnsRef.current = [];
-    pronunciationInFlightRef.current = null;
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current);
       audioBlobUrlRef.current = null;
@@ -465,6 +464,14 @@ export default function Home() {
         // Azure SDK returns per-phoneme scores directly — no secondary REST call needed.
         const pronunciation: PronunciationResult = { ...azurePron, source: "azure" };
 
+        // H-01 latency instrumentation: mark the moment STT considers the
+        // utterance final, tagged with whether it's about to sit in the
+        // buffer (avatar still busy) — that wait is turn-taking, not pipeline
+        // latency, so keeping it visible lets the two be told apart later.
+        const turnLogId = `turn-${++turnCounterRef.current}`;
+        const willBuffer = isProcessingRef.current || isSpeakingRef.current;
+        logClientEvent("turn_stt_final", { turnLogId, buffered: willBuffer });
+
         // Always close out THIS utterance's recording the instant STT
         // recognizes it, regardless of whether the avatar is busy — the
         // recorder must be scoped to when the user actually spoke, not to
@@ -479,8 +486,8 @@ export default function Home() {
         // Avatar is still talking or processing a previous turn — queue this
         // turn (its audio is already correctly captured above). All queued
         // turns are replayed in order once the avatar finishes speaking.
-        if (isProcessingRef.current || isSpeakingRef.current) {
-          bufferedTurnsRef.current.push({ text, pronunciation, recordingPromise });
+        if (willBuffer) {
+          bufferedTurnsRef.current.push({ text, pronunciation, recordingPromise, turnLogId });
           return;
         }
 
@@ -517,22 +524,20 @@ export default function Home() {
           historyRef.current = finalHistory;
           setHistory(finalHistory);
         } else {
-          await handleUserTurn(text, pronunciation);
+          await handleUserTurn(text, pronunciation, turnLogId);
         }
 
-        // Kick off the assessment. callPronunciationAPI also attaches the
-        // conditioned WAV to the transcript player (the raw webm is recorded
-        // with AGC off and can be inaudibly quiet). Tracked in
-        // pronunciationInFlightRef so the next turn's /api/chat call waits for
-        // this turn's Mistral judge call instead of overlapping it.
-        pronunciationInFlightRef.current = recordingPromise
-          .then((recording) => {
-            if (!recording) return;
-            return callPronunciationAPI(recording.blob, turnIndex, azurePron.wpm, text, questionContext);
-          })
-          .finally(() => {
-            pronunciationInFlightRef.current = null;
-          });
+        // Kick off the assessment in the background. callPronunciationAPI also
+        // attaches the conditioned WAV to the transcript player (the raw webm
+        // is recorded with AGC off and can be inaudibly quiet). This runs
+        // concurrently with the next turn's /api/chat call — both are Mistral
+        // calls, but lib/mistral-queue.ts already caps concurrent Mistral
+        // requests server-side (MISTRAL_MAX_CONCURRENCY, default 2), so this
+        // no longer needs to be serialized here at the page level.
+        void recordingPromise.then((recording) => {
+          if (!recording) return;
+          return callPronunciationAPI(recording.blob, turnIndex, azurePron.wpm, text, questionContext);
+        });
 
         if (shouldEnd) {
           await deliverClosingRemarkAndEnd();
@@ -599,19 +604,22 @@ export default function Home() {
     await handleUserTurn("__START__");
   };
 
-  const handleUserTurn = async (userText: string, pronunciation?: PronunciationResult) => {
+  const handleUserTurn = async (userText: string, pronunciation?: PronunciationResult, turnLogId?: string) => {
     isProcessingRef.current = true;
     setIsThinking(true);
     setChatError(null);
     const isStart = userText === "__START__";
     const isEnd   = userText === "__END__";
+    // H-01 latency instrumentation id — falls back to a synthetic one for the
+    // opening/closing turns, which don't come from onFinal.
+    const logId = turnLogId ?? (isStart ? "start" : isEnd ? "end" : "unknown");
 
     try {
-      // Never let this turn's /api/chat call overlap the previous turn's
-      // still-in-flight pronunciation-judge call — both hit the same Mistral
-      // rate limit, and the overlap was creating request bursts that tripped it.
-      if (pronunciationInFlightRef.current) await pronunciationInFlightRef.current;
-
+      // This turn's /api/chat call is allowed to overlap the previous turn's
+      // pronunciation-judge Mistral call (previously serialized here to avoid
+      // rate-limit bursts) — lib/mistral-queue.ts caps concurrent Mistral
+      // requests server-side, so the two calls now queue safely there instead
+      // of blocking the examiner's next reply on the previous answer's score.
       const newHistory: Msg[] = (isStart || isEnd)
         ? historyRef.current
         : [...historyRef.current, { role: "user", content: userText, pronunciation }];
@@ -627,10 +635,14 @@ export default function Home() {
           ? "__END__"
           : userText;
 
+      // H-01: marks when the request actually goes out — the gap since
+      // turn_stt_final includes any buffering wait (avatar still speaking),
+      // so the two are logged separately rather than folded into one number.
+      logClientEvent("turn_chat_request_sent", { turnLogId: logId });
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, history: newHistory, userMessage }),
+        body: JSON.stringify({ language, history: newHistory, userMessage, turnLogId: logId }),
       });
 
       if (!res.body) {
@@ -644,6 +656,10 @@ export default function Home() {
       const decoder = new TextDecoder();
       let buffer = "";
       let assistantText = "";
+      // H-01: log only the FIRST text/audio event per turn — deltas/chunks
+      // arrive in bursts and aren't individually interesting for latency.
+      let loggedFirstText = false;
+      let loggedFirstAudio = false;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -662,17 +678,26 @@ export default function Home() {
           const data = dataMatch[1];
 
           if (type === "text") {
+            if (!loggedFirstText) {
+              loggedFirstText = true;
+              logClientEvent("turn_first_text", { turnLogId: logId });
+            }
             const { delta } = JSON.parse(data);
             assistantText += delta;
             setStreamingAssistant(assistantText);
             setIsThinking(false);
           } else if (type === "audio") {
+            if (!loggedFirstAudio) {
+              loggedFirstAudio = true;
+              logClientEvent("turn_first_audio", { turnLogId: logId });
+            }
             if (USE_HEYGEN) {
               liveAvatarRef.current?.sendAudio(data);
             } else {
               playerRef.current?.playChunk(data);
             }
           } else if (type === "done") {
+            logClientEvent("turn_stream_done", { turnLogId: logId });
             const { fullText } = JSON.parse(data);
             // Defense in depth: an empty-content assistant message stuck in
             // history gets sent back to Mistral on every future turn, which
@@ -727,15 +752,11 @@ export default function Home() {
     // Examiner's question — captured before handleUserTurn appends the reply.
     const questionContext =
       [...historyRef.current].reverse().find((m) => m.role === "assistant")?.content ?? "";
-    await handleUserTurn(buffered.text, buffered.pronunciation);
-    pronunciationInFlightRef.current = buffered.recordingPromise
-      .then((recording) => {
-        if (!recording) return;
-        return callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext);
-      })
-      .finally(() => {
-        pronunciationInFlightRef.current = null;
-      });
+    await handleUserTurn(buffered.text, buffered.pronunciation, buffered.turnLogId);
+    void buffered.recordingPromise.then((recording) => {
+      if (!recording) return;
+      return callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext);
+    });
   };
 
   // ── end the session: stop everything, show the full-screen evaluating
