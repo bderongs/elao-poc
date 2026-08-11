@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Overwrites a live-conversation session's headline azure_scores with its
- * latest azure-ensemble pronunciation-lab re-run — POST
+ * Overwrites a live-conversation session's headline pronunciation_scores with its
+ * latest re-run from LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (see
+ * lib/pronunciation-rollup.ts — currently voxtral) — POST
  * /api/sessions/:id/promote-rollup. Deliberately bypasses the normal
  * protection that keeps a conversation session's headline score as the live
  * flow's original output (see promoteConversationRollup in
@@ -13,7 +14,7 @@ import { useRouter } from "next/navigation";
  * shown everywhere for this session with no way back short of re-running the
  * live conversation itself.
  */
-export function PromoteHeadlineButton({ sessionId }: { sessionId: string }) {
+export function PromoteHeadlineButton({ sessionId, providerId }: { sessionId: string; providerId: string }) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +23,7 @@ export function PromoteHeadlineButton({ sessionId }: { sessionId: string }) {
   const run = async () => {
     if (
       !window.confirm(
-        "Overwrite this session's headline score with the latest azure-ensemble pronunciation-lab result? This replaces the number shown everywhere for this session and can't be undone (short of re-running the live conversation).",
+        `Overwrite this session's headline score with the latest ${providerId} pronunciation-lab result? This replaces the number shown everywhere for this session and can't be undone (short of re-running the live conversation).`,
       )
     ) {
       return;
@@ -58,7 +59,7 @@ export function PromoteHeadlineButton({ sessionId }: { sessionId: string }) {
           cursor: running ? "default" : "pointer",
         }}
       >
-        {running ? "Promoting…" : "Promote azure-ensemble result to headline score"}
+        {running ? "Promoting…" : `Promote ${providerId} result to headline score`}
       </button>
       {error && <div style={{ marginTop: 6, fontSize: 11, color: "#f87171" }}>{error}</div>}
       {done && !error && <div style={{ marginTop: 6, fontSize: 11, color: "#4ade80" }}>Headline score updated.</div>}

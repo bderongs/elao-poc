@@ -15,7 +15,7 @@ import {
   UserWords,
   UtteranceBadges,
   wordColor,
-  type AzureAvg,
+  type PronunciationAvg,
   type CefrResult,
 } from "@/components/ScoreDisplay";
 
@@ -103,7 +103,7 @@ export default function Home() {
    * Mirrors the latest endSession() closure, same pattern as processBufferedRef
    * below — onFinal and the 3-min timeout are created once and never
    * recreated, so calling endSession directly from them would close over
-   * stale `elapsed`/`azureAvg` state instead of the current render's.
+   * stale `elapsed`/`pronunciationAvg` state instead of the current render's.
    */
   const endSessionRef = useRef<() => Promise<void>>(async () => {});
   const historyRef = useRef<Msg[]>([]);
@@ -131,8 +131,8 @@ export default function Home() {
    */
   const micStreamRef = useRef<MediaStream | null>(null);
 
-  // Derived: average Azure pronunciation scores across all scored user turns
-  const azureAvg = useMemo<AzureAvg | null>(() => {
+  // Derived: average pronunciation scores across all scored user turns
+  const pronunciationAvg = useMemo<PronunciationAvg | null>(() => {
     const scored = history.filter((m) => m.role === "user" && m.pronunciation);
     if (!scored.length) return null;
     const avg = (key: keyof PronunciationResult) => {
@@ -202,7 +202,7 @@ export default function Home() {
     if (result?.score_percent != null) form.append("globalScore", String(result.score_percent));
     form.append("scores", JSON.stringify(result?.dimensions ?? null));
     form.append("evaluation", JSON.stringify(result ?? null));
-    form.append("azureScores", JSON.stringify(azureAvg));
+    form.append("pronunciationScores", JSON.stringify(pronunciationAvg));
 
     if (audioBlob && audioBlob.size > 0) {
       const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
@@ -385,11 +385,11 @@ export default function Home() {
         console.warn("[pronunciation] pass-2 returned no result (Azure no-speech)");
         return;
       }
-      console.log(`[pronunciation] pass-2 OK turn=${turnIndex} score=${result.pronunciationScore}`);
+      console.log(`[pronunciation] pass-2 OK turn=${turnIndex} score=${result.pronunciationScore} source=${result.source}`);
       setHistory((h) =>
         h.map((m, i) => {
           if (i !== turnIndex || m.role !== "user" || !m.pronunciation) return m;
-          return { ...m, pronunciation: { ...result, source: "azure" } };
+          return { ...m, pronunciation: result };
         })
       );
     } catch (e) {
@@ -802,7 +802,7 @@ export default function Home() {
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, userTurns, azureContext: azureAvg }),
+        body: JSON.stringify({ language, userTurns, pronunciationContext: pronunciationAvg }),
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
       result = await res.json();
@@ -1064,7 +1064,7 @@ export default function Home() {
       {sessionStarted && phase === "done" && (
         <SessionResultsScreen
           cefrResult={cefrResult}
-          azureAvg={azureAvg}
+          pronunciationAvg={pronunciationAvg}
           evalFailed={evalFailed}
           audioBlobUrl={audioBlob ? audioBlobUrlRef.current : null}
           transcriptPanel={transcriptPanel}

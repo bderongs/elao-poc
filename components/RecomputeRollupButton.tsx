@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Re-derives an uploaded session's transcript + azure_scores from whatever
- * pronunciation-lab evaluations already exist — POST /api/sessions/:id/recompute.
+ * Re-derives an uploaded session's transcript + pronunciation_scores from
+ * whatever pronunciation-lab evaluations already exist — POST /api/sessions/:id/recompute.
  * Needed for sessions assessed before the auto-recompute-after-assess wiring
  * existed, or to pull in a manual override once that lands. Tucked into the
  * run-evaluation gear as a small link since it's a rare maintenance action,

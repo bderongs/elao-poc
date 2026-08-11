@@ -27,7 +27,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const results = await assessTurn(turnId, providers);
     // Uploaded/imported sessions only: fold the latest run of every turn into
-    // the session-level transcript + azure_scores so the existing CEFR eval
+    // the session-level transcript + pronunciation_scores so the existing CEFR eval
     // lab can score the session as a whole. No-op for real conversations.
     await recomputeSessionRollup(sessionId);
     return Response.json({ results });

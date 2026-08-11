@@ -57,9 +57,10 @@ export default async function AdminSessionDetailPage({
   // Every provider call is a fresh, paid API request with no caching (see
   // lib/pronunciation/assess.ts) — surface which providers already have a
   // complete score for this session so the gear doesn't invite re-billing
-  // for results we already have. A live conversation session's azure-ensemble
-  // pronunciation score and mistral CEFR eval come from the live flow itself
-  // (session.azure_scores / session.evaluation_json), never from the
+  // for results we already have. A live conversation session's
+  // LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (voxtral) pronunciation score
+  // and mistral CEFR eval come from the live flow itself
+  // (session.pronunciation_scores / session.evaluation_json), never from the
   // session_turn_evaluations/session_evaluations lab tables — same
   // attribution gap buildScoreBreakdown already accounts for above.
   const alreadyScoredPronunciationIds = pronunciationProviderOptions
@@ -67,7 +68,7 @@ export default async function AdminSessionDetailPage({
       (p) =>
         (session.source === "conversation" &&
           p.id === LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID &&
-          session.azure_scores != null) ||
+          session.pronunciation_scores != null) ||
         pronunciationProviderFullyCovered(turnEvaluations, p.id, turnsWithAudioIds)
     )
     .map((p) => p.id);
@@ -89,9 +90,10 @@ export default async function AdminSessionDetailPage({
     .filter((p) => isEvalProviderPending(evaluations, p.id))
     .map((p) => p.id);
 
-  // Whether a fresh azure-ensemble pronunciation-lab re-run exists for every
-  // recorded turn — i.e. there's something to promote over the live flow's
-  // original azure_scores (see PromoteHeadlineButton / promoteConversationRollup).
+  // Whether a fresh LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (voxtral)
+  // pronunciation-lab re-run exists for every recorded turn — i.e. there's
+  // something to promote over the live flow's original pronunciation_scores (see
+  // PromoteHeadlineButton / promoteConversationRollup).
   const canPromoteHeadline =
     session.source === "conversation" &&
     pronunciationProviderFullyCovered(turnEvaluations, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID, turnsWithAudioIds);
@@ -135,7 +137,7 @@ export default async function AdminSessionDetailPage({
         <div className={styles.scoreCardWrap}>
           <CefrPanel
             result={cefrResult}
-            azureAvg={session.azure_scores}
+            pronunciationAvg={session.pronunciation_scores}
             sourceLabel={breakdown.cefrSourceLabel ?? undefined}
             pronunciationSourceLabel={breakdown.pronunciationSourceLabel ?? undefined}
             showDetails={false}

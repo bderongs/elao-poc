@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { computeAzureAvg, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
+import { computePronunciationAvg, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/azure-stt";
 
@@ -9,11 +9,11 @@ import type { PronunciationResult } from "@/lib/azure-stt";
 // directly rather than round-tripping through their own API), so the
 // query/upload logic exists exactly once.
 
-// Includes evaluation_json/azure_scores/speechace_scores even for the list
-// view (not just detail) so the session table can show a full score
+// Includes evaluation_json/pronunciation_scores/speechace_scores even for the
+// list view (not just detail) so the session table can show a full score
 // breakdown on hover/click, not just the single global_score column.
 const SESSION_SUMMARY_COLUMNS =
-  "id, created_at, language, cefr_level, global_score, duration_seconds, source, evaluation_json, azure_scores, speechace_scores, user_id";
+  "id, created_at, language, cefr_level, global_score, duration_seconds, source, evaluation_json, pronunciation_scores, speechace_scores, user_id";
 const SESSION_DETAIL_COLUMNS = `${SESSION_SUMMARY_COLUMNS}, audio_url, source_url`;
 
 // ─── list / detail (read) ──────────────────────────────────────────────────
@@ -172,7 +172,7 @@ export async function createSessionFromForm(form: FormData): Promise<{ id: strin
   const globalScore = globalScoreRaw ? parseInt(globalScoreRaw, 10) : null;
   const scores = parseJsonField(form, "scores", null);
   const evaluation = parseJsonField(form, "evaluation", null);
-  const azureScores = parseJsonField(form, "azureScores", null);
+  const pronunciationScores = parseJsonField(form, "pronunciationScores", null);
   const turns = parseJsonField<TurnMeta[]>(form, "turns", []);
 
   const datePrefix = new Date().toISOString().slice(0, 10);
@@ -204,7 +204,7 @@ export async function createSessionFromForm(form: FormData): Promise<{ id: strin
       evaluation_json: evaluation,
       transcript: turns.map(({ role, content, pronunciation }) => ({ role, content, pronunciation })),
       audio_url: audioUrl,
-      azure_scores: azureScores,
+      pronunciation_scores: pronunciationScores,
     })
     .select("id")
     .single();
@@ -481,6 +481,26 @@ export async function createSpeechaceImportSession(reportUrl: string): Promise<{
   return { id: sessionId };
 }
 
+/**
+ * Imports a batch of Speechace report URLs, one session per URL. One bad
+ * URL doesn't sink the rest — mirrors the per-provider isolation pattern in
+ * runCefrEvaluation (lib/cefr-eval.ts).
+ */
+export async function createSpeechaceImportSessions(
+  urls: string[],
+): Promise<Array<{ url: string; id?: string; error?: string }>> {
+  return Promise.all(
+    urls.map(async (url) => {
+      try {
+        const { id } = await createSpeechaceImportSession(url);
+        return { url, id };
+      } catch (e) {
+        return { url, error: e instanceof Error ? e.message : String(e) };
+      }
+    }),
+  );
+}
+
 /** Appends another recording to an existing session — "add a recording if we have one". */
 export async function appendTurn(sessionId: string, form: FormData): Promise<UploadedTurn> {
   const supabase = getSupabaseServer();
@@ -534,13 +554,13 @@ export async function getTurnForAssessment(
 
 /**
  * Recomputes an uploaded/imported session's per-turn transcript + session-level
- * `azure_scores` from the LATEST pronunciation-lab run of each turn (across
- * all providers) — called after every assess run so "the global score" for
- * such a session always reflects the most recent evidence, per turn.
+ * `pronunciation_scores` from the LATEST pronunciation-lab run of each turn
+ * (across all providers) — called after every assess run so "the global
+ * score" for such a session always reflects the most recent evidence, per turn.
  *
  * Only touches `source: 'upload'` or `'speechace'` sessions: a real
- * conversation's transcript and azure_scores are the live flow's actual
- * output and must not be silently overwritten by ad-hoc replay runs.
+ * conversation's transcript and pronunciation_scores are the live flow's
+ * actual output and must not be silently overwritten by ad-hoc replay runs.
  *
  * If a turn's latest run failed, that turn drops out of the rollup (rather
  * than falling back to an older successful run) until it's reassessed — a
@@ -597,23 +617,31 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
 
   const { error: updateError } = await supabase
     .from("sessions")
-    .update({ azure_scores: computeAzureAvg(results) })
+    .update({ pronunciation_scores: computePronunciationAvg(results) })
     .eq("id", sessionId);
   if (updateError) throw new Error(updateError.message);
 }
 
 /**
- * Overwrites a live-conversation session's headline `azure_scores` with its
- * latest azure-ensemble pronunciation-lab re-run — the one deliberate way to
- * let a fresh replay (e.g. after adding DEEPGRAM_API_KEY, since
- * azure-ensemble silently falls back to Azure-only when Deepgram is
- * unavailable) become the number shown on the session, bypassing the
- * protection in recomputeSessionRollup. Unlike that function, this never
- * touches session_turns.content — the live transcript stays exactly what the
+ * Overwrites a live-conversation session's headline `pronunciation_scores`
+ * with its latest LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (currently
+ * voxtral) pronunciation-lab re-run — the one deliberate way to let a fresh
+ * replay (e.g. after a prompt/calibration tweak to that provider) become the
+ * number shown on the session, bypassing the protection in
+ * recomputeSessionRollup. Unlike that function, this never touches
+ * session_turns.content — the live transcript stays exactly what the
  * assistant actually replied to; only the score changes.
  *
- * Requires every recorded (audio) turn to already have a successful
- * azure-ensemble run — run it from the "run full evaluation" gear first.
+ * Requires every recorded (audio) turn to already have a successful run from
+ * that provider — run it from the "run full evaluation" gear first.
+ *
+ * M8 Track M (2026-08-10): switching the live default from azure-ensemble to
+ * voxtral deliberately does NOT bulk-migrate existing sessions' stored
+ * pronunciation_scores — decided with the client to leave historical
+ * headline scores as-is (as actually produced by the live flow at the time)
+ * and only apply voxtral going forward. This function remains the
+ * per-session, manually confirmed escape hatch for anyone who wants to
+ * re-promote an individual old session to the new default.
  */
 export async function promoteConversationRollup(sessionId: string): Promise<void> {
   const supabase = getSupabaseServer();
@@ -660,7 +688,7 @@ export async function promoteConversationRollup(sessionId: string): Promise<void
     const latest = latestByTurn.get(turnId);
     if (!latest || latest.error || !latest.result_json) {
       throw new Error(
-        "every recorded turn needs a successful azure-ensemble pronunciation-lab run before promoting — run it from the gear first",
+        `every recorded turn needs a successful ${LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID} pronunciation-lab run before promoting — run it from the gear first`,
       );
     }
     results.push(latest.result_json);
@@ -668,7 +696,7 @@ export async function promoteConversationRollup(sessionId: string): Promise<void
 
   const { error: updateError } = await supabase
     .from("sessions")
-    .update({ azure_scores: computeAzureAvg(results) })
+    .update({ pronunciation_scores: computePronunciationAvg(results) })
     .eq("id", sessionId)
     .eq("source", "conversation");
   if (updateError) throw new Error(updateError.message);

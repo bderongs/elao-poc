@@ -1,6 +1,6 @@
 import { scoreBarColor, CONFIDENCE_COLOR, ExplainerCard } from "@/components/ScoreDisplay";
 import { computeCompositeCefrScore } from "@/lib/cefr-score";
-import type { CefrResult, AzureAvg } from "@/lib/types";
+import type { CefrResult, PronunciationAvg } from "@/lib/types";
 import styles from "@/components/admin.module.css";
 
 const label: React.CSSProperties = { fontSize: 13, lineHeight: 1.6, color: "#cbd5e1" };
@@ -21,12 +21,12 @@ const exampleResult: CefrResult = {
   notable_errors: ['"he go" instead of "he goes"'],
   summary: "Confident, natural speaker with minor grammar slips.",
 };
-const exampleAzure: AzureAvg = { pronunciation: 90, wpm: 138, score: 90, count: 6, shortTurns: 0 };
-const composite = computeCompositeCefrScore(exampleResult, exampleAzure);
+const examplePronunciation: PronunciationAvg = { pronunciation: 90, wpm: 138, score: 90, count: 6, shortTurns: 0 };
+const composite = computeCompositeCefrScore(exampleResult, examplePronunciation);
 
 const accentGlobal = scoreBarColor(composite.score);
 const accentConfidence = CONFIDENCE_COLOR[exampleResult.confidence];
-const accentPronunciation = scoreBarColor(exampleAzure.pronunciation);
+const accentPronunciation = scoreBarColor(examplePronunciation.pronunciation);
 const accentFluency = scoreBarColor(exampleResult.dimensions.fluency! * 10);
 const accentVocab = scoreBarColor(exampleResult.dimensions.vocabulary_grammar! * 10);
 const accentCommunication = scoreBarColor(exampleResult.dimensions.communication! * 10);
@@ -91,7 +91,7 @@ export default function ScoringGuidePage() {
           </a>
         </div>
 
-        <LinkedBar href="#score-pronunciation" label="Pronunciation" value={exampleAzure.pronunciation / 10} max={10} />
+        <LinkedBar href="#score-pronunciation" label="Pronunciation" value={examplePronunciation.pronunciation / 10} max={10} />
         <LinkedBar href="#score-fluency" label="Fluency" value={exampleResult.dimensions.fluency!} max={10} />
         <LinkedBar href="#score-vocab" label="Vocab & Gram." value={exampleResult.dimensions.vocabulary_grammar!} max={10} />
         <LinkedBar href="#score-communication" label="Communication" value={exampleResult.dimensions.communication!} max={10} />

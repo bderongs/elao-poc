@@ -21,7 +21,7 @@ export interface CefrResult {
   summary: string;
 }
 
-export interface AzureAvg {
+export interface PronunciationAvg {
   pronunciation: number;
   wpm: number;
   score: number;
@@ -48,7 +48,7 @@ export interface SessionSummary {
   source: "conversation" | "upload" | "speechace";
   /** Present only for 'conversation' sessions — the live flow is the only writer of this column. */
   evaluation_json: CefrResult | null;
-  azure_scores: AzureAvg | null;
+  pronunciation_scores: PronunciationAvg | null;
   speechace_scores: SpeechaceScores | null;
   /** listSessions-only: latest successful eval-lab run, for sessions where evaluation_json is empty — see lib/cefr-score.ts's resolveCefrResult. */
   latest_eval_json?: CefrResult | null;

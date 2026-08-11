@@ -361,6 +361,6 @@ async function assess({
 
 export const azureEnsembleProvider: PronunciationProvider = {
   id: "azure-ensemble",
-  label: "Azure + Deepgram + Mistral judge",
+  label: "Azure + Deepgram + Mistral judge (additional assessment)",
   assess,
 };

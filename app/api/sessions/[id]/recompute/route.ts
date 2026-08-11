@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 
 /**
  * POST /api/sessions/:id/recompute
- * Re-derives an uploaded session's transcript + azure_scores from whatever
+ * Re-derives an uploaded session's transcript + pronunciation_scores from whatever
  * pronunciation-lab evaluations already exist, without re-running any
  * provider. Needed for sessions that were assessed before the automatic
  * recompute-after-assess wiring existed, or whenever the rollup otherwise

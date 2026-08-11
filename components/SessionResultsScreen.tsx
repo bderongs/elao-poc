@@ -3,7 +3,7 @@
 import { CefrPanel } from "@/components/ScoreDisplay";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { ClaimResultsForm } from "@/components/ClaimResultsForm";
-import type { CefrResult, AzureAvg } from "@/lib/types";
+import type { CefrResult, PronunciationAvg } from "@/lib/types";
 
 const FR_CEFR_LABELS = {
   eyebrow: "TON NIVEAU",
@@ -22,14 +22,14 @@ const FR_CEFR_LABELS = {
  */
 export function SessionResultsScreen({
   cefrResult,
-  azureAvg,
+  pronunciationAvg,
   evalFailed,
   audioBlobUrl,
   transcriptPanel,
   sessionId,
 }: {
   cefrResult: CefrResult | null;
-  azureAvg: AzureAvg | null;
+  pronunciationAvg: PronunciationAvg | null;
   evalFailed: boolean;
   audioBlobUrl: string | null;
   transcriptPanel: React.ReactNode;
@@ -62,7 +62,7 @@ export function SessionResultsScreen({
 
         {cefrResult && (
           <div style={{ boxShadow: "0 8px 30px rgba(0,0,0,0.35)", borderRadius: 12, overflow: "hidden" }}>
-            <CefrPanel result={cefrResult} azureAvg={azureAvg} labels={FR_CEFR_LABELS} />
+            <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={FR_CEFR_LABELS} />
           </div>
         )}
 

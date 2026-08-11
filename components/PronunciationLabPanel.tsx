@@ -60,7 +60,7 @@ export function PronunciationLabPanel({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       setEvaluations((prev) => [...(data.results ?? []), ...prev]);
-      // Picks up the recomputed turn transcript / session azure_scores
+      // Picks up the recomputed turn transcript / session pronunciation_scores
       // (uploaded sessions only — see recomputeSessionRollup).
       router.refresh();
     } catch (e) {

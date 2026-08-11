@@ -6,6 +6,7 @@ import type { SessionSummary } from "@/lib/types";
 import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { RecomputeRollupButton } from "@/components/RecomputeRollupButton";
 import { PromoteHeadlineButton } from "@/components/PromoteHeadlineButton";
+import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
 import styles from "./admin.module.css";
 
 export interface ProviderOption {
@@ -255,7 +256,9 @@ export function FullEvaluationPanel({
           />
         ))}
       </div>
-      {canPromoteHeadline && <PromoteHeadlineButton sessionId={sessionId} />}
+      {canPromoteHeadline && (
+        <PromoteHeadlineButton sessionId={sessionId} providerId={LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID} />
+      )}
 
       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6, marginTop: canPromoteHeadline ? 10 : 0 }}>
         Transcript (CEFR eval)

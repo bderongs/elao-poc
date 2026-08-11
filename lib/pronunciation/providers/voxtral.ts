@@ -48,6 +48,15 @@ Return ONLY JSON, no markdown fences, no commentary outside the JSON:
 // points below Speechace on the same recordings azure-ensemble scored 10-30
 // points above. This shift is a calibration fix for that gap, not a claim
 // that these numbers are independently "more correct" than Speechace's.
+//
+// Re-checked for M8 Track M (2026-08-10), now that this is the live/headline
+// score rather than a secondary comparison row: left unchanged. The client's
+// own review of real sessions — the thing that triggered switching the
+// default to Voxtral in the first place — was already looking at scores
+// produced by this exact map, so it's validated by that feedback, not just
+// by the original Speechace-comparison exercise. Revisit with fresh
+// Speechace-vs-Voxtral recordings if the client flags scores as off now that
+// they're the number shown by default (M-05 sibling task).
 const VERDICT_MAP: Record<string, { confidence: number; accuracyScore: number; errorType: string }> = {
   good: { confidence: 1.0, accuracyScore: 96, errorType: "None" },
   ok: { confidence: 0.75, accuracyScore: 82, errorType: "None" },
@@ -164,6 +173,6 @@ async function assess({
 
 export const voxtralProvider: PronunciationProvider = {
   id: "voxtral",
-  label: "Voxtral (direct audio, single call)",
+  label: "Voxtral (direct audio, single call) — default",
   assess,
 };

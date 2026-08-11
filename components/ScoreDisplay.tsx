@@ -1,5 +1,5 @@
 import type { PronunciationResult, WordScore } from "@/lib/azure-stt";
-import type { CefrResult, AzureAvg } from "@/lib/types";
+import type { CefrResult, PronunciationAvg } from "@/lib/types";
 import { scoreToLevel, computeCompositeCefrScore } from "@/lib/cefr-score";
 
 export { scoreToLevel };
@@ -9,7 +9,7 @@ export { scoreToLevel };
 // no hooks/browser APIs here, so this is safe to import from server
 // components too.
 
-export type { CefrResult, AzureAvg };
+export type { CefrResult, PronunciationAvg };
 
 // ─── colour helpers ──────────────────────────────────────────────────────────
 
@@ -113,14 +113,14 @@ export type CefrPanelLabels = Partial<typeof DEFAULT_CEFR_LABELS>;
 
 export function CefrPanel({
   result,
-  azureAvg,
+  pronunciationAvg,
   sourceLabel,
   pronunciationSourceLabel,
   showDetails = true,
   labels,
 }: {
   result: CefrResult;
-  azureAvg: AzureAvg | null;
+  pronunciationAvg: PronunciationAvg | null;
   sourceLabel?: string;
   pronunciationSourceLabel?: string;
   /** Strengths/to-improve/notable-errors/summary — off on the admin detail page, where lib/score-breakdown.ts's panel covers that ground per-category instead. */
@@ -130,12 +130,12 @@ export function CefrPanel({
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   // All 4 components on a 0-10 scale for uniform bar display
-  const pronScore  = azureAvg  ? azureAvg.pronunciation / 10 : null;
+  const pronScore  = pronunciationAvg  ? pronunciationAvg.pronunciation / 10 : null;
   const fluency    = result.dimensions.fluency;
   const vocabGram  = result.dimensions.vocabulary_grammar;
   const comm       = result.dimensions.communication;
 
-  const { score: compositeScore, level: compositeLevel } = computeCompositeCefrScore(result, azureAvg);
+  const { score: compositeScore, level: compositeLevel } = computeCompositeCefrScore(result, pronunciationAvg);
 
   const dim4: [string, number | null][] = [
     ["Pronunciation", pronScore],
@@ -194,7 +194,7 @@ export function CefrPanel({
           )
         )}
       </div>
-      {azureAvg && pronunciationSourceLabel && (
+      {pronunciationAvg && pronunciationSourceLabel && (
         <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: -4, marginBottom: 8 }}>
           Pronunciation via {pronunciationSourceLabel}
         </div>
@@ -271,16 +271,18 @@ export function UtteranceBadges({ p }: { p: PronunciationResult }) {
           {Math.round(val)}
         </span>
       ))}
-      {/* Source badge: DG = Deepgram confidence proxy (pending Azure), AZ = Azure phoneme scores */}
+      {/* Source badge: which pronunciation provider actually produced this score. */}
       <span
         title={
           p.source === "azure"
             ? "Scored by Azure Pronunciation Assessment (phoneme-level)"
+            : p.source === "voxtral"
+            ? "Scored by Voxtral (Mistral direct-audio judge)"
             : "Scored by Deepgram confidence — Azure assessment pending"
         }
         style={{
-          background: p.source === "azure" ? "#60a5fa" : "#475569",
-          color: p.source === "azure" ? "#000" : "#cbd5e1",
+          background: p.source === "azure" ? "#60a5fa" : p.source === "voxtral" ? "#c084fc" : "#475569",
+          color: p.source === "azure" || p.source === "voxtral" ? "#000" : "#cbd5e1",
           borderRadius: 3,
           padding: "1px 5px",
           fontSize: 10,
@@ -288,7 +290,7 @@ export function UtteranceBadges({ p }: { p: PronunciationResult }) {
           cursor: "help",
         }}
       >
-        {p.source === "azure" ? "AZ" : "DG"}
+        {p.source === "azure" ? "AZ" : p.source === "voxtral" ? "VX" : "DG"}
       </span>
     </div>
   );

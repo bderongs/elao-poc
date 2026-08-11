@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(git *)",
+      "Bash(npm run *)",
+      "mcp__supabase__list_tables",
+      "Bash(command -v *)",
+      "Bash(curl -sf -o /dev/null http://localhost:*)",
+      "mcp__supabase__list_migrations"
+    ]
+  }
+}

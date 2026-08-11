@@ -1,21 +1,23 @@
-import type { AzureAvg, TurnEvaluationRow } from "@/lib/types";
+import type { PronunciationAvg, TurnEvaluationRow } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/azure-stt";
 
 /**
  * The live conversation flow (app/api/pronunciation/route.ts) hardcodes
- * getProvider("azure-ensemble"), bypassing any provider choice — keep in
- * sync with lib/pronunciation/registry.ts's "azure-ensemble" entry if that
- * route ever stops hardcoding it.
+ * getProvider("voxtral"), bypassing any provider choice — keep in sync with
+ * lib/pronunciation/registry.ts's "voxtral" entry if that route ever stops
+ * hardcoding it. Was "azure-ensemble" until the client confirmed Voxtral
+ * looks better on real sessions (M8 Track M, 2026-08-10) — azure-ensemble
+ * remains available as an on-demand comparison run from the admin gear.
  */
-export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID = "azure-ensemble";
+export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID = "voxtral";
 
 /**
  * Session-level pronunciation aggregate from a set of per-turn results —
- * same formula as the live conversation UI's `azureAvg` (app/page.tsx),
+ * same formula as the live conversation UI's `pronunciationAvg` (app/page.tsx),
  * reimplemented here so uploaded sessions (no browser-side history array)
- * can get the same `AzureAvg` shape feeding into the CEFR eval prompt.
+ * can get the same `PronunciationAvg` shape feeding into the CEFR eval prompt.
  */
-export function computeAzureAvg(results: PronunciationResult[]): AzureAvg | null {
+export function computePronunciationAvg(results: PronunciationResult[]): PronunciationAvg | null {
   if (!results.length) return null;
 
   const avg = (key: "pronunciationScore" | "wpm") =>
@@ -45,8 +47,8 @@ export function computeAzureAvg(results: PronunciationResult[]): AzureAvg | null
 /**
  * A single provider's session-level pronunciation average — one turn's LATEST
  * successful run from that provider, averaged across all turns. Unlike
- * `computeAzureAvg` (which mixes whichever provider ran most recently per
- * turn), this isolates one provider so it can be compared head-to-head
+ * `computePronunciationAvg` (which mixes whichever provider ran most recently
+ * per turn), this isolates one provider so it can be compared head-to-head
  * against another, e.g. Azure vs. Voxtral against a Speechace import.
  */
 export function pronunciationScoreByProvider(turnEvaluations: TurnEvaluationRow[], providerId: string): number | null {
@@ -124,20 +126,21 @@ export function pronunciationProviderPending(
   );
 }
 
-export interface AzureAvgAttribution {
+export interface PronunciationAvgAttribution {
   providerIds: string[];
 }
 
 /**
  * Which pronunciation provider(s) actually fed the numbers currently sitting
- * in session.azure_scores — mirrors recomputeSessionRollup's own "first row
- * seen per turn_id, newest-first" selection (lib/sessions-service.ts) using
- * the turnEvaluations the caller already fetched (already ordered
- * created_at desc), so no extra query is needed. Only meaningful for
- * upload/speechace sessions: recomputeSessionRollup no-ops for
- * conversation sessions, whose azure_scores come from the live flow instead.
+ * in session.pronunciation_scores — mirrors recomputeSessionRollup's own
+ * "first row seen per turn_id, newest-first" selection
+ * (lib/sessions-service.ts) using the turnEvaluations the caller already
+ * fetched (already ordered created_at desc), so no extra query is needed.
+ * Only meaningful for upload/speechace sessions: recomputeSessionRollup
+ * no-ops for conversation sessions, whose pronunciation_scores come from the
+ * live flow instead.
  */
-export function azureAvgAttribution(turnEvaluations: TurnEvaluationRow[]): AzureAvgAttribution | null {
+export function pronunciationAvgAttribution(turnEvaluations: TurnEvaluationRow[]): PronunciationAvgAttribution | null {
   const latestByTurn = new Map<string, TurnEvaluationRow>();
   for (const row of turnEvaluations) {
     if (!latestByTurn.has(row.turn_id)) latestByTurn.set(row.turn_id, row);

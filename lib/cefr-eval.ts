@@ -4,7 +4,7 @@ import { getProvider } from "@/lib/llm/registry";
 import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore } from "@/lib/cefr-score";
 import type { ConvLang } from "@/lib/conversation-prompts";
-import type { AzureAvg, CefrResult, EvaluationRow } from "@/lib/types";
+import type { PronunciationAvg, CefrResult, EvaluationRow } from "@/lib/types";
 
 /**
  * The live conversation flow (app/api/evaluate/route.ts) calls
@@ -55,10 +55,10 @@ export function isEvalProviderPending(evaluations: EvaluationRow[], modelId: str
  * composite `CefrPanel` displays (LLM score_percent + the audio-pronunciation
  * excellence bonus, see lib/cefr-score.ts), not the raw score_percent alone.
  */
-export function globalScoreByModel(evaluations: EvaluationRow[], modelId: string, azureAvg: AzureAvg | null): number | null {
+export function globalScoreByModel(evaluations: EvaluationRow[], modelId: string, pronunciationAvg: PronunciationAvg | null): number | null {
   const result = latestEvaluationResult(evaluations, modelId);
   if (!result) return null;
-  return computeCompositeCefrScore(result, azureAvg).score;
+  return computeCompositeCefrScore(result, pronunciationAvg).score;
 }
 
 /**
@@ -76,7 +76,7 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
   const userMessage = buildEvaluationUserMessage(
     detail.session.language as ConvLang,
     userTurns,
-    detail.session.azure_scores ?? undefined,
+    detail.session.pronunciation_scores ?? undefined,
   );
 
   const supabase = getSupabaseServer();

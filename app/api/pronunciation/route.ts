@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const audioBuf = await audio.arrayBuffer();
 
   try {
-    const result = await getProvider("azure-ensemble").assess({
+    const result = await getProvider("voxtral").assess({
       audio: audioBuf,
       contentType,
       langCode,

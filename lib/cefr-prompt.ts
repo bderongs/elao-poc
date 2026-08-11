@@ -175,7 +175,7 @@ interface SttContext {
 export function buildEvaluationUserMessage(
   language: ConvLang,
   userTurns: string[],
-  sttContext?: SttContext,
+  pronunciationContext?: SttContext,
 ): string {
   const langLabel =
     language === "fr" ? "French" :
@@ -185,14 +185,14 @@ export function buildEvaluationUserMessage(
     language === "de" ? "German" :
     "English";
 
-  const shortPenalty = sttContext?.shortTurns
-    ? `\n  Short turns (< 6 words): ${sttContext.shortTurns}. NOTE: brief answers to simple warm-up questions ("I'm from Brussels", "Yes, one sister") are NORMAL and must NOT lower fluency. Only treat a short turn as a fluency problem if the speaker was clearly unable to produce more when the question called for it.`
+  const shortPenalty = pronunciationContext?.shortTurns
+    ? `\n  Short turns (< 6 words): ${pronunciationContext.shortTurns}. NOTE: brief answers to simple warm-up questions ("I'm from Brussels", "Yes, one sister") are NORMAL and must NOT lower fluency. Only treat a short turn as a fluency problem if the speaker was clearly unable to produce more when the question called for it.`
     : "";
 
-  const azureSection = sttContext
-    ? `\nSpeech recognition data (averaged over ${sttContext.count} turn${sttContext.count > 1 ? "s" : ""}):
-  Pronunciation confidence: ${Math.round(sttContext.pronunciation)}/100
-  Speaking rate:            ${Math.round(sttContext.wpm)} WPM
+  const pronunciationSection = pronunciationContext
+    ? `\nSpeech recognition data (averaged over ${pronunciationContext.count} turn${pronunciationContext.count > 1 ? "s" : ""}):
+  Pronunciation confidence: ${Math.round(pronunciationContext.pronunciation)}/100
+  Speaking rate:            ${Math.round(pronunciationContext.wpm)} WPM
   (Use the WPM figure to anchor the fluency dimension score per the mapping table above.)${shortPenalty}\n`
     : "";
 
@@ -205,7 +205,7 @@ export function buildEvaluationUserMessage(
 Number of turns: ${userTurns.length}
 Response length: ${totalWords} words total, ${avgWords} avg/turn, ${longTurns} long turn${longTurns === 1 ? "" : "s"} (≥ 25 words).
   (Apply LENGTH GENEROSITY for vocabulary_grammar: long, developed turns warrant the 8-9 band even with several errors — judge error density, not raw count.)
-${azureSection}
+${pronunciationSection}
 Interviewee's turns (in order, with word counts):
 
 ${userTurns.map((t, i) => `[Turn ${i + 1} · ${wordCounts[i]}w] ${t}`).join("\n")}

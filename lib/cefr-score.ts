@@ -1,4 +1,4 @@
-import type { CefrResult, AzureAvg, SpeechaceScores } from "@/lib/types";
+import type { CefrResult, PronunciationAvg, SpeechaceScores } from "@/lib/types";
 
 /** Derive CEFR level from composite score (5-point bands). */
 export function scoreToLevel(score: number): string {
@@ -33,8 +33,8 @@ export interface CompositeCefrScore {
  * than reading `result.score_percent` directly, which is the LLM's number
  * alone and doesn't account for our own measured pronunciation.
  */
-export function computeCompositeCefrScore(result: CefrResult, azureAvg: AzureAvg | null): CompositeCefrScore {
-  const pronScore = azureAvg ? azureAvg.pronunciation / 10 : null;
+export function computeCompositeCefrScore(result: CefrResult, pronunciationAvg: PronunciationAvg | null): CompositeCefrScore {
+  const pronScore = pronunciationAvg ? pronunciationAvg.pronunciation / 10 : null;
   const fluency = result.dimensions.fluency;
   const vocabGram = result.dimensions.vocabulary_grammar;
   const comm = result.dimensions.communication;
@@ -50,14 +50,14 @@ export function computeCompositeCefrScore(result: CefrResult, azureAvg: AzureAvg
 
 export interface SessionMainScore extends CompositeCefrScore {
   /** Which stored field the number came from — lets the UI label it honestly. */
-  source: "cefr" | "speechace" | "azure";
+  source: "cefr" | "speechace" | "pronunciation";
 }
 
 interface ScorableSession {
   cefr_level: string | null;
   global_score: number | null;
   evaluation_json: CefrResult | null;
-  azure_scores: AzureAvg | null;
+  pronunciation_scores: PronunciationAvg | null;
   speechace_scores: SpeechaceScores | null;
   /**
    * Fallback for upload/Speechace-import sessions: `evaluation_json` is only
@@ -80,13 +80,13 @@ function resolveCefrResult(session: ScorableSession): CefrResult | null {
  * The one headline number for a session row, picked from whichever score
  * field is actually populated for that session's source (see
  * SESSION_SUMMARY_COLUMNS): a live conversation has evaluation_json, an
- * uploaded recording may only have azure_scores, a Speechace import only
- * has speechace_scores. Returns null when nothing has been scored yet.
+ * uploaded recording may only have pronunciation_scores, a Speechace import
+ * only has speechace_scores. Returns null when nothing has been scored yet.
  */
 export function computeSessionMainScore(session: ScorableSession): SessionMainScore | null {
   const cefrResult = resolveCefrResult(session);
   if (cefrResult) {
-    return { ...computeCompositeCefrScore(cefrResult, session.azure_scores), source: "cefr" };
+    return { ...computeCompositeCefrScore(cefrResult, session.pronunciation_scores), source: "cefr" };
   }
   if (session.global_score != null && session.cefr_level) {
     return { score: session.global_score, level: session.cefr_level, source: "cefr" };
@@ -95,9 +95,9 @@ export function computeSessionMainScore(session: ScorableSession): SessionMainSc
     const score = Math.round(session.speechace_scores.overall);
     return { score, level: scoreToLevel(score), source: "speechace" };
   }
-  if (session.azure_scores?.score != null) {
-    const score = Math.round(session.azure_scores.score);
-    return { score, level: scoreToLevel(score), source: "azure" };
+  if (session.pronunciation_scores?.score != null) {
+    const score = Math.round(session.pronunciation_scores.score);
+    return { score, level: scoreToLevel(score), source: "pronunciation" };
   }
   return null;
 }
@@ -126,10 +126,10 @@ interface DimensionScore {
  * pronunciation-engine number per source) — not a per-dimension breakdown.
  * The session DETAIL page's per-category breakdown lives in
  * lib/score-breakdown.ts instead.
- * `azure_scores.score` is deliberately not a third "global" source: it's
- * literally `Math.round(azure_scores.pronunciation)` (see
- * lib/pronunciation-rollup.ts's computeAzureAvg), i.e. the same pronunciation
- * number again, not a distinct construct.
+ * `pronunciation_scores.score` is deliberately not a third "global" source:
+ * it's literally `Math.round(pronunciation_scores.pronunciation)` (see
+ * lib/pronunciation-rollup.ts's computePronunciationAvg), i.e. the same
+ * pronunciation number again, not a distinct construct.
  */
 export function sessionScoreBreakdown(session: ScorableSession): ScoreBreakdownGroup[] {
   const cefrResult = resolveCefrResult(session);
@@ -137,15 +137,15 @@ export function sessionScoreBreakdown(session: ScorableSession): ScoreBreakdownG
   const pronunciation: DimensionScore[] = [];
 
   if (cefrResult) {
-    const { score } = computeCompositeCefrScore(cefrResult, session.azure_scores);
+    const { score } = computeCompositeCefrScore(cefrResult, session.pronunciation_scores);
     global.push({ source: "Ours", value: score });
   }
   if (session.speechace_scores?.overall != null) {
     global.push({ source: "Speechace", value: session.speechace_scores.overall });
   }
 
-  if (session.azure_scores) {
-    pronunciation.push({ source: "Ours", value: session.azure_scores.pronunciation });
+  if (session.pronunciation_scores) {
+    pronunciation.push({ source: "Ours", value: session.pronunciation_scores.pronunciation });
   }
   if (session.speechace_scores?.pronunciation != null) {
     pronunciation.push({ source: "Speechace", value: session.speechace_scores.pronunciation });

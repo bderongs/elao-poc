@@ -16,11 +16,11 @@ interface SttContext {
 interface EvalRequest {
   language: ConvLang;
   userTurns: string[];
-  azureContext?: SttContext | null;
+  pronunciationContext?: SttContext | null;
 }
 
 export async function POST(req: Request) {
-  const { language, userTurns, azureContext } = (await req.json()) as EvalRequest;
+  const { language, userTurns, pronunciationContext } = (await req.json()) as EvalRequest;
 
   if (!userTurns.length) {
     return NextResponse.json(
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       messages: [
         {
           role: "user",
-          content: buildEvaluationUserMessage(language, userTurns, azureContext ?? undefined),
+          content: buildEvaluationUserMessage(language, userTurns, pronunciationContext ?? undefined),
         },
       ],
       maxTokens: 1500,

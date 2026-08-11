@@ -2,7 +2,7 @@ import { computeCompositeCefrScore } from "@/lib/cefr-score";
 import { globalScoreByModel, latestEvaluationResult, LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
 import {
   pronunciationScoreByProvider,
-  azureAvgAttribution,
+  pronunciationAvgAttribution,
   LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID,
 } from "@/lib/pronunciation-rollup";
 import type { CefrResult, EvaluationRow, TurnEvaluationRow, SessionDetailRow } from "@/lib/types";
@@ -58,10 +58,10 @@ type Dimension = "fluency" | "vocabulary_grammar" | "communication";
  * tables — empty for a conversation session that's never been replayed
  * through either lab, even though the headline card is clearly showing a
  * value from the live flow's own cache (session.evaluation_json /
- * session.azure_scores). Every category here prefers that displayed value
- * for whichever model/provider is actually attributed as "current" and only
- * falls back to the lab tables for every other row — so the row matching
- * what's on screen is never wrongly labeled "not yet run".
+ * session.pronunciation_scores). Every category here prefers that displayed
+ * value for whichever model/provider is actually attributed as "current" and
+ * only falls back to the lab tables for every other row — so the row
+ * matching what's on screen is never wrongly labeled "not yet run".
  */
 export function buildScoreBreakdown(params: {
   session: SessionDetailRow;
@@ -72,7 +72,7 @@ export function buildScoreBreakdown(params: {
   pronunciationProviderOptions: ProviderOption[];
 }): ScoreBreakdown {
   const { session, cefrResult, evaluations, turnEvaluations, providerOptions, pronunciationProviderOptions } = params;
-  const azureAvg = session.azure_scores;
+  const pronunciationAvg = session.pronunciation_scores;
 
   const latestEvalRow = evaluations.find((e) => !e.error && e.result_json) ?? null;
   const cefrSourceId = session.evaluation_json ? LIVE_CONVERSATION_MODEL_ID : latestEvalRow?.model_id ?? null;
@@ -82,10 +82,10 @@ export function buildScoreBreakdown(params: {
 
   const pronunciationProviderIds =
     session.source === "conversation"
-      ? session.azure_scores
+      ? session.pronunciation_scores
         ? [LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID]
         : []
-      : azureAvgAttribution(turnEvaluations)?.providerIds ?? [];
+      : pronunciationAvgAttribution(turnEvaluations)?.providerIds ?? [];
   const pronunciationSourceId = pronunciationProviderIds.length === 1 ? pronunciationProviderIds[0] : null;
   const pronunciationSourceLabel =
     pronunciationProviderIds.length === 1
@@ -99,8 +99,8 @@ export function buildScoreBreakdown(params: {
     label: p.label,
     score:
       p.id === cefrSourceId && cefrResult
-        ? computeCompositeCefrScore(cefrResult, azureAvg).score
-        : globalScoreByModel(evaluations, p.id, azureAvg),
+        ? computeCompositeCefrScore(cefrResult, pronunciationAvg).score
+        : globalScoreByModel(evaluations, p.id, pronunciationAvg),
   }));
 
   const confidenceRows: ConfidenceRow[] = providerOptions.map((p) => ({
@@ -123,17 +123,18 @@ export function buildScoreBreakdown(params: {
       return { id: p.id, label: p.label, score: raw != null ? raw * 10 : null };
     });
 
-  // For a conversation session's single attributed provider, azure_scores IS
-  // the authoritative live number — recomputeSessionRollup no-ops for
-  // conversation sessions, so an ad-hoc single-turn lab rerun never feeds
-  // back into it and pronunciationScoreByProvider could disagree with what's
-  // actually displayed above.
+  // For a conversation session's single attributed provider,
+  // pronunciation_scores IS the authoritative live number —
+  // recomputeSessionRollup no-ops for conversation sessions, so an ad-hoc
+  // single-turn lab rerun never feeds back into it and
+  // pronunciationScoreByProvider could disagree with what's actually
+  // displayed above.
   const pronunciationRows: ScoreRow[] = pronunciationProviderOptions.map((p) => ({
     id: p.id,
     label: p.label,
     score:
-      session.source === "conversation" && p.id === pronunciationSourceId && azureAvg
-        ? azureAvg.pronunciation
+      session.source === "conversation" && p.id === pronunciationSourceId && pronunciationAvg
+        ? pronunciationAvg.pronunciation
         : pronunciationScoreByProvider(turnEvaluations, p.id),
   }));
 

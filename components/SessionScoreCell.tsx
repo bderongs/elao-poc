@@ -10,7 +10,7 @@ import styles from "@/components/admin.module.css";
 const SOURCE_LABEL: Record<string, string> = {
   cefr: "our CEFR assessment",
   speechace: "Speechace",
-  azure: "pronunciation engine",
+  pronunciation: "pronunciation engine",
 };
 
 // Grace period between leaving the badge/popover and actually closing, so
