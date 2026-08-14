@@ -39,7 +39,8 @@
       "Bash(python3 -m json.tool out_en2.json)",
       "Bash(node /private/tmp/claude-501/-Users-baptiste-ELAO-Speaking/0fac019c-1b10-4909-a8f9-32e22dd25de4/scratchpad/wpmcheck.mjs)",
       "Bash(npx tsx *)",
-      "Bash(curl -s \"https://www.elao-test.com/wp-content/uploads/sites/2/2024/02/ELAO_RVB.svg\" -o /Users/baptiste/ELAO-Speaking/public/images/elao-logo.svg)"
+      "Bash(curl -s \"https://www.elao-test.com/wp-content/uploads/sites/2/2024/02/ELAO_RVB.svg\" -o /Users/baptiste/ELAO-Speaking/public/images/elao-logo.svg)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

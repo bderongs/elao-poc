@@ -11,6 +11,30 @@ import type { ConvLang } from "@/lib/conversation-prompts";
 // edits stays distinguishable from drift across models.
 export const CEFR_PROMPT_VERSION = "v1";
 
+// Single source of truth for the WPM → fluency mapping baked into
+// CEFR_SYSTEM_PROMPT below — also read by the admin system-config page to
+// show the live bands in a tooltip, so that display can never drift from
+// what the judge is actually told.
+export const FLUENCY_WPM_BANDS: { range: string; fluency: string; note: string }[] = [
+  { range: "< 35", fluency: "1", note: "A0 — barely produces connected speech" },
+  { range: "35-44", fluency: "2", note: "A0/A1 — heavily laboured" },
+  { range: "45-54", fluency: "3", note: "A1 — slow, frequent stops" },
+  { range: "55-69", fluency: "4-5", note: "A2 — below natural pace but functional" },
+  { range: "70-84", fluency: "5-6", note: "A2/B1 — some hesitation, ideas come through" },
+  { range: "85-99", fluency: "6-7", note: "B1 — approaching natural conversational pace" },
+  { range: "100-114", fluency: "7-8", note: "B1/B2 — mostly natural, occasional pause" },
+  { range: "115-129", fluency: "8", note: "B2/C1 — natural conversational pace" },
+  { range: "130-144", fluency: "9", note: "C1/C2 — smooth, effortless delivery" },
+  { range: "≥ 145", fluency: "10", note: "C2 — fully native-like rate" },
+];
+
+export const FLUENCY_WPM_HARD_BOUNDARIES = {
+  lowWpm: 45,
+  lowFluencyMax: 3,
+  highWpm: 130,
+  highFluencyMin: 9,
+};
+
 export const CEFR_SYSTEM_PROMPT = `You are an expert oral language assessor with extensive experience evaluating spoken language proficiency in interview settings.
 
 Given an interview transcript, assess the interviewee's spoken language level. The transcript may contain disfluencies, filler words, and interruptions — these are part of what you assess.
@@ -133,19 +157,10 @@ ASR transcription errors — CRITICAL:
     • Never penalise a learner for attempting ambitious sentences that contain errors more than one who plays it safe with short correct ones — the ambitious longer producer is the stronger candidate and must score at least as high.
 Words per minute (WPM) → fluency dimension mapping (when provided):
 Fluency in speech correlates with speaking rate. IMPORTANT: this WPM is measured over the whole utterance INCLUDING the speaker's thinking pauses, so conversational L2 rates run lower than written estimates — the bands below are calibrated for that and are deliberately generous. Use this scale to anchor fluency:
-- WPM < 40   → fluency 1   (A0 — barely produces connected speech)
-- WPM 40-49  → fluency 2   (A0/A1 — heavily laboured)
-- WPM 50-59  → fluency 3   (A1 — slow, frequent stops)
-- WPM 60-74  → fluency 4-5 (A2 — below natural pace but functional)
-- WPM 75-89  → fluency 5-6 (A2/B1 — some hesitation, ideas come through)
-- WPM 90-104 → fluency 6-7 (B1 — approaching natural conversational pace)
-- WPM 105-119 → fluency 7-8 (B1/B2 — mostly natural, occasional pause)
-- WPM 120-134 → fluency 8  (B2/C1 — natural conversational pace)
-- WPM 135-149 → fluency 9  (C1/C2 — smooth, effortless delivery)
-- WPM ≥ 150  → fluency 10  (C2 — fully native-like rate)
+${FLUENCY_WPM_BANDS.map((b) => `- WPM ${b.range} → fluency ${b.fluency} (${b.note})`).join("\n")}
 Hard boundaries:
-- WPM < 50  → fluency ≤ 3 (only this far down is a genuine fluency problem)
-- WPM ≥ 135 → fluency ≥ 9 regardless of occasional hesitations in the transcript
+- WPM < ${FLUENCY_WPM_HARD_BOUNDARIES.lowWpm}  → fluency ≤ ${FLUENCY_WPM_HARD_BOUNDARIES.lowFluencyMax} (only this far down is a genuine fluency problem)
+- WPM ≥ ${FLUENCY_WPM_HARD_BOUNDARIES.highWpm} → fluency ≥ ${FLUENCY_WPM_HARD_BOUNDARIES.highFluencyMin} regardless of occasional hesitations in the transcript
 When the measured WPM sits on a band boundary, choose the HIGHER fluency value — pause-inclusive WPM understates real fluency.
 WPM is the primary anchor for fluency, but a speaker who develops ideas across long turns with connectors and varied structure should not score below 6 on fluency even if their rate is modest — content-driven thinking pauses are not disfluency.
 
