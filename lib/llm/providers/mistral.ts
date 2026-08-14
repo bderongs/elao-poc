@@ -4,8 +4,8 @@ import type { LlmProvider } from "../types";
 export const mistralProvider: LlmProvider = {
   id: "mistral",
   label: "Mistral",
-  defaultModel: mistralModel(),
+  modelLabel: mistralModel(),
   async complete(params) {
-    return mistralComplete({ ...params, context: "eval-lab" });
+    return mistralComplete({ ...params, context: params.context ?? "eval-lab" });
   },
 };

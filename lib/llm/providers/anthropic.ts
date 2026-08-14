@@ -13,7 +13,7 @@ function client(): Anthropic {
 export const anthropicProvider: LlmProvider = {
   id: "anthropic",
   label: "Anthropic Claude",
-  defaultModel: DEFAULT_MODEL,
+  modelLabel: DEFAULT_MODEL,
   async complete({ model, system, messages, maxTokens }) {
     const res = await client().messages.create({
       model: model ?? DEFAULT_MODEL,

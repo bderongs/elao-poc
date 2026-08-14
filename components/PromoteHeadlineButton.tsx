@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 /**
  * Overwrites a live-conversation session's headline pronunciation_scores with its
  * latest re-run from LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (see
- * lib/pronunciation-rollup.ts — currently voxtral) — POST
+ * lib/pronunciation-rollup.ts — currently azure-ensemble) — POST
  * /api/sessions/:id/promote-rollup. Deliberately bypasses the normal
  * protection that keeps a conversation session's headline score as the live
  * flow's original output (see promoteConversationRollup in

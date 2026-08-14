@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { computePronunciationAvg, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
+import { getSystemConfig } from "@/lib/system-config";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
-import type { PronunciationResult } from "@/lib/azure-stt";
+import type { PronunciationResult } from "@/lib/pronunciation/types";
 
 // Single source of truth for reading/writing sessions — used by both the
 // /api/sessions* route handlers and the admin pages (which call these
@@ -14,7 +15,7 @@ import type { PronunciationResult } from "@/lib/azure-stt";
 // breakdown on hover/click, not just the single global_score column.
 const SESSION_SUMMARY_COLUMNS =
   "id, created_at, language, cefr_level, global_score, duration_seconds, source, evaluation_json, pronunciation_scores, speechace_scores, user_id";
-const SESSION_DETAIL_COLUMNS = `${SESSION_SUMMARY_COLUMNS}, audio_url, source_url`;
+const SESSION_DETAIL_COLUMNS = `${SESSION_SUMMARY_COLUMNS}, audio_url, source_url, providers_json`;
 
 // ─── list / detail (read) ──────────────────────────────────────────────────
 
@@ -205,6 +206,12 @@ export async function createSessionFromForm(form: FormData): Promise<{ id: strin
       transcript: turns.map(({ role, content, pronunciation }) => ({ role, content, pronunciation })),
       audio_url: audioUrl,
       pronunciation_scores: pronunciationScores,
+      // Snapshot of which provider/model each capability used — read fresh
+      // here rather than accepted from the client, since it must reflect
+      // what the server actually ran. Accurate because config is static per
+      // running server process (no per-session override exists today) — see
+      // lib/system-config.ts.
+      providers_json: getSystemConfig(),
     })
     .select("id")
     .single();
@@ -625,7 +632,7 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
 /**
  * Overwrites a live-conversation session's headline `pronunciation_scores`
  * with its latest LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (currently
- * voxtral) pronunciation-lab re-run — the one deliberate way to let a fresh
+ * azure-ensemble) pronunciation-lab re-run — the one deliberate way to let a fresh
  * replay (e.g. after a prompt/calibration tweak to that provider) become the
  * number shown on the session, bypassing the protection in
  * recomputeSessionRollup. Unlike that function, this never touches

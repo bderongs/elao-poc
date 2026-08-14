@@ -7,18 +7,37 @@
  * Call addMicStream() to also route the user's mic into recordingDest,
  * then getRecordingStream() to hand the combined (TTS + mic) stream to
  * SessionRecorder. This produces a full-session recording of both sides.
+ *
+ * An AnalyserNode (avatarAnalyser) is also fed from every chunk, in this
+ * SAME AudioContext — getAvatarAnalyser()/getAudioContext() hand both to the
+ * avatar component so wawa-lipsync can drive real-time lip-sync directly off
+ * the exact signal already playing to the speakers, with no MediaStream/
+ * cross-AudioContext bridging (an earlier version routed through a second,
+ * separate AudioContext via a hidden <audio> element — dropped because it
+ * added several silent-failure points for no benefit; this one is simpler
+ * and taps the real signal directly).
  */
 
 export class StreamingAudioPlayer {
   private audioContext: AudioContext | null = null;
   /** Receives both TTS chunks and mic audio for the session recording. */
   private recordingDest: MediaStreamAudioDestinationNode | null = null;
+  /** Receives TTS chunks only, for avatar lip-sync analysis. */
+  private avatarAnalyser: AnalyserNode | null = null;
   private nextStartTime = 0;
   private isPlaying = false;
   private onAmplitudeChange?: (amp: number) => void;
+  private onSentenceStart?: (text: string, durationMs: number) => void;
+  /** setTimeout ids for pending onSentenceStart callbacks — cancelled on stop() so
+   *  nothing fires after the player (and the AudioContext it timed against) is gone. */
+  private pendingSentenceTimeouts: ReturnType<typeof setTimeout>[] = [];
 
-  constructor(onAmplitudeChange?: (amp: number) => void) {
+  constructor(
+    onAmplitudeChange?: (amp: number) => void,
+    onSentenceStart?: (text: string, durationMs: number) => void
+  ) {
     this.onAmplitudeChange = onAmplitudeChange;
+    this.onSentenceStart = onSentenceStart;
   }
 
   /**
@@ -37,6 +56,10 @@ export class StreamingAudioPlayer {
       // to resample at the driver level, which introduces quantisation noise.
       this.audioContext = new AudioContext();
       this.recordingDest = this.audioContext.createMediaStreamDestination();
+      this.avatarAnalyser = this.audioContext.createAnalyser();
+      // Match wawa-lipsync's own default fftSize (2048) — its band-analysis
+      // math (binWidth = sampleRate / fftSize) assumes this unless told otherwise.
+      this.avatarAnalyser.fftSize = 2048;
       this.nextStartTime = this.audioContext.currentTime;
     }
     // Call resume() fire-and-forget. Scheduled sources are queued by the Web
@@ -76,11 +99,33 @@ export class StreamingAudioPlayer {
   }
 
   /**
+   * Returns an AnalyserNode fed by TTS chunks only (no mic), on this
+   * player's own AudioContext, for the avatar's real-time lip-sync analysis.
+   * Available after init() has been called. Pair with getAudioContext().
+   */
+  getAvatarAnalyser(): AnalyserNode | null {
+    return this.avatarAnalyser;
+  }
+
+  /** The AudioContext getAvatarAnalyser()'s node belongs to. */
+  getAudioContext(): AudioContext | null {
+    return this.audioContext;
+  }
+
+  /**
    * Reçoit un chunk PCM linear16 (Int16) 24 kHz en base64,
    * le convertit en Float32 et le programme dans la timeline.
    * Synchronous — must stay synchronous to avoid scheduling races.
+   *
+   * `text` (optional) is the sentence this chunk's audio was synthesized
+   * from. When given, onSentenceStart fires at the moment this chunk
+   * actually starts playing (not when it's received/decoded — chunks queue
+   * behind whatever's still playing via nextStartTime below), with the
+   * chunk's real duration. The caller uses this to reveal the caption in
+   * step with playback instead of as soon as the text streams in from the
+   * LLM, which can be seconds ahead of the corresponding audio.
    */
-  playChunk(base64Pcm: string) {
+  playChunk(base64Pcm: string, text?: string) {
     const ctx = this.ensureContext();
 
     // base64 → bytes → Int16 → Float32
@@ -114,9 +159,11 @@ export class StreamingAudioPlayer {
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
-    // Route to speakers AND the session recording destination.
+    // Route to speakers, the session recording destination, and the
+    // avatar lip-sync analyser.
     source.connect(ctx.destination);
     if (this.recordingDest) source.connect(this.recordingDest);
+    if (this.avatarAnalyser) source.connect(this.avatarAnalyser);
 
     // If we've fallen behind real-time (e.g. a hiccup), add a 20 ms lookahead
     // so the audio engine has time to prepare the buffer before playback.
@@ -125,6 +172,15 @@ export class StreamingAudioPlayer {
     source.start(startAt);
     this.nextStartTime = startAt + buffer.duration;
     this.isPlaying = true;
+
+    if (text && this.onSentenceStart) {
+      const delayMs = Math.max(0, (startAt - now) * 1000);
+      const durationMs = buffer.duration * 1000;
+      const timeoutId = setTimeout(() => {
+        this.onSentenceStart?.(text, durationMs);
+      }, delayMs);
+      this.pendingSentenceTimeouts.push(timeoutId);
+    }
 
     source.onended = () => {
       if (ctx.currentTime >= this.nextStartTime - 0.05) {
@@ -135,9 +191,12 @@ export class StreamingAudioPlayer {
   }
 
   stop() {
+    this.pendingSentenceTimeouts.forEach((id) => clearTimeout(id));
+    this.pendingSentenceTimeouts = [];
     this.audioContext?.close();
     this.audioContext = null;
     this.recordingDest = null;
+    this.avatarAnalyser = null;
     this.nextStartTime = 0;
     this.isPlaying = false;
   }

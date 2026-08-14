@@ -3,11 +3,13 @@ import { notFound } from "next/navigation";
 import { getSessionDetail } from "@/lib/sessions-service";
 import { CefrPanel, UserWords, UtteranceBadges, wordColor } from "@/components/ScoreDisplay";
 import { PronunciationLabPanel } from "@/components/PronunciationLabPanel";
+import { SttLabPanel } from "@/components/SttLabPanel";
 import { AddRecordingButton } from "@/components/AddRecordingButton";
 import { RunEvaluationGear } from "@/components/RunEvaluationGear";
 import { ScoreBreakdownPanel } from "@/components/ScoreBreakdownPanel";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { ProviderConfigTable } from "@/components/ProviderConfigTable";
 import { listProviders } from "@/lib/llm/registry";
 import { listProviders as listPronunciationProviders } from "@/lib/pronunciation/registry";
 import { buildScoreBreakdown } from "@/lib/score-breakdown";
@@ -58,7 +60,7 @@ export default async function AdminSessionDetailPage({
   // lib/pronunciation/assess.ts) — surface which providers already have a
   // complete score for this session so the gear doesn't invite re-billing
   // for results we already have. A live conversation session's
-  // LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (voxtral) pronunciation score
+  // LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (azure-ensemble) pronunciation score
   // and mistral CEFR eval come from the live flow itself
   // (session.pronunciation_scores / session.evaluation_json), never from the
   // session_turn_evaluations/session_evaluations lab tables — same
@@ -90,7 +92,7 @@ export default async function AdminSessionDetailPage({
     .filter((p) => isEvalProviderPending(evaluations, p.id))
     .map((p) => p.id);
 
-  // Whether a fresh LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (voxtral)
+  // Whether a fresh LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (azure-ensemble)
   // pronunciation-lab re-run exists for every recorded turn — i.e. there's
   // something to promote over the live flow's original pronunciation_scores (see
   // PromoteHeadlineButton / promoteConversationRollup).
@@ -168,6 +170,20 @@ export default async function AdminSessionDetailPage({
       />
 
       <div style={{ marginTop: 24 }}>
+        <CollapsibleSection title="Configuration used">
+          {session.providers_json ? (
+            <ProviderConfigTable config={session.providers_json} />
+          ) : (
+            <div className={styles.emptyState}>
+              Not recorded — this session was saved before per-session
+              provider tracking existed, or has no live turn pipeline
+              (upload/Speechace import).
+            </div>
+          )}
+        </CollapsibleSection>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
         <CollapsibleSection title="Transcript">
           <div className={styles.turnList}>
             {turns.map((t) => (
@@ -192,6 +208,9 @@ export default async function AdminSessionDetailPage({
                     providers={pronunciationProviderOptions}
                     initialEvaluations={turnEvaluations.filter((e) => e.turn_id === t.id)}
                   />
+                )}
+                {t.role === "user" && t.audio_url && (
+                  <SttLabPanel sessionId={session.id} turnId={t.id} originalText={t.content} />
                 )}
               </div>
             ))}

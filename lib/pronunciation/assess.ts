@@ -1,7 +1,12 @@
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { getTurnForAssessment } from "@/lib/sessions-service";
 import { getProvider } from "@/lib/pronunciation/registry";
+import { getProvider as getSttProvider, LIVE_STT_PROVIDER_ID } from "@/lib/stt/registry";
 import type { TurnEvaluationRow } from "@/lib/types";
+
+function audioExtension(contentType: string): string {
+  return contentType.includes("wav") ? "wav" : contentType.includes("mp4") ? "m4a" : "webm";
+}
 
 /**
  * Runs one recording through one or more pronunciation providers and persists
@@ -26,6 +31,30 @@ export async function assessTurn(turnId: string, providerIds: string[]): Promise
   // run toward agreeing with that earlier transcript instead of hearing the
   // audio independently.
   const referenceText = turn.source === "conversation" ? turn.content || undefined : undefined;
+
+  // Voxtral (the default provider) has no independent duration signal of its
+  // own — a live turn gets a real one from the STT step that already runs
+  // ahead of it (lib/turn-vad.ts / app/api/transcribe/route.ts); a replayed
+  // turn here has no equivalent step, so without this it silently falls back
+  // to 0 (see lib/pronunciation/providers/voxtral.ts's clientWpm fallback),
+  // which then poisons the WPM-anchored fluency dimension of any CEFR read
+  // that uses this session's rollup (lib/cefr-prompt.ts). Probe it once per
+  // turn (shared across all requested providers, not once each) using the
+  // same STT registry the live path uses. Best-effort: azure-ensemble
+  // computes its own, more accurate wpm from Azure's own timing and only
+  // falls back to this on failure — see azure-ensemble.ts's own `wpm` calc.
+  let clientWpm = 0;
+  try {
+    const sttResult = await getSttProvider(LIVE_STT_PROVIDER_ID).transcribe({
+      audio: audioBuf,
+      contentType,
+      filename: `turn.${audioExtension(contentType)}`,
+      langCode: turn.language,
+    });
+    clientWpm = sttResult.wpm;
+  } catch (e) {
+    console.warn(`[assess] wpm probe failed for turn ${turnId}:`, e);
+  }
 
   return Promise.all(
     providerIds.map(async (providerId) => {
@@ -53,6 +82,7 @@ export async function assessTurn(turnId: string, providerIds: string[]): Promise
           contentType,
           langCode: turn.language,
           referenceText,
+          clientWpm,
         });
         const durationMs = Date.now() - startedAt;
 

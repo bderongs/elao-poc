@@ -1,15 +1,19 @@
 import type { PronunciationAvg, TurnEvaluationRow } from "@/lib/types";
-import type { PronunciationResult } from "@/lib/azure-stt";
+import type { PronunciationResult } from "@/lib/pronunciation/types";
 
 /**
- * The live conversation flow (app/api/pronunciation/route.ts) hardcodes
- * getProvider("voxtral"), bypassing any provider choice — keep in sync with
- * lib/pronunciation/registry.ts's "voxtral" entry if that route ever stops
- * hardcoding it. Was "azure-ensemble" until the client confirmed Voxtral
- * looks better on real sessions (M8 Track M, 2026-08-10) — azure-ensemble
- * remains available as an on-demand comparison run from the admin gear.
+ * The single source of truth for which lib/pronunciation/registry.ts
+ * provider is live — app/api/pronunciation/route.ts calls
+ * getProvider(LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID) directly, so this
+ * constant IS the switch, not just a label for one. Was "azure-ensemble"
+ * until the client confirmed Voxtral looks better on real sessions (M8
+ * Track M, 2026-08-10); switched back to "azure-ensemble" on 2026-08-14 at
+ * the client's request (Azure + Deepgram evidence, judged by Mistral) — voxtral
+ * remains registered and available as an on-demand comparison run from the
+ * admin gear. See lib/system-config.ts, which surfaces this (and the other 4
+ * capabilities' live provider) in the admin UI and per-session logs/records.
  */
-export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID = "voxtral";
+export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID = "azure-ensemble";
 
 /**
  * Session-level pronunciation aggregate from a set of per-turn results —

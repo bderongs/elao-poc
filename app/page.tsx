@@ -2,11 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { AzureSTT, type PronunciationResult, type WordScore } from "@/lib/azure-stt";
+import { TurnVad } from "@/lib/turn-vad";
+import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
-import type { LiveAvatarHandle } from "@/components/LiveAvatar";
+import { logClientEvent } from "@/lib/client-log";
+import { isCefrRung, type CefrRung } from "@/lib/cefr-rung";
+import { isTopicDomain, type TopicDomain } from "@/lib/topic-domain";
+import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
 import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { EvaluatingScreen } from "@/components/EvaluatingScreen";
 import { SessionResultsScreen } from "@/components/SessionResultsScreen";
@@ -19,26 +23,10 @@ import {
   type CefrResult,
 } from "@/components/ScoreDisplay";
 
-const Avatar = dynamic(
-  () => import("@/components/Avatar").then((m) => m.Avatar),
+const TalkingHeadAvatar = dynamic(
+  () => import("@/components/TalkingHeadAvatar").then((m) => m.TalkingHeadAvatar),
   { ssr: false }
 );
-
-const LiveAvatar = dynamic(
-  () => import("@/components/LiveAvatar").then((m) => m.LiveAvatar),
-  { ssr: false }
-);
-
-const USE_HEYGEN = process.env.NEXT_PUBLIC_HEYGEN_ENABLED === "true";
-
-/** Best-effort: ships a client-side failure to logs/server-*.log. Never throws, never blocks the caller. */
-function logClientEvent(event: string, data: Record<string, unknown>) {
-  fetch("/api/client-log", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ event, data }),
-  }).catch(() => {});
-}
 
 type Lang = "fr" | "en" | "nl-BE" | "es" | "it" | "de";
 
@@ -66,7 +54,7 @@ export default function Home() {
   const [history, setHistory] = useState<Msg[]>([]);
   const [partialUser, setPartialUser] = useState("");
   const [streamingAssistant, setStreamingAssistant] = useState("");
-  const [amplitude, setAmplitude] = useState(0);
+  const [avatarAnalyser, setAvatarAnalyser] = useState<AnalyserNode | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [cefrResult, setCefrResult] = useState<CefrResult | null>(null);
   /** "active": conversation + single end button. "evaluating": full-screen takeover. "done": results. */
@@ -84,14 +72,54 @@ export default function Home() {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const audioBlobUrlRef = useRef<string | null>(null);
 
-  const sttRef = useRef<AzureSTT | null>(null);
+  const vadRef = useRef<TurnVad | null>(null);
   const playerRef = useRef<StreamingAudioPlayer | null>(null);
-  const liveAvatarRef = useRef<LiveAvatarHandle | null>(null);
+  /** setTimeout ids for the in-progress caption word-reveal — cleared whenever a
+   *  turn starts fresh or the session ends, so a stale reveal never bleeds text
+   *  from a finished/aborted turn into the next one. */
+  const revealTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const recorderRef = useRef<SessionRecorder | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
   const isSpeakingRef = useRef(false);
   const sessionSavedRef = useRef(false);
+  /**
+   * Difficulty rung to target the NEXT examiner question — set by ET's most
+   * recently COMPLETED result (lib/level-assessment.ts), best-effort. A never
+   * waits for ET to finish; it just reads whatever this holds when it fires.
+   * "A2" matches the old inline prompt's default starting point (turn 1 is
+   * always the A1 warm-up, handled separately — see startSession/handleUserTurn).
+   */
+  const currentRungRef = useRef<CefrRung>("A2");
+  /** Bank question strings already offered this session (any rung) — Track
+   *  I-03 within-session repeat-avoidance. Round-tripped with /api/chat the
+   *  same way currentRungRef's rung is, but fully independent of it: this
+   *  only ever talks to /api/chat, never /api/assess-transcript. */
+  const usedQuestionsRef = useRef<string[]>([]);
+  /**
+   * TT (lib/topic-tracking.ts) tracking state — the domain of the examiner's
+   * most recently asked question, and how many turns in a row have landed on
+   * it. Once the streak hits the cap, handleUserTurn sends currentDomainRef's
+   * value as `avoidDomain` so the server can tell the model explicitly to
+   * move on, instead of relying on the model to have counted correctly
+   * itself (see lib/topic-domain.ts's header comment for why).
+   */
+  const currentDomainRef = useRef<TopicDomain | null>(null);
+  const domainStreakRef = useRef(0);
+  /** Consecutive same-domain turns allowed before a switch is forced next turn. */
+  const MAX_DOMAIN_STREAK = 2;
+  /**
+   * Admin-configurable starting rung + ET step size (lib/conversation-settings-service.ts).
+   * Seeded with today's pre-existing hardcoded values, then overwritten once
+   * the GET fired near the top of startSession() resolves — fire-and-forget,
+   * never awaited, since currentRungRef's starting value and stepSize are
+   * both only actually consumed after the user has answered the fixed-A1
+   * turn 1, which takes far longer than this fetch.
+   */
+  const conversationSettingsRef = useRef<{ startingRung: CefrRung; stepSize: number }>({
+    startingRung: "A2",
+    stepSize: 1,
+  });
   /** Set at 4 min — causes the next onFinal to trigger __END__ after the user's sentence. */
   const pendingEndRef = useRef(false);
   const endTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -125,9 +153,10 @@ export default function Home() {
   /** Per-turn MediaRecorder — one recording per user utterance, restarted after each turn. */
   const turnRecorderRef = useRef<MediaRecorder | null>(null);
   /**
-   * Dedicated mic stream for per-turn and session recording.
-   * AzureSTT manages its own internal getUserMedia — this stream is for
-   * MediaRecorder only, so there is no AudioContext conflict.
+   * Dedicated mic stream for per-turn recording, session recording, AND
+   * turn-boundary VAD (lib/turn-vad.ts taps this same stream — no separate
+   * getUserMedia call needed now that STT isn't a live SDK with its own
+   * internal stream).
    */
   const micStreamRef = useRef<MediaStream | null>(null);
 
@@ -308,23 +337,23 @@ export default function Home() {
     });
   };
 
-  // ── two-pass pronunciation: REST API with LLM-corrected reference ───────────
-  // Pass 1: AzureSTT SDK scores (free-speech mode — lenient, near-100 for any
-  //   recognized word) are attached immediately as placeholders.
+  // ── two-pass pronunciation: neutral placeholder, then the real Voxtral score ──
+  // Pass 1: a neutral placeholder (score 0, no words) is attached immediately
+  //   once the transcript resolves (onSpeechEnd, below) — there's no live SDK
+  //   score to show in the meantime now that STT is a Voxtral batch call.
   // Pass 2 (this function): converts the turn recording to WAV 16 kHz mono
-  //   (Azure's REST endpoint rejects Chrome's webm container — the silent
-  //   failure that left pass-1's ~100 scores on screen), then sends it with the
-  //   transcript + examiner question. The server has Claude reconstruct the
-  //   INTENDED text and Azure scores actual phonemes against it
-  //   (EnableMiscue:true) — catching substitutions, omissions, insertions.
-  //   Result overwrites the pass-1 scores in place.
+  //   and sends it to app/api/pronunciation (getProvider("voxtral")), which
+  //   both re-transcribes and judges pronunciation from the audio directly.
+  //   Result overwrites the pass-1 placeholder in place.
   const callPronunciationAPI = async (
     blob: Blob,
     turnIndex: number,
     wpm: number,
     referenceText: string,
     context: string,
+    turnLogId: string,
   ) => {
+    const eoProcess = assessProcessLabel("EO", turnLogId);
     let audio = blob;
     let filename = "turn.webm";
     try {
@@ -371,21 +400,26 @@ export default function Home() {
     // The examiner's question this turn answers — used server-side by the LLM
     // correction step to reconstruct what the learner intended to say.
     form.append("context", context);
+    form.append("turnLogId", turnLogId);
 
+    logClientEvent("eo_request_sent", { turnLogId, process: eoProcess });
     try {
       const r = await fetch("/api/pronunciation", { method: "POST", body: form });
       if (!r.ok) {
         // Loud failure: a dead pass 2 means the lenient pass-1 scores stay on
         // screen — exactly the "everything is 100%" bug. Never fail silently.
         console.error(`[pronunciation] pass-2 HTTP ${r.status}: ${await r.text()}`);
+        logClientEvent("eo_failed", { turnLogId, process: eoProcess, status: r.status });
         return;
       }
       const result = (await r.json()) as PronunciationResult | null;
       if (!result) {
         console.warn("[pronunciation] pass-2 returned no result (Azure no-speech)");
+        logClientEvent("eo_failed", { turnLogId, process: eoProcess, reason: "no-speech" });
         return;
       }
       console.log(`[pronunciation] pass-2 OK turn=${turnIndex} score=${result.pronunciationScore} source=${result.source}`);
+      logClientEvent("eo_result_received", { turnLogId, process: eoProcess, score: result.pronunciationScore });
       setHistory((h) =>
         h.map((m, i) => {
           if (i !== turnIndex || m.role !== "user" || !m.pronunciation) return m;
@@ -394,14 +428,142 @@ export default function Home() {
       );
     } catch (e) {
       console.error("[pronunciation] pass-2 request failed:", e);
+      logClientEvent("eo_failed", { turnLogId, process: eoProcess, error: String(e) });
     }
   };
+
+  /**
+   * ET — Evaluation Transcription. Fired immediately when STT finalizes a
+   * user answer (text-only, doesn't need the recording — see onFinal below),
+   * non-blocking: nothing ever awaits this. It just updates currentRungRef
+   * when it completes, best-effort — the next /api/chat call reads whatever
+   * currentRungRef holds at the moment it fires, stale or not.
+   */
+  const runTranscriptAssessment = async (userAnswer: string, questionAsked: string, turnLogId: string) => {
+    const etProcess = assessProcessLabel("ET", turnLogId);
+    logClientEvent("et_request_sent", { turnLogId, process: etProcess });
+    try {
+      const r = await fetch("/api/assess-transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language,
+          questionAsked,
+          userAnswer,
+          currentRung: currentRungRef.current,
+          turnLogId,
+          stepSize: conversationSettingsRef.current.stepSize,
+        }),
+      });
+      if (!r.ok) {
+        logClientEvent("et_failed", { turnLogId, process: etProcess, status: r.status });
+        return;
+      }
+      const { nextRung, verdict } = (await r.json()) as { nextRung: string; verdict: string };
+      logClientEvent("et_result_received", {
+        turnLogId,
+        process: etProcess,
+        previousRung: currentRungRef.current,
+        nextRung,
+        verdict,
+      });
+      if (isCefrRung(nextRung)) currentRungRef.current = nextRung;
+    } catch (e) {
+      logClientEvent("et_failed", { turnLogId, process: etProcess, error: String(e) });
+    }
+  };
+
+  /**
+   * TT — Topic Tracking. Fired right after an examiner reply's full text is
+   * known (the "done" SSE event in handleUserTurn below), non-blocking: tags
+   * which life domain that question belongs to and updates the same-domain
+   * streak. handleUserTurn reads currentDomainRef/domainStreakRef when
+   * building the NEXT /api/chat request, best-effort — same tolerance as ET.
+   */
+  const runTopicClassification = async (questionAsked: string, recentExchange: string, turnLogId: string) => {
+    const ttProcess = assessProcessLabel("TT", turnLogId);
+    try {
+      const r = await fetch("/api/classify-topic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionAsked, recentExchange, turnLogId }),
+      });
+      if (!r.ok) return;
+      const { domain } = (await r.json()) as { domain: string | null };
+      if (!isTopicDomain(domain)) return;
+      domainStreakRef.current = domain === currentDomainRef.current ? domainStreakRef.current + 1 : 1;
+      currentDomainRef.current = domain;
+      logClientEvent("tt_result_received", { turnLogId, process: ttProcess, domain, streak: domainStreakRef.current });
+    } catch (e) {
+      logClientEvent("tt_failed", { turnLogId, process: ttProcess, error: String(e) });
+    }
+  };
+
+  /** Cancels any in-progress caption word-reveal timers (see scheduleWordReveal). */
+  function clearPendingReveals() {
+    revealTimeoutsRef.current.forEach((id) => clearTimeout(id));
+    revealTimeoutsRef.current = [];
+  }
+
+  /**
+   * Reveals `text` word by word over `durationMs` — passed to StreamingAudioPlayer
+   * as onSentenceStart, so it fires at the moment this sentence's audio actually
+   * starts playing, not when the SSE "text" event streamed in. The raw LLM token
+   * stream typically finishes generating the WHOLE reply well before TTS/playback
+   * even starts on the first sentence, so driving the caption off it directly
+   * showed the answer on screen long before any of it was audible.
+   * Word timing is an estimate, not real boundaries: each word's share of
+   * durationMs is proportional to its character length. Neither TTS provider
+   * used here (Azure REST, Mistral/Voxtral) returns word-level timestamps —
+   * only a whole-sentence PCM buffer — so this is the closest approximation of
+   * "appears as it's spoken" available without a bigger TTS integration change.
+   */
+  function scheduleWordReveal(text: string, durationMs: number) {
+    const tokens = text.split(/(\s+)/).filter((t) => t.length > 0);
+    const totalChars = tokens.reduce((sum, t) => sum + (/^\s+$/.test(t) ? 0 : t.length), 0) || 1;
+    let elapsed = 0;
+    let isFirst = true;
+    for (const token of tokens) {
+      const id = setTimeout(() => {
+        setStreamingAssistant((prev) => prev + token);
+        if (isFirst) {
+          isFirst = false;
+          setIsThinking(false);
+        }
+      }, elapsed);
+      revealTimeoutsRef.current.push(id);
+      if (!/^\s+$/.test(token)) elapsed += (token.length / totalChars) * durationMs;
+    }
+  }
 
   // ── session ──
   const startSession = async () => {
     setSessionStarted(true);
     sessionSavedRef.current = false;
     startedAtRef.current = Date.now();
+
+    // Fire-and-forget: resolve this language's admin-configured starting rung
+    // + ET step size (lib/conversation-settings-service.ts). Not awaited —
+    // the mic-permission prompt and STT connect below already take real time,
+    // and currentRungRef's starting value/stepSize are only actually
+    // consumed after the user answers the fixed-A1 turn 1, so there's ample
+    // time for this to resolve. Falls back to conversationSettingsRef's
+    // seeded default if the fetch fails or hasn't resolved in time.
+    fetch(`/api/conversation-settings?language=${language}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((settings) => {
+        if (settings && isCefrRung(settings.startingRung) && Number.isInteger(settings.stepSize)) {
+          conversationSettingsRef.current = settings;
+          // currentRungRef.current is set synchronously from the (still-default)
+          // seed a few lines below, before this fetch can possibly resolve —
+          // apply the real value here too once it lands. Safe to do
+          // unconditionally: this always resolves long before ET could have
+          // produced its first real update (which needs the opening turn to
+          // finish playing, the user to answer, and STT to finalize first).
+          currentRungRef.current = settings.startingRung;
+        }
+      })
+      .catch(() => {});
 
     // Reset ALL per-session state from any previous run. Without this, a stale
     // cefrResult from the last evaluation keeps the pronunciation panel and
@@ -419,6 +581,11 @@ export default function Home() {
     historyRef.current = [];
     setPartialUser("");
     setStreamingAssistant("");
+    clearPendingReveals();
+    currentRungRef.current = conversationSettingsRef.current.startingRung;
+    usedQuestionsRef.current = [];
+    currentDomainRef.current = null;
+    domainStreakRef.current = 0;
     setElapsed(0);
     setChatError(null);
     setIsThinking(false);
@@ -429,127 +596,35 @@ export default function Home() {
     }
     setAudioBlob(null);
 
-    if (!USE_HEYGEN) {
-      // Create player and unlock AudioContext NOW — must be synchronous and
-      // inside the click handler before any await, otherwise Chrome's autoplay
-      // policy will block the AudioContext when the first TTS chunk arrives.
-      // The MediaStreamDestinationNode (for session recording) is also created
-      // here so it's ready when we connect the mic stream after Deepgram starts.
-      playerRef.current = new StreamingAudioPlayer((amp) => {
-        const wasSpeaking = isSpeakingRef.current;
-        isSpeakingRef.current = amp > 0;
-        setAmplitude(amp);
-        // When the last audio chunk finishes playing, flush any queued user turns.
-        // This is the correct moment — the SSE stream ends before audio finishes,
-        // so flushing from the SSE callback would overlap with playback.
-        if (wasSpeaking && amp === 0) {
-          processBufferedRef.current();
-          playbackDoneWaiterRef.current?.();
-          playbackDoneWaiterRef.current = null;
-        }
-      });
-      playerRef.current.init();
-    }
+    // Create player and unlock AudioContext NOW — must be synchronous and
+    // inside the click handler before any await, otherwise Chrome's autoplay
+    // policy will block the AudioContext when the first TTS chunk arrives.
+    // The MediaStreamDestinationNode (for session recording) is also created
+    // here so it's ready when we connect the mic stream after Deepgram starts.
+    playerRef.current = new StreamingAudioPlayer((amp) => {
+      const wasSpeaking = isSpeakingRef.current;
+      isSpeakingRef.current = amp > 0;
+      // Raise the turn-VAD's threshold while the avatar is audible — echo
+      // leaking back into the mic despite echoCancellation was getting
+      // mistaken for a real user turn (see lib/turn-vad.ts).
+      vadRef.current?.setAvatarSpeaking(amp > 0);
+      // When the last audio chunk finishes playing, flush any queued user turns.
+      // This is the correct moment — the SSE stream ends before audio finishes,
+      // so flushing from the SSE callback would overlap with playback.
+      if (wasSpeaking && amp === 0) {
+        processBufferedRef.current();
+        playbackDoneWaiterRef.current?.();
+        playbackDoneWaiterRef.current = null;
+      }
+    }, scheduleWordReveal);
+    playerRef.current.init();
+    // Avatar-only (no mic) stream for the TalkingHead component's wawa-lipsync analysis.
+    setAvatarAnalyser(playerRef.current.getAvatarAnalyser());
 
-    // ── Azure STT: transcription + pronunciation in one step ─────────────────
-    sttRef.current = new AzureSTT(language, {
-      onPartial: (text) => {
-        if (isSpeakingRef.current) return;
-        setPartialUser(text);
-        if (USE_HEYGEN) liveAvatarRef.current?.startListening();
-      },
-      onFinal: async (text, azurePron) => {
-        if (!text.trim()) return;
-
-        // Azure SDK returns per-phoneme scores directly — no secondary REST call needed.
-        const pronunciation: PronunciationResult = { ...azurePron, source: "azure" };
-
-        // H-01 latency instrumentation: mark the moment STT considers the
-        // utterance final, tagged with whether it's about to sit in the
-        // buffer (avatar still busy) — that wait is turn-taking, not pipeline
-        // latency, so keeping it visible lets the two be told apart later.
-        const turnLogId = `turn-${++turnCounterRef.current}`;
-        const willBuffer = isProcessingRef.current || isSpeakingRef.current;
-        logClientEvent("turn_stt_final", { turnLogId, buffered: willBuffer });
-
-        // Always close out THIS utterance's recording the instant STT
-        // recognizes it, regardless of whether the avatar is busy — the
-        // recorder must be scoped to when the user actually spoke, not to
-        // whenever a buffered turn eventually gets flushed. Deferring the
-        // stop/start to flush time (the old behaviour) made the recorded
-        // window the gap between two flushes — often under a second — instead
-        // of the real utterance, producing near-empty recordings for any
-        // turn that got buffered.
-        const recordingPromise = stopTurnRecording();
-        startTurnRecording();
-
-        // Avatar is still talking or processing a previous turn — queue this
-        // turn (its audio is already correctly captured above). All queued
-        // turns are replayed in order once the avatar finishes speaking.
-        if (willBuffer) {
-          bufferedTurnsRef.current.push({ text, pronunciation, recordingPromise, turnLogId });
-          return;
-        }
-
-        setPartialUser("");
-        if (USE_HEYGEN) liveAvatarRef.current?.stopListening();
-
-        const turnIndex = historyRef.current.length;
-
-        // Capture and clear the pending-end flag before any await.
-        const shouldEnd = pendingEndRef.current;
-        if (shouldEnd) {
-          pendingEndRef.current = false;
-          if (endTimeoutRef.current) {
-            clearTimeout(endTimeoutRef.current);
-            endTimeoutRef.current = null;
-          }
-        }
-
-        // The examiner's question this turn answers — captured BEFORE
-        // the avatar's next reply is appended to history.
-        const questionContext =
-          [...historyRef.current].reverse().find((m) => m.role === "assistant")?.content ?? "";
-
-        if (shouldEnd) {
-          // Winding down: record + assess this final answer, but do NOT let the
-          // avatar ask another question right before closing (that made the
-          // ending feel abrupt). Append the user turn to history directly, then
-          // go straight to the closing comment, which Claude phrases naturally
-          // around the answer it can now see in the transcript.
-          const finalHistory: Msg[] = [
-            ...historyRef.current,
-            { role: "user", content: text, pronunciation },
-          ];
-          historyRef.current = finalHistory;
-          setHistory(finalHistory);
-        } else {
-          await handleUserTurn(text, pronunciation, turnLogId);
-        }
-
-        // Kick off the assessment in the background. callPronunciationAPI also
-        // attaches the conditioned WAV to the transcript player (the raw webm
-        // is recorded with AGC off and can be inaudibly quiet). This runs
-        // concurrently with the next turn's /api/chat call — both are Mistral
-        // calls, but lib/mistral-queue.ts already caps concurrent Mistral
-        // requests server-side (MISTRAL_MAX_CONCURRENCY, default 2), so this
-        // no longer needs to be serialized here at the page level.
-        void recordingPromise.then((recording) => {
-          if (!recording) return;
-          return callPronunciationAPI(recording.blob, turnIndex, azurePron.wpm, text, questionContext);
-        });
-
-        if (shouldEnd) {
-          await deliverClosingRemarkAndEnd();
-        }
-      },
-      onError: (e) => console.error("Azure STT error:", e),
-    });
-
-    // Open a dedicated mic stream for per-turn recording AND session listen-back.
-    // AzureSTT manages its own internal getUserMedia — this stream is used only by
-    // MediaRecorder and the player's AudioContext (for mixing), so there is no
-    // dual-AudioContext conflict of any kind.
+    // Open a dedicated mic stream for per-turn recording, session listen-back,
+    // AND turn-boundary VAD (lib/turn-vad.ts taps this same stream below —
+    // no separate getUserMedia call needed now that STT isn't a live SDK
+    // with its own internal mic stream).
     try {
       // Fidelity-first constraints for the ASSESSMENT stream:
       // - noiseSuppression OFF: browser noise suppression is telephony-grade
@@ -559,9 +634,6 @@ export default function Home() {
       //   normalised later in blobToWav16kMono instead.
       // - echoCancellation stays ON: it keeps the avatar's question (playing
       //   through the speakers while the turn recorder runs) out of the clip.
-      // Safe because this stream is SEPARATE from AzureSTT's internal mic
-      // stream — the live recognizer keeps its own DSP-processed signal, so
-      // VAD/segmentation behaviour is unaffected.
       micStreamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: {
           autoGainControl: false,
@@ -574,28 +646,155 @@ export default function Home() {
       });
       // Mix the mic into the player's session-recording destination so the
       // listen-back audio captures both sides (avatar TTS + user voice).
-      // Safe now that AzureSTT owns a completely separate internal stream.
-      if (!USE_HEYGEN && playerRef.current) {
+      if (playerRef.current) {
         playerRef.current.addMicStream(micStreamRef.current);
       }
     } catch (e) {
       console.warn("Mic stream for recording unavailable:", e);
     }
 
-    // Start Azure STT — failure is non-fatal (avatar TTS still works).
+    // ── Turn-taking: client-side VAD (lib/turn-vad.ts) detects when the user
+    // has stopped talking; Voxtral transcribes the recorded clip once it has
+    // (app/api/transcribe, Mistral's dedicated transcription endpoint) ──────
+    const onSpeechEnd = async () => {
+      // H-01 latency instrumentation: mark the moment VAD considers the
+      // utterance final, tagged with whether it's about to sit in the
+      // buffer (avatar still busy) — that wait is turn-taking, not pipeline
+      // latency, so keeping it visible lets the two be told apart later.
+      const turnLogId = `turn-${++turnCounterRef.current}`;
+      const willBuffer = isProcessingRef.current || isSpeakingRef.current;
+      // Commit to the non-buffered path immediately, before the (new, blocking)
+      // transcription call below — otherwise a second utterance that starts
+      // while this one is still transcribing would ALSO compute willBuffer as
+      // false (isProcessingRef only used to flip true inside handleUserTurn,
+      // which doesn't run until after transcription resolves) and the two
+      // turns would race instead of the second one correctly buffering.
+      if (!willBuffer) isProcessingRef.current = true;
+
+      // The examiner's question this turn answers — captured now, synchronously,
+      // before any await, so ET (fired below) judges the same question this
+      // turn's eventual reply answers regardless of what else happens on
+      // historyRef while transcription is in flight.
+      const questionContext =
+        [...historyRef.current].reverse().find((m) => m.role === "assistant")?.content ?? "";
+
+      // Always close out THIS utterance's recording the instant VAD detects
+      // silence, regardless of whether the avatar is busy — the recorder must
+      // be scoped to when the user actually spoke, not to whenever a buffered
+      // turn eventually gets flushed. Deferring the stop/start to flush time
+      // (the old behaviour) made the recorded window the gap between two
+      // flushes — often under a second — instead of the real utterance,
+      // producing near-empty recordings for any turn that got buffered.
+      const recordingPromise = stopTurnRecording();
+      startTurnRecording();
+
+      const recording = await recordingPromise;
+      if (!recording) return; // false-alarm VAD trigger — nothing was captured
+
+      // Blocking: unlike ET/EO below, A/history/ET all need this text — see
+      // doc/assessment_process.md's "non-blocking, best-effort" section for
+      // why that's the exception here, not the rule elsewhere in this pipeline.
+      let text = "";
+      let wpm = 0;
+      try {
+        const form = new FormData();
+        form.append("audio", recording.blob, "turn.webm");
+        form.append("language", language);
+        form.append("turnLogId", turnLogId);
+        const res = await fetch("/api/transcribe", { method: "POST", body: form });
+        if (!res.ok) throw new Error(`transcribe API error ${res.status}`);
+        const data = (await res.json()) as { text: string; wpm: number };
+        text = data.text;
+        wpm = data.wpm;
+      } catch (e) {
+        console.error("Transcribe failed:", e);
+        return;
+      }
+      if (!text.trim()) return; // no speech recognized
+
+      logClientEvent("turn_stt_final", { turnLogId, buffered: willBuffer });
+
+      // No more pass-1 SDK score (Azure used to supply one instantly) — EO's
+      // pass-2 result (callPronunciationAPI below) overwrites this placeholder
+      // in place, same mechanism as before, just with a neutral stand-in as
+      // the starting value instead of a real (if lenient) Azure score.
+      const pronunciation: PronunciationResult = {
+        text, pronunciationScore: 0, accuracyScore: 0, wpm, words: [], source: "voxtral",
+      };
+
+      // ET (text-only, non-blocking/best-effort — see runTranscriptAssessment)
+      // fires regardless of buffering: it only touches currentRungRef, never
+      // history/turnIndex, so there's no ordering hazard with a turn that's
+      // about to sit in the buffer below.
+      void runTranscriptAssessment(text, questionContext, turnLogId);
+
+      // Avatar is still talking or processing a previous turn — queue this
+      // turn (its audio is already correctly captured above). All queued
+      // turns are replayed in order once the avatar finishes speaking.
+      // EO for a buffered turn still fires at flush time (processBufferedRef
+      // below) rather than here, to keep its turnIndex (computed at flush
+      // time, once this turn's position in history is actually known) correct.
+      if (willBuffer) {
+        bufferedTurnsRef.current.push({ text, pronunciation, recordingPromise, turnLogId });
+        return;
+      }
+
+      setPartialUser("");
+
+      const turnIndex = historyRef.current.length;
+
+      // Capture and clear the pending-end flag before any await.
+      const shouldEnd = pendingEndRef.current;
+      if (shouldEnd) {
+        pendingEndRef.current = false;
+        if (endTimeoutRef.current) {
+          clearTimeout(endTimeoutRef.current);
+          endTimeoutRef.current = null;
+        }
+      }
+
+      // EO (needs the recording, not just text) fires here, non-blocking —
+      // same endpoint/provider as before, now handed the real transcription
+      // wpm instead of a live-SDK one.
+      void callPronunciationAPI(recording.blob, turnIndex, wpm, text, questionContext, turnLogId);
+
+      if (shouldEnd) {
+        // Winding down: record + assess this final answer, but do NOT let the
+        // avatar ask another question right before closing (that made the
+        // ending feel abrupt). Append the user turn to history directly, then
+        // go straight to the closing comment, which Claude phrases naturally
+        // around the answer it can now see in the transcript.
+        const finalHistory: Msg[] = [
+          ...historyRef.current,
+          { role: "user", content: text, pronunciation },
+        ];
+        historyRef.current = finalHistory;
+        setHistory(finalHistory);
+      } else {
+        await handleUserTurn(text, pronunciation, turnLogId);
+      }
+
+      if (shouldEnd) {
+        await deliverClosingRemarkAndEnd();
+      }
+    };
+
+    // Start turn-taking — failure is non-fatal (avatar TTS still works).
     try {
-      await sttRef.current.start();
+      if (!micStreamRef.current) throw new Error("mic stream unavailable");
+      vadRef.current = new TurnVad(micStreamRef.current, {
+        onSpeechStart: () => {
+          if (!isSpeakingRef.current) setPartialUser("…"); // listening indicator — no live captions without a streaming ASR
+        },
+        onSpeechEnd: () => { void onSpeechEnd(); },
+      });
       startTurnRecording(); // begin recording the first user turn
 
-      if (!USE_HEYGEN && playerRef.current) {
-        // Session recording: TTS + mic audio mixed via the player's recordingDest.
-        const ttsStream = playerRef.current.getRecordingStream();
-        recorderRef.current = new SessionRecorder(ttsStream ?? (micStreamRef.current ?? undefined));
-      } else {
-        recorderRef.current = new SessionRecorder(micStreamRef.current ?? undefined);
-      }
+      // Session recording: TTS + mic audio mixed via the player's recordingDest.
+      const ttsStream = playerRef.current?.getRecordingStream();
+      recorderRef.current = new SessionRecorder(ttsStream ?? (micStreamRef.current ?? undefined));
     } catch (e) {
-      console.error("Azure STT failed to start:", e);
+      console.error("Turn-taking VAD failed to start:", e);
       recorderRef.current = new SessionRecorder(micStreamRef.current ?? undefined);
     }
     recorderRef.current.start();
@@ -613,6 +812,11 @@ export default function Home() {
     // H-01 latency instrumentation id — falls back to a synthetic one for the
     // opening/closing turns, which don't come from onFinal.
     const logId = turnLogId ?? (isStart ? "start" : isEnd ? "end" : "unknown");
+    const process = chatProcessLabel(logId);
+    // The opening line always targets A1 (the warm-up) regardless of
+    // currentRungRef's default — everything after reads whatever ET's most
+    // recently completed result set it to (best-effort, see runTranscriptAssessment).
+    const rung: CefrRung = isStart ? "A1" : currentRungRef.current;
 
     try {
       // This turn's /api/chat call is allowed to overlap the previous turn's
@@ -626,6 +830,7 @@ export default function Home() {
 
       if (!isStart && !isEnd) setHistory(newHistory);
       setStreamingAssistant("");
+      clearPendingReveals();
 
       const userMessage = isStart
         ? language === "fr"
@@ -638,11 +843,20 @@ export default function Home() {
       // H-01: marks when the request actually goes out — the gap since
       // turn_stt_final includes any buffering wait (avatar still speaking),
       // so the two are logged separately rather than folded into one number.
-      logClientEvent("turn_chat_request_sent", { turnLogId: logId });
+      logClientEvent("turn_chat_request_sent", { turnLogId: logId, process, rung });
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, history: newHistory, userMessage, turnLogId: logId }),
+        body: JSON.stringify({
+          language,
+          history: newHistory,
+          userMessage,
+          turnLogId: logId,
+          rung,
+          usedQuestions: usedQuestionsRef.current,
+          isStart,
+          avoidDomain: domainStreakRef.current >= MAX_DOMAIN_STREAK ? currentDomainRef.current ?? undefined : undefined,
+        }),
       });
 
       if (!res.body) {
@@ -655,7 +869,6 @@ export default function Home() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let assistantText = "";
       // H-01: log only the FIRST text/audio event per turn — deltas/chunks
       // arrive in bursts and aren't individually interesting for latency.
       let loggedFirstText = false;
@@ -678,37 +891,56 @@ export default function Home() {
           const data = dataMatch[1];
 
           if (type === "text") {
+            // Not rendered live anymore — the raw LLM token stream usually
+            // finishes generating the whole reply before TTS/playback even
+            // starts, so driving the caption off it showed the full answer
+            // on screen well before any of it was audible. The caption is
+            // now driven by scheduleWordReveal via the audio player's
+            // onSentenceStart instead (see the "audio" branch below).
+            // Still logged here for H-01 latency comparison against
+            // turn_first_audio/the reveal timing.
             if (!loggedFirstText) {
               loggedFirstText = true;
-              logClientEvent("turn_first_text", { turnLogId: logId });
+              logClientEvent("turn_first_text", { turnLogId: logId, process });
             }
-            const { delta } = JSON.parse(data);
-            assistantText += delta;
-            setStreamingAssistant(assistantText);
-            setIsThinking(false);
           } else if (type === "audio") {
             if (!loggedFirstAudio) {
               loggedFirstAudio = true;
-              logClientEvent("turn_first_audio", { turnLogId: logId });
+              logClientEvent("turn_first_audio", { turnLogId: logId, process });
             }
-            if (USE_HEYGEN) {
-              liveAvatarRef.current?.sendAudio(data);
-            } else {
-              playerRef.current?.playChunk(data);
-            }
+            const { text: sentenceText, audio } = JSON.parse(data);
+            playerRef.current?.playChunk(audio, sentenceText);
           } else if (type === "done") {
-            logClientEvent("turn_stream_done", { turnLogId: logId });
-            const { fullText } = JSON.parse(data);
+            logClientEvent("turn_stream_done", { turnLogId: logId, process });
+            const { fullText, usedQuestions } = JSON.parse(data);
             // Defense in depth: an empty-content assistant message stuck in
             // history gets sent back to Mistral on every future turn, which
             // rejects it outright — never let one in, regardless of what the
             // server sends.
             if (fullText.trim()) {
               setHistory((h) => [...h, { role: "assistant", content: fullText }]);
+              // TT (non-blocking) — the closing remark never asks a question,
+              // so there's nothing to classify there. recentExchange gives the
+              // classifier the prior Q&A so it can resolve references like
+              // "the lifestyle you just described" that the bare question
+              // text can't be classified from on its own.
+              if (!isEnd) {
+                const recentExchange = newHistory
+                  .slice(-2)
+                  .map((m) => `${m.role}: ${m.content}`)
+                  .join("\n");
+                void runTopicClassification(fullText, recentExchange, logId);
+              }
             }
-            setStreamingAssistant("");
+            if (usedQuestions) usedQuestionsRef.current = usedQuestions;
+            // NOT clearing streamingAssistant here — the SSE stream ending
+            // just means all audio bytes have been sent, not that playback
+            // (and the word-by-word reveal riding on it) has finished. It's
+            // cleared when the NEXT turn starts (see clearPendingReveals()
+            // above). setIsThinking(false) is a safety net in case a turn
+            // somehow produced text but no audio chunk ever arrived to
+            // trigger the reveal's own setIsThinking(false).
             setIsThinking(false);
-            if (USE_HEYGEN) liveAvatarRef.current?.speakEnd();
           } else if (type === "error") {
             console.error("Stream error:", data);
             setIsThinking(false);
@@ -755,7 +987,7 @@ export default function Home() {
     await handleUserTurn(buffered.text, buffered.pronunciation, buffered.turnLogId);
     void buffered.recordingPromise.then((recording) => {
       if (!recording) return;
-      return callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext);
+      return callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext, buffered.turnLogId);
     });
   };
 
@@ -763,8 +995,6 @@ export default function Home() {
   // takeover immediately, then evaluate and ALWAYS persist — this is now the
   // one and only way a session ends, so a failed evaluation must never
   // strand the user without a saved session.
-  // TODO: under USE_HEYGEN, this never tears down the HeyGen-side avatar
-  // session (liveAvatarRef) — pre-existing gap, not addressed here.
   const endSession = async () => {
     if (endSessionInFlightRef.current) return;
     endSessionInFlightRef.current = true;
@@ -778,7 +1008,7 @@ export default function Home() {
     setPhase("evaluating"); // flip the UI before any awaits
 
     await stopTurnRecording();
-    sttRef.current?.stop();
+    vadRef.current?.stop();
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
     // Stop session recorder BEFORE closing the player's AudioContext — the
@@ -786,7 +1016,9 @@ export default function Home() {
     // so closing the AudioContext first would cut the stream before the
     // recorder can flush its final buffered chunk.
     const blob = await recorderRef.current?.stop() ?? null;
-    if (!USE_HEYGEN) playerRef.current?.stop();
+    playerRef.current?.stop();
+    clearPendingReveals();
+    setAvatarAnalyser(null);
     if (blob && blob.size > 0) {
       if (audioBlobUrlRef.current) URL.revokeObjectURL(audioBlobUrlRef.current);
       audioBlobUrlRef.current = URL.createObjectURL(blob);
@@ -1009,11 +1241,11 @@ export default function Home() {
       {sessionStarted && phase === "active" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 520px", flex: 1, overflow: "hidden" }}>
           <div style={{ position: "relative", overflow: "hidden" }}>
-            {USE_HEYGEN ? (
-              <LiveAvatar ref={liveAvatarRef} onAmplitude={(amp) => setAmplitude(amp)} />
-            ) : (
-              <Avatar amplitude={amplitude} />
-            )}
+            <TalkingHeadAvatar
+              analyser={avatarAnalyser}
+              audioContext={playerRef.current?.getAudioContext() ?? null}
+            />
+
             {/* Overlay: "thinking" cue while waiting on the avatar's reply —
                 the gap between end-of-speech and the first streamed token
                 previously had zero visual feedback. */}

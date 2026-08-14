@@ -28,7 +28,7 @@
 import { mistralComplete, mistralPronunciationModel } from "@/lib/mistral";
 import { discreteWordConfidence, wordAccuracy } from "@/lib/pronunciation-scoring";
 import type { PronunciationProvider, PronunciationAssessParams } from "@/lib/pronunciation/types";
-import type { PronunciationResult } from "@/lib/azure-stt";
+import type { PronunciationResult } from "@/lib/pronunciation/types";
 
 // ─── Evidence collectors ──────────────────────────────────────────────────────
 
@@ -362,5 +362,6 @@ async function assess({
 export const azureEnsembleProvider: PronunciationProvider = {
   id: "azure-ensemble",
   label: "Azure + Deepgram + Mistral judge (additional assessment)",
+  modelLabel: `Deepgram nova-3 + Azure Pronunciation Assessment + ${mistralPronunciationModel()} judge`,
   assess,
 };

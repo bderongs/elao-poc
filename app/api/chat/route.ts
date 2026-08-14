@@ -1,6 +1,10 @@
-import { getSystemPrompt, type ConvLang } from "@/lib/conversation-prompts";
-import { mistralModel, mistralStreamText } from "@/lib/mistral";
+import { getSystemPrompt, buildQuestionBank, type ConvLang } from "@/lib/conversation-prompts";
+import { mistralChatModel, mistralStreamText } from "@/lib/mistral";
 import { logServerEvent } from "@/lib/server-log";
+import { isCefrRung, type CefrRung } from "@/lib/cefr-rung";
+import { chatProcessLabel } from "@/lib/turn-labels";
+import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
+import { OPENER_DOMAINS, isTopicDomain } from "@/lib/topic-domain";
 
 export const runtime = "nodejs";
 
@@ -12,122 +16,75 @@ interface ChatRequest {
    *  log line below so a turn's client + server timeline can be reconstructed
    *  from logs/server-YYYY-MM-DD.log by grepping for the id. */
   turnLogId?: string;
+  /** Difficulty rung to target this reply, from app/page.tsx's currentRungRef —
+   *  set by ET's most recently COMPLETED result (lib/level-assessment.ts),
+   *  best-effort/non-blocking. This call no longer decides its own pacing. */
+  rung?: CefrRung;
+  /** Bank question strings already offered this session (any rung), from
+   *  app/page.tsx's usedQuestionsRef — Track I-03 within-session repeat-avoidance. */
+  usedQuestions?: string[];
+  /** True for the opening turn ("__START__") — triggers a random openerDomain
+   *  pick below (see lib/topic-domain.ts) instead of letting the model default
+   *  to "where are you from" every session. */
+  isStart?: boolean;
+  /** Life domain to steer AWAY from this turn — set by app/page.tsx once TT
+   *  (lib/topic-tracking.ts) has tagged the same domain 2 turns running,
+   *  best-effort/non-blocking, same tolerance as `rung` above. */
+  avoidDomain?: string;
 }
-
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/**
- * Per-language voice profile.
- *   voice — a natural multilingual / regional neural voice (English was
- *           previously voiced by the FRENCH Vivienne voice — fixed).
- *   style — Azure mstts:express-as conversational style for warmth and
- *           expressiveness; empty when the voice doesn't support styles
- *           (multilingual voices ignore unsupported styles, but we only set
- *           one where it genuinely lands).
- */
-const VOICE_PROFILE: Record<ConvLang, { lang: string; voice: string; style: string }> = {
-  // en-US-AvaNeural: very natural AND documented to support express-as styles
-  // (the Multilingual variant is natural but has no styles — an unsupported
-  // style would fail the request and silence the avatar).
-  en: { lang: "en-US", voice: "en-US-AvaNeural", style: "chat" },
-  fr: { lang: "fr-FR", voice: "fr-FR-VivienneMultilingualNeural", style: "" },
-  // nl-BE-DenaNeural has no documented express-as styles — leave style empty so
-  // the SSML can't be rejected; it still gets the livelier prosody below.
-  "nl-BE": { lang: "nl-BE", voice: "nl-BE-DenaNeural", style: "" },
-  // Natural regional neural voices; style left empty to avoid SSML rejection on
-  // voices without documented express-as support.
-  es: { lang: "es-ES", voice: "es-ES-ElviraNeural", style: "" },
-  it: { lang: "it-IT", voice: "it-IT-ElsaNeural", style: "" },
-  de: { lang: "de-DE", voice: "de-DE-KatjaNeural", style: "" },
-};
 
 // Speaking-rate presets. The conversation opens slow so low-level listeners
-// can follow; it switches to the natural rate once the avatar judges the
-// speaker is B1+ (signalled per-reply via a leading level tag — see below).
+// can follow; it switches to the natural rate once the target rung (from the
+// request body, set by ET — see ChatRequest.rung above) reaches B1+. Product/
+// pedagogy decision, not provider-specific — only lib/tts/providers/azure.ts
+// actually applies it (Mistral's endpoint rejects a speed param entirely).
 const SLOW_RATE = "-16%";
 const NORMAL_RATE = "-3%";
 
 /**
- * Build expressive SSML.
- * - mstts:express-as style="chat" + styledegree gives a warm, conversational
- *   register instead of the flat reading voice.
- * - prosody rate is caller-supplied (slow for A1/A2 listeners, natural for B1+)
- *   with a slight pitch lift for gentle intonation movement.
- */
-function buildSSML(text: string, p: { lang: string; voice: string; style: string }, rate: string): string {
-  const inner = `<prosody rate="${rate}" pitch="+3%">${escapeXml(text)}</prosody>`;
-  const styled = p.style
-    ? `<mstts:express-as style="${p.style}" styledegree="1.3">${inner}</mstts:express-as>`
-    : inner;
-  return (
-    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" ` +
-    `xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${p.lang}">` +
-    `<voice name="${p.voice}">${styled}</voice></speak>`
-  );
-}
-
-/**
- * Starts an Azure TTS request immediately and returns a reader for the PCM stream.
- * Calling this function (without await) fires the HTTP request right away so it
- * runs in parallel with Claude generation.
- */
-async function startTTS(
-  text: string,
-  language: ConvLang,
-  rate: string
-): Promise<ReadableStreamDefaultReader<Uint8Array> | null> {
-  const key = process.env.AZURE_SPEECH_KEY;
-  if (!key || !text.trim()) return null;
-
-  const region = process.env.AZURE_SPEECH_REGION ?? "westeurope";
-  const profile = VOICE_PROFILE[language] ?? VOICE_PROFILE.en;
-
-  const res = await fetch(
-    `https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`,
-    {
-      method: "POST",
-      headers: {
-        "Ocp-Apim-Subscription-Key": key,
-        "Content-Type": "application/ssml+xml",
-        "X-Microsoft-OutputFormat": "raw-24khz-16bit-mono-pcm",
-      },
-      body: buildSSML(text, profile, rate),
-    }
-  );
-
-  if (!res.ok || !res.body) {
-    console.error("Azure TTS error:", res.status, await res.text().catch(() => ""));
-    return null;
-  }
-
-  return res.body.getReader();
-}
-
-/**
  * POST /api/chat
- * SSE stream:  event: text  → token delta (real-time, unblocked)
- *              event: audio → base64 PCM chunk (streamed per sentence)
- *              event: done  → { fullText }
+ * SSE stream:  event: text  → { delta } token delta (real-time, unblocked —
+ *                              the client logs it for latency but no longer
+ *                              renders it live; see event: audio below)
+ *              event: audio → { text, audio } — text is the sentence this
+ *                              chunk was synthesized from, audio is base64
+ *                              PCM (one full sentence per event). Paired so
+ *                              the client can reveal the caption in step with
+ *                              actual playback instead of the raw token
+ *                              stream, which typically finishes well before
+ *                              any audio is ready.
+ *              event: done  → { fullText, usedQuestions }
  *              event: error → { stage, message }
  *
  * Latency strategy:
  *  1. TTS is fired immediately on each sentence boundary — NO await inside Claude loop.
  *  2. All TTS requests run in parallel with Claude generation.
- *  3. Azure TTS response is streamed (chunks forwarded as they arrive).
+ *  3. The TTS response is streamed (chunks forwarded as they arrive) — Azure
+ *     for nl-BE/es/it/de, Mistral (Voxtral) for en/fr (see
+ *     lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG).
  *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage, turnLogId } = (await req.json()) as ChatRequest;
+  const { language, history, userMessage, turnLogId, rung, usedQuestions, isStart, avoidDomain } =
+    (await req.json()) as ChatRequest;
   const logId = turnLogId ?? "unknown";
+  const process = chatProcessLabel(logId);
+  const targetRung: CefrRung = isCefrRung(rung) ? rung : "A2";
+  // Picked fresh per session rather than left to the model's own "vary it"
+  // judgment — live sessions showed the model defaulting to "where are you
+  // from" as the opener nearly every time regardless of that instruction.
+  const openerDomain = isStart ? OPENER_DOMAINS[Math.floor(Math.random() * OPENER_DOMAINS.length)] : undefined;
+  const promptOpts = {
+    ...(isTopicDomain(avoidDomain) ? { avoidDomain } : {}),
+    ...(openerDomain ? { openerDomain } : {}),
+  };
+  // Narrow the bank to just this turn's target rung, and track which strings
+  // have already been offered this session — Track I-03. Called once, here,
+  // so the updatedUsedQuestions echoed back in "done" matches exactly what
+  // the LLM was shown (calling buildQuestionBank twice would desync them).
+  const { bankText, updatedUsedQuestions } = buildQuestionBank(targetRung, usedQuestions ?? []);
   const requestReceivedAt = Date.now();
-  logServerEvent("chat_request_received", { turnLogId: logId });
+  logServerEvent("chat_request_received", { turnLogId: logId, process, targetRung });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -142,98 +99,80 @@ export async function POST(req: Request) {
       let loggedFirstTtsFired = false;
       let loggedFirstTtsReady = false;
 
-      // Speaking rate for this reply. The avatar prefixes each reply with a
-      // level tag ⟦A1⟧…⟦C1⟧ (its presumed level for the speaker); we strip it
-      // and pick the rate from it. Default slow until proven B1+.
-      let rate = SLOW_RATE;
-      // Head-buffer: hold the very start of the reply until the leading level
-      // tag is parsed and removed, so it never reaches the caption or TTS.
-      let headResolved = false;
-      let head = "";
+      // Speaking rate for this reply, derived directly from the target rung —
+      // no more parsing a self-reported tag out of the model's own output.
+      const rate = targetRung === "A1" || targetRung === "A2" ? SLOW_RATE : NORMAL_RATE;
 
-      // Each entry is a Promise that resolves to a streaming reader (or null).
+      // Each entry pairs the sentence text with a Promise that resolves to its
+      // streaming TTS reader (or null) — the text travels with its audio so
+      // the client can reveal the caption in step with playback instead of
+      // as soon as it streams in from the LLM (see the "audio" event below).
       // Promises are pushed immediately when a sentence boundary is hit — no await.
-      const ttsQueue: Promise<ReadableStreamDefaultReader<Uint8Array> | null>[] = [];
+      const ttsQueue: { text: string; readerPromise: Promise<ReadableStreamDefaultReader<Uint8Array> | null> }[] = [];
 
-      // Emit cleaned (tag-free) text: forward to the caption, accumulate into
-      // fullText, and fire TTS on each complete sentence.
+      // Mistral for en/fr (preset voices exist), Azure for everything else —
+      // see lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
+      const fireTTS = (sentence: string) =>
+        ttsQueue.push({
+          text: sentence,
+          readerPromise: getTtsProvider(LIVE_TTS_PROVIDER_BY_LANG[language]).synthesize({
+            text: sentence, language, rate, turnLogId: logId,
+          }),
+        });
+
+      // Forward text: to the caption channel, accumulate into fullText, and
+      // fire TTS on each complete sentence.
       const emit = (chunk: string) => {
         if (!chunk) return;
         fullText += chunk;
         pending += chunk;
         send("text", JSON.stringify({ delta: chunk }));
+        // Requires at least 2 consecutive letters somewhere before the
+        // terminator, not just the bare `[.!?…]` — otherwise a stray
+        // numbered/lettered marker ("1.") or leftover punctuation with no
+        // real word content gets treated as its own "sentence" and fired to
+        // TTS on its own. Voxtral (lib/tts/providers/mistral.ts) doesn't
+        // fail gracefully on that kind of degenerate input — it hallucinates
+        // unintelligible babble, which plays right before the real reply
+        // with no meaningful caption to show for it (the caption is the
+        // fragment's own text, e.g. "1.", easy to miss entirely).
         let m;
-        while ((m = pending.match(/^([\s\S]*?[.!?…])\s/))) {
+        while ((m = pending.match(/^([\s\S]*?[A-Za-zÀ-ÖØ-öø-ÿ]{2}[\s\S]*?[.!?…])\s/))) {
           if (!loggedFirstTtsFired) {
             loggedFirstTtsFired = true;
-            logServerEvent("chat_first_tts_fired", { turnLogId: logId });
+            logServerEvent("chat_first_tts_fired", { turnLogId: logId, process });
           }
-          ttsQueue.push(startTTS(m[1], language, rate));
+          fireTTS(m[1]);
           pending = pending.slice(m[0].length);
         }
       };
 
       try {
         const llmStream = mistralStreamText({
-          model: mistralModel(),
-          system: getSystemPrompt(language),
+          model: mistralChatModel(),
+          system: getSystemPrompt(language, targetRung, bankText, promptOpts),
           messages: [
             ...history.map(({ role, content }) => ({ role, content })),
             { role: "user", content: userMessage },
           ],
           maxTokens: 300,
-          context: `chat:${logId}`,
+          context: process,
         });
 
         for await (const piece of llmStream) {
-            if (!loggedFirstToken) {
-              loggedFirstToken = true;
-              logServerEvent("chat_first_llm_token", { turnLogId: logId });
-            }
-
-            if (headResolved) {
-              emit(piece);
-              continue;
-            }
-
-            // Still resolving the leading level tag. Accept the intended ⟦XX⟧
-            // glyphs and a [XX] fallback in case the model normalises them.
-            head += piece;
-            const trimmed = head.replace(/^\s+/, "");
-            if (trimmed === "") continue; // only whitespace so far
-
-            if (trimmed[0] !== "⟦" && trimmed[0] !== "[") {
-              // No tag present — flush what we have as normal text.
-              headResolved = true;
-              emit(head);
-              head = "";
-              continue;
-            }
-
-            const tag = head.match(/^\s*[⟦[]\s*(A1|A2|B1|B2|C1)\s*[⟧\]]\s*/i);
-            if (tag) {
-              const level = tag[1].toUpperCase();
-              rate = level === "A1" || level === "A2" ? SLOW_RATE : NORMAL_RATE;
-              headResolved = true;
-              emit(head.slice(tag[0].length));
-              head = "";
-            } else if (head.length > 14) {
-              // An opening ⟦ that never closed sensibly — give up, treat as text.
-              headResolved = true;
-              emit(head);
-              head = "";
-            }
-            // else: partial tag, wait for more deltas.
+          if (!loggedFirstToken) {
+            loggedFirstToken = true;
+            logServerEvent("chat_first_llm_token", { turnLogId: logId, process });
+          }
+          emit(piece);
         }
 
-        // Flush any unresolved head (e.g. a lone partial tag at end of stream).
-        if (!headResolved && head) emit(head);
         if (pending.trim()) {
           if (!loggedFirstTtsFired) {
             loggedFirstTtsFired = true;
-            logServerEvent("chat_first_tts_fired", { turnLogId: logId });
+            logServerEvent("chat_first_tts_fired", { turnLogId: logId, process });
           }
-          ttsQueue.push(startTTS(pending, language, rate));
+          fireTTS(pending);
         }
       } catch (e) {
         send("error", JSON.stringify({ stage: "llm", message: String(e) }));
@@ -246,11 +185,11 @@ export async function POST(req: Request) {
       // Since TTS runs in parallel with Claude, the full sentence audio is
       // typically already available by the time we reach this drain phase —
       // buffering adds no meaningful latency.
-      for (const readerPromise of ttsQueue) {
+      for (const { text: sentenceText, readerPromise } of ttsQueue) {
         const reader = await readerPromise;
         if (!loggedFirstTtsReady) {
           loggedFirstTtsReady = true;
-          logServerEvent("chat_first_tts_ready", { turnLogId: logId, ok: !!reader });
+          logServerEvent("chat_first_tts_ready", { turnLogId: logId, process, ok: !!reader });
         }
         if (!reader) continue;
         try {
@@ -261,7 +200,7 @@ export async function POST(req: Request) {
             if (value?.length) chunks.push(Buffer.from(value));
           }
           if (chunks.length) {
-            send("audio", Buffer.concat(chunks).toString("base64"));
+            send("audio", JSON.stringify({ text: sentenceText, audio: Buffer.concat(chunks).toString("base64") }));
           }
         } finally {
           reader.releaseLock();
@@ -276,9 +215,9 @@ export async function POST(req: Request) {
       // either content or tool_calls, but not none", permanently breaking the
       // rest of the session over one transient failure.
       if (fullText.trim()) {
-        send("done", JSON.stringify({ fullText }));
+        send("done", JSON.stringify({ fullText, usedQuestions: updatedUsedQuestions }));
       }
-      logServerEvent("chat_stream_done", { turnLogId: logId, durationMs: Date.now() - requestReceivedAt });
+      logServerEvent("chat_stream_done", { turnLogId: logId, process, durationMs: Date.now() - requestReceivedAt });
       controller.close();
     },
   });

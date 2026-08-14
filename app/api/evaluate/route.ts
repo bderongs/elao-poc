@@ -4,7 +4,9 @@ import {
   buildEvaluationUserMessage,
 } from "@/lib/cefr-prompt";
 import type { ConvLang } from "@/lib/conversation-prompts";
-import { mistralComplete, mistralModel } from "@/lib/mistral";
+import { getProvider } from "@/lib/llm/registry";
+import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
+import { logServerEvent } from "@/lib/server-log";
 
 interface SttContext {
   pronunciation: number;
@@ -30,8 +32,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const text = await mistralComplete({
-      model: mistralModel(),
+    const provider = getProvider(LIVE_CONVERSATION_MODEL_ID);
+    const text = await provider.complete({
+      model: provider.modelLabel,
       system: CEFR_SYSTEM_PROMPT,
       messages: [
         {
@@ -48,6 +51,7 @@ export async function POST(req: Request) {
     const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();
     const evaluation = JSON.parse(cleaned);
 
+    logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
     return NextResponse.json(evaluation);
   } catch (e) {
     return NextResponse.json(

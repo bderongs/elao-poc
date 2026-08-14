@@ -6,14 +6,14 @@ import { computeCompositeCefrScore } from "@/lib/cefr-score";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { PronunciationAvg, CefrResult, EvaluationRow } from "@/lib/types";
 
-/**
- * The live conversation flow (app/api/evaluate/route.ts) calls
- * mistralComplete()/mistralModel() directly, bypassing lib/llm/registry.ts
- * entirely — so a session's evaluation_json has no stored model_id to
- * attribute it to. Keep in sync with lib/llm/registry.ts's "mistral" entry
- * if that route ever stops hardcoding Mistral.
- */
-export const LIVE_CONVERSATION_MODEL_ID = "mistral";
+// Moved to lib/llm/live-provider.ts (standalone, to avoid a circular import
+// with lib/system-config.ts) — re-exported here since every existing
+// consumer of this module already imports it from "@/lib/cefr-eval". A
+// session's evaluation_json still has no stored model_id of its own (that
+// column only exists on session_evaluations, the admin-lab replay table) —
+// see lib/system-config.ts for the per-session provider snapshot that
+// covers the live path instead.
+export { LIVE_CONVERSATION_MODEL_ID } from "./llm/live-provider";
 
 /**
  * One model's latest successful CEFR result for a session — unlike reading
@@ -99,7 +99,7 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
       try {
         const provider = getProvider(providerId);
         const text = await provider.complete({
-          model: provider.defaultModel,
+          model: provider.modelLabel,
           system: CEFR_SYSTEM_PROMPT,
           messages: [{ role: "user", content: userMessage }],
           maxTokens: 1500,

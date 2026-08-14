@@ -2,13 +2,13 @@ import type { PronunciationProvider } from "./types";
 import { azureEnsembleProvider } from "./providers/azure-ensemble";
 import { voxtralProvider } from "./providers/voxtral";
 
-// Order here drives display order in the admin gear (listProviders()) — voxtral
-// first since it's the live/headline default (LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID
-// in lib/pronunciation-rollup.ts), azure-ensemble second as the on-demand
-// comparison run.
+// Order here drives display order in the admin gear (listProviders()) —
+// azure-ensemble first since it's the live/headline default
+// (LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID in lib/pronunciation-rollup.ts),
+// voxtral second as the on-demand comparison run.
 const PROVIDERS: Record<string, PronunciationProvider> = {
-  voxtral: voxtralProvider,
   "azure-ensemble": azureEnsembleProvider,
+  voxtral: voxtralProvider,
 };
 
 export function getProvider(id: string): PronunciationProvider {

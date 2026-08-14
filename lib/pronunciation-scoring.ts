@@ -1,14 +1,9 @@
 /**
- * Single source of truth for pronunciation scoring.
- *
- * Used by BOTH:
- *   - lib/azure-stt.ts          (pass 1: browser SDK, instant scores)
- *   - app/api/pronunciation/route.ts (pass 2: REST with reference text, accurate scores)
- *
- * Pass 2 overwrites pass 1 in the UI, so both passes MUST use identical
- * scoring or the final displayed scores silently revert to whatever this
- * file's older copy said (this exact bug shipped once — don't reintroduce it
- * by redefining these functions locally).
+ * Single source of truth for pronunciation scoring, consumed by
+ * lib/pronunciation/providers/azure-ensemble.ts — the live pronunciation
+ * provider (Azure Pronunciation Assessment REST + Deepgram + Mistral judge).
+ * The voxtral provider remains registered as an on-demand comparison run,
+ * scoring from Voxtral's own judge output rather than Azure phoneme scores.
  *
  * Scoring philosophy:
  *   - UNFLAGGED words: lenient. Avg-phoneme (robust to single-phoneme ASR

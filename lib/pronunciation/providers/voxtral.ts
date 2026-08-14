@@ -15,8 +15,10 @@
  */
 
 import { mistralComplete, mistralVoxtralModel } from "@/lib/mistral";
+import { assessProcessLabel } from "@/lib/turn-labels";
+import { logServerEvent } from "@/lib/server-log";
 import type { PronunciationProvider, PronunciationAssessParams } from "@/lib/pronunciation/types";
-import type { PronunciationResult } from "@/lib/azure-stt";
+import type { PronunciationResult } from "@/lib/pronunciation/types";
 
 const SYSTEM_PROMPT = `You are an expert phonetician assessing the spoken pronunciation of a second-language learner. You are given the learner's audio recording directly as input — listen to it yourself and judge pronunciation the way an experienced human examiner listening in the room would. You are not given any transcript or other engine's output; your own hearing of the audio is the only evidence.
 
@@ -99,8 +101,15 @@ async function assess({
   langCode,
   context = "",
   clientWpm = 0,
+  turnLogId,
 }: PronunciationAssessParams): Promise<PronunciationResult | null> {
   if (!process.env.MISTRAL_API_KEY) throw new Error("MISTRAL_API_KEY missing");
+
+  // "EO" = Evaluation Oral — see lib/turn-labels.ts. Falls back to the old
+  // unlabeled context string when called without a turnLogId (e.g. the admin
+  // pronunciation lab's replay path, outside the live H-01 timeline).
+  const processLabel = turnLogId ? assessProcessLabel("EO", turnLogId) : "voxtral-judge";
+  logServerEvent("eo_request_received", { turnLogId, process: processLabel });
 
   const langLabel = LANG_LABELS[langCode] ?? "English";
   const format = audioFormat(contentType);
@@ -127,7 +136,7 @@ async function assess({
       ],
       maxTokens: 2000,
       json: true,
-      context: "voxtral-judge",
+      context: processLabel,
     });
     const cleaned = raw.trim().replace(/^```json\s*|\s*```$/g, "").trim();
     parsed = JSON.parse(cleaned) as VoxtralJudgeResult;
@@ -136,6 +145,7 @@ async function assess({
     }
   } catch (e) {
     console.error("[pronunciation] voxtral failed:", e);
+    logServerEvent("eo_failed", { turnLogId, process: processLabel, error: String(e) });
     throw e instanceof Error ? e : new Error(String(e));
   }
 
@@ -158,6 +168,7 @@ async function assess({
   console.log(
     `[pronunciation] voxtral OK score=${score} verdicts=${parsed.words.map((w) => `${w.w}:${w.v}`).join(" ")}${parsed.summary ? ` — ${parsed.summary}` : ""}`
   );
+  logServerEvent("eo_complete", { turnLogId, process: processLabel, provider: "voxtral", model: mistralVoxtralModel(), score });
 
   return {
     text: parsed.transcript,
@@ -174,5 +185,6 @@ async function assess({
 export const voxtralProvider: PronunciationProvider = {
   id: "voxtral",
   label: "Voxtral (direct audio, single call) — default",
+  modelLabel: mistralVoxtralModel(),
   assess,
 };

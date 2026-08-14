@@ -2,6 +2,7 @@ import { acquireMistralSlot, releaseMistralSlot, withMistralSlot } from "@/lib/m
 import { logServerEvent } from "@/lib/server-log";
 
 const MISTRAL_API = "https://api.mistral.ai/v1/chat/completions";
+const MISTRAL_TRANSCRIBE_API = "https://api.mistral.ai/v1/audio/transcriptions";
 
 export type MistralRole = "system" | "user" | "assistant";
 
@@ -36,6 +37,17 @@ export function mistralModel(override?: string): string {
   return override ?? process.env.MISTRAL_MODEL ?? "mistral-large-latest";
 }
 
+/**
+ * Model for the live conversation call (app/api/chat/route.ts) specifically —
+ * separate from MISTRAL_MODEL so it can be tuned/tested (e.g. mistral-small-latest
+ * for latency) without also changing the end-of-session CEFR evaluation, which
+ * reads mistralModel() directly and stays on the default/large model.
+ * Falls back to MISTRAL_MODEL, then the same "mistral-large-latest" default.
+ */
+export function mistralChatModel(): string {
+  return process.env.MISTRAL_CHAT_MODEL ?? process.env.MISTRAL_MODEL ?? "mistral-large-latest";
+}
+
 export function mistralPronunciationModel(): string {
   return (
     process.env.MISTRAL_PRONUNCIATION_MODEL ??
@@ -47,6 +59,15 @@ export function mistralPronunciationModel(): string {
 /** Voxtral (audio-input) model — separate family from the text models above. */
 export function mistralVoxtralModel(): string {
   return process.env.MISTRAL_VOXTRAL_MODEL ?? "voxtral-small-latest";
+}
+
+/**
+ * Model for the dedicated transcription endpoint (mistralTranscribe below) —
+ * a different Mistral model family/endpoint than mistralVoxtralModel()'s
+ * chat-completions judge call: optimized for speed, no reasoning.
+ */
+export function mistralTranscribeModel(): string {
+  return process.env.MISTRAL_TRANSCRIBE_MODEL ?? "voxtral-mini-latest";
 }
 
 function buildMessages(system: string | undefined, messages: MistralMessage[]): MistralMessage[] {
@@ -188,6 +209,87 @@ export async function mistralComplete(params: {
     const content = data.choices?.[0]?.message?.content;
     if (typeof content !== "string") throw new Error("Mistral: empty response");
     return content;
+  });
+}
+
+export interface MistralTranscription {
+  text: string;
+  /** Word-level timing, when the API returns it — best-effort, used only for WPM. */
+  words?: Array<{ word: string; start: number; end: number }>;
+}
+
+/**
+ * POSTs to the dedicated transcription endpoint (voxtral-mini-latest by
+ * default) — a different, faster/cheaper endpoint than mistralComplete's
+ * chat-completions-with-audio-input path, meant for verbatim transcription
+ * only (no judging). Mirrors postWithRetry's retry/logging conventions but
+ * against a multipart body, since this endpoint takes a file upload rather
+ * than a JSON messages array.
+ */
+export async function mistralTranscribe(params: {
+  audio: ArrayBuffer;
+  filename: string;
+  contentType: string;
+  model?: string;
+  language?: string;
+  /** Label for the log timeline, e.g. "ET1" via lib/turn-labels.ts. */
+  context?: string;
+}): Promise<MistralTranscription> {
+  const model = params.model ?? mistralTranscribeModel();
+  const context = params.context ?? "transcribe";
+
+  return withMistralSlot(async () => {
+    let lastError: MistralHttpError | null = null;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const form = new FormData();
+      form.append("file", new Blob([params.audio], { type: params.contentType }), params.filename);
+      form.append("model", model);
+      if (params.language) form.append("language", params.language);
+      form.append("timestamp_granularities", "word");
+
+      const startedAt = Date.now();
+      logServerEvent("mistral_request_start", { context, model, attempt: attempt + 1, maxAttempts: MAX_ATTEMPTS });
+
+      const res = await fetch(MISTRAL_TRANSCRIBE_API, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${requireApiKey()}` },
+        body: form,
+      });
+
+      if (res.ok) {
+        logServerEvent("mistral_request_success", {
+          context,
+          model,
+          attempt: attempt + 1,
+          durationMs: Date.now() - startedAt,
+        });
+        const data = (await res.json()) as {
+          text?: string;
+          // With timestamp_granularities=word, each word comes back as its own
+          // top-level segment (type: "transcription_segment") — confirmed live
+          // against the real API (2026-08-12), not documented in the API docs
+          // at the time this was written.
+          segments?: Array<{ text?: string; start?: number; end?: number }>;
+        };
+        if (typeof data.text !== "string") throw new Error("Mistral transcribe: empty response");
+        const words = (data.segments ?? [])
+          .map((s) => ({ word: (s.text ?? "").trim(), start: s.start ?? 0, end: s.end ?? 0 }))
+          .filter((w) => w.word);
+        return { text: data.text, words: words.length ? words : undefined };
+      }
+
+      const willRetry = isRetryableStatus(res.status) && attempt < MAX_ATTEMPTS - 1;
+      const error = await describeError(res, context, {
+        model,
+        attempt: attempt + 1,
+        willRetry,
+        durationMs: Date.now() - startedAt,
+      });
+      if (!willRetry) throw error;
+      lastError = error;
+      await sleep(backoffDelayMs(attempt, error.retryAfterMs));
+    }
+    throw lastError ?? new Error(`Mistral API: ${context} failed`);
   });
 }
 

@@ -1,4 +1,4 @@
-import type { PronunciationResult, WordScore } from "@/lib/azure-stt";
+import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
 import { scoreToLevel, computeCompositeCefrScore } from "@/lib/cefr-score";
 
@@ -275,7 +275,7 @@ export function UtteranceBadges({ p }: { p: PronunciationResult }) {
       <span
         title={
           p.source === "azure"
-            ? "Scored by Azure Pronunciation Assessment (phoneme-level)"
+            ? "Scored by Azure + Deepgram, judged by Mistral"
             : p.source === "voxtral"
             ? "Scored by Voxtral (Mistral direct-audio judge)"
             : "Scored by Deepgram confidence — Azure assessment pending"

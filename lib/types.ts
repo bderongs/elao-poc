@@ -1,4 +1,5 @@
-import type { PronunciationResult } from "@/lib/azure-stt";
+import type { PronunciationResult } from "@/lib/pronunciation/types";
+import type { CapabilityConfig } from "@/lib/system-config";
 
 // Domain types shared across API routes, the admin tool, and the eval lab —
 // single source of truth so route handlers and pages don't redeclare the
@@ -59,6 +60,11 @@ export interface SessionSummary {
 export interface SessionDetailRow extends SessionSummary {
   audio_url: string | null;
   source_url: string | null;
+  /** Snapshot of which provider/model each capability used, taken at session
+   *  save time — see lib/system-config.ts. Null for sessions saved before
+   *  this column existed, and for upload/speechace sessions (no live turn
+   *  pipeline ran). */
+  providers_json: CapabilityConfig[] | null;
 }
 
 export interface TurnRow {

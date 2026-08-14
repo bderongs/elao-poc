@@ -8,6 +8,7 @@
  */
 
 import { getProvider } from "@/lib/pronunciation/registry";
+import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
 
 export async function POST(req: Request) {
   const formData = await req.formData();
@@ -18,6 +19,8 @@ export async function POST(req: Request) {
   const referenceText = (formData.get("referenceText") as string | null) ?? "";
   // The examiner's question the learner was answering.
   const context = (formData.get("context") as string | null) ?? "";
+  // H-01 latency-instrumentation id — see lib/pronunciation/types.ts.
+  const turnLogId = (formData.get("turnLogId") as string | null) ?? undefined;
 
   if (!audio || audio.size === 0) return new Response("No audio", { status: 400 });
 
@@ -33,13 +36,14 @@ export async function POST(req: Request) {
   const audioBuf = await audio.arrayBuffer();
 
   try {
-    const result = await getProvider("voxtral").assess({
+    const result = await getProvider(LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID).assess({
       audio: audioBuf,
       contentType,
       langCode,
       referenceText,
       context,
       clientWpm,
+      turnLogId,
     });
     return Response.json(result);
   } catch (e) {
