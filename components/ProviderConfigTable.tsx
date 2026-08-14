@@ -1,6 +1,15 @@
 import { Fragment } from "react";
 import type { CapabilityConfig } from "@/lib/system-config";
 import { FLUENCY_WPM_BANDS, FLUENCY_WPM_HARD_BOUNDARIES } from "@/lib/cefr-prompt";
+import {
+  estimateSttCostUsd,
+  estimateTtsCostUsd,
+  estimateEtCostUsd,
+  estimateEoCostUsd,
+  estimateCefrEvalCostUsd,
+  formatUsd,
+  type CostEstimate,
+} from "@/lib/session-cost";
 import styles from "@/components/admin.module.css";
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -34,6 +43,49 @@ function FluencyWpmTooltip() {
   );
 }
 
+// Cost per session isn't part of CapabilityConfig itself (lib/system-config.ts
+// stays about "what's live", not "what it costs") — computed here, per row,
+// from lib/session-cost.ts's estimators.
+function costForCapability(c: CapabilityConfig): CostEstimate | null {
+  switch (c.capability) {
+    case "STT":
+      return estimateSttCostUsd(c.providerId);
+    case "ET":
+      return estimateEtCostUsd(c.providerId, c.modelLabel);
+    case "EO":
+      return estimateEoCostUsd(c.providerId, c.modelLabel);
+    case "CEFR_EVAL":
+      return estimateCefrEvalCostUsd(c.providerId, c.modelLabel);
+    case "TTS":
+      return null; // no single number — varies by language, see perLanguage rows
+  }
+}
+
+function blendedTtsCost(perLanguage: NonNullable<CapabilityConfig["perLanguage"]>): CostEstimate {
+  const entries = Object.values(perLanguage);
+  const costs = entries.map((p) => estimateTtsCostUsd(p.providerId)?.usdPerSession ?? 0);
+  const usdPerSession = costs.reduce((a, b) => a + b, 0) / entries.length;
+  return { usdPerSession, note: `Average across ${entries.length} languages' live TTS provider` };
+}
+
+// Hover tooltip showing the cost estimate's basis (audio minutes, token
+// counts, per-unit price) — same interaction pattern as FluencyWpmTooltip.
+function CostCell({ estimate }: { estimate: CostEstimate | null }) {
+  if (!estimate) return <td data-label="Est. cost / session">—</td>;
+  return (
+    <td data-label="Est. cost / session">
+      <span className={styles.tooltipWrap}>
+        <span tabIndex={0} style={{ cursor: "default", borderBottom: "1px dotted #6b7280" }}>
+          {formatUsd(estimate.usdPerSession)}
+        </span>
+        <span className={styles.tooltipBox} style={{ width: 240 }}>
+          {estimate.note}
+        </span>
+      </span>
+    </td>
+  );
+}
+
 /**
  * Renders a CapabilityConfig[] (lib/system-config.ts) as a table — used both
  * by the admin "System configuration" page (what's live right now) and the
@@ -41,6 +93,9 @@ function FluencyWpmTooltip() {
  * views never visually drift apart.
  */
 export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) {
+  const rowCosts = config.map((c) => (c.perLanguage ? blendedTtsCost(c.perLanguage) : costForCapability(c)));
+  const totalUsd = rowCosts.reduce((sum, c) => sum + (c?.usdPerSession ?? 0), 0);
+
   return (
     <div className={styles.tableCard}>
       <table className={styles.table}>
@@ -49,10 +104,23 @@ export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) 
             <th>Capability</th>
             <th>Provider</th>
             <th>Model</th>
+            <th>
+              Est. cost / session
+              <span className={styles.tooltipWrap}>
+                <span className={styles.tooltipIcon} tabIndex={0}>
+                  i
+                </span>
+                <span className={styles.tooltipBox} style={{ textTransform: "none", fontWeight: 400 }}>
+                  Rough estimate, not a billing reconciliation: current vendor list pricing × average
+                  per-session usage (turns, words, audio duration) measured from recent real sessions. Hover
+                  a value for its basis.
+                </span>
+              </span>
+            </th>
           </tr>
         </thead>
         <tbody>
-          {config.map((c) => (
+          {config.map((c, i) => (
             <Fragment key={c.capability}>
               <tr>
                 <td data-label="Capability">
@@ -61,6 +129,7 @@ export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) 
                 </td>
                 <td data-label="Provider">{c.perLanguage ? "Varies by language" : c.providerLabel}</td>
                 <td data-label="Model">{c.perLanguage ? "—" : c.modelLabel}</td>
+                <CostCell estimate={rowCosts[i]} />
               </tr>
               {c.perLanguage &&
                 Object.entries(c.perLanguage).map(([lang, p]) => (
@@ -70,10 +139,21 @@ export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) 
                     </td>
                     <td data-label="Provider">{p.providerLabel}</td>
                     <td data-label="Model">{p.modelLabel}</td>
+                    <CostCell estimate={estimateTtsCostUsd(p.providerId)} />
                   </tr>
                 ))}
             </Fragment>
           ))}
+          <tr>
+            <td data-label="Capability" style={{ fontWeight: 700 }}>
+              Total (est.)
+            </td>
+            <td data-label="Provider" />
+            <td data-label="Model" />
+            <td data-label="Est. cost / session" style={{ fontWeight: 700 }}>
+              {formatUsd(totalUsd)}
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>

@@ -40,7 +40,17 @@
       "Bash(node /private/tmp/claude-501/-Users-baptiste-ELAO-Speaking/0fac019c-1b10-4909-a8f9-32e22dd25de4/scratchpad/wpmcheck.mjs)",
       "Bash(npx tsx *)",
       "Bash(curl -s \"https://www.elao-test.com/wp-content/uploads/sites/2/2024/02/ELAO_RVB.svg\" -o /Users/baptiste/ELAO-Speaking/public/images/elao-logo.svg)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "WebFetch(domain:mistral.ai)",
+      "WebFetch(domain:azure.microsoft.com)",
+      "WebFetch(domain:deepgram.com)",
+      "WebFetch(domain:prices.azure.com)",
+      "Bash(curl -s 'https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'\\\\''Cognitive%20Services'\\\\''%20and%20contains\\(productName,%20'\\\\''Speech'\\\\''\\)')",
+      "Bash(curl -s 'https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20%27Cognitive%20Services%27')",
+      "Bash(curl -s 'https://prices.azure.com/api/retail/prices?$filter=contains\\(productName,%20%27Speech%27\\)')",
+      "Bash(curl -s 'https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Azure%20Speech%27%20and%20armRegionName%20eq%20%27eastus%27')",
+      "Bash(grep -n \"function buildCommonRules\\\\|^export function getSystemPrompt\\\\|en:\\\\|return \\\\`You are Alex\" lib/conversation-prompts.ts)",
+      "Bash(npx tsx -e ' *)"
     ]
   }
 }
