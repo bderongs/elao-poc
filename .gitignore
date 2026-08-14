@@ -16,6 +16,8 @@ out/
 # Large binary assets — serve from CDN or object storage instead
 *.fbx
 *.glb
+# ...except the placeholder avatar, committed until it's moved to a CDN
+!public/avatars/brunette-t.glb
 
 # build artifacts
 tsconfig.tsbuildinfo
