@@ -3,12 +3,13 @@
  * Thin wrapper around the provider registry (lib/pronunciation/registry.ts) —
  * the actual triangulation logic lives in lib/pronunciation/providers/*, so
  * this route and the admin pronunciation-lab replay path share one
- * implementation. AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, MISTRAL_API_KEY never
- * leave the server.
+ * implementation. Provider is picked per-language (see
+ * lib/pronunciation-rollup.ts's LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG).
+ * AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, MISTRAL_API_KEY never leave the server.
  */
 
 import { getProvider } from "@/lib/pronunciation/registry";
-import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
+import { liveConversationPronunciationProviderId } from "@/lib/pronunciation-rollup";
 
 export async function POST(req: Request) {
   const formData = await req.formData();
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
   const audioBuf = await audio.arrayBuffer();
 
   try {
-    const result = await getProvider(LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID).assess({
+    const result = await getProvider(liveConversationPronunciationProviderId(langCode)).assess({
       audio: audioBuf,
       contentType,
       langCode,

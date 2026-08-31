@@ -6,9 +6,9 @@
  * through the 5 registries directly, so the "what's live" view and the
  * "what a session used" view can never drift apart from each other.
  *
- * Each registry's own LIVE_..._ID constant (or, for TTS, LIVE_TTS_PROVIDER_BY_LANG)
- * remains the actual switch — this file only reads them, it doesn't decide
- * anything itself.
+ * Each registry's own LIVE_..._ID constant (or, for TTS and EO, a
+ * LIVE_..._PROVIDER_BY_LANG map) remains the actual switch — this file only
+ * reads them, it doesn't decide anything itself.
  */
 
 import type { ConvLang } from "@/lib/conversation-prompts";
@@ -16,7 +16,7 @@ import { getProvider as getSttProvider, LIVE_STT_PROVIDER_ID } from "@/lib/stt/r
 import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { getProvider as getPronunciationProvider } from "@/lib/pronunciation/registry";
-import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
+import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG } from "@/lib/pronunciation-rollup";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
 
@@ -31,23 +31,32 @@ export interface ProviderConfig {
 export interface CapabilityConfig extends ProviderConfig {
   capability: "STT" | "TTS" | "ET" | "EO" | "CEFR_EVAL";
   capabilityLabel: string;
-  /** TTS only — provider choice varies by language; absent for the other 4. */
+  /** TTS and EO only — provider choice varies by language; absent for STT/ET/CEFR_EVAL. */
   perLanguage?: Partial<Record<ConvLang, ProviderConfig>>;
 }
 
 export function getSystemConfig(): CapabilityConfig[] {
   const stt = getSttProvider(LIVE_STT_PROVIDER_ID);
   const et = getEtProvider(LIVE_ET_PROVIDER_ID);
-  const eo = getPronunciationProvider(LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID);
   const cefrEval = getLlmProvider(LIVE_CONVERSATION_MODEL_ID);
 
-  const perLanguage: Partial<Record<ConvLang, ProviderConfig>> = {};
+  const ttsPerLanguage: Partial<Record<ConvLang, ProviderConfig>> = {};
   for (const lang of ALL_LANGUAGES) {
     const provider = getTtsProvider(LIVE_TTS_PROVIDER_BY_LANG[lang]);
-    perLanguage[lang] = {
+    ttsPerLanguage[lang] = {
       providerId: provider.id,
       providerLabel: provider.label,
       modelLabel: provider.voiceLabel(lang),
+    };
+  }
+
+  const eoPerLanguage: Partial<Record<ConvLang, ProviderConfig>> = {};
+  for (const lang of ALL_LANGUAGES) {
+    const provider = getPronunciationProvider(LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG[lang]);
+    eoPerLanguage[lang] = {
+      providerId: provider.id,
+      providerLabel: provider.label,
+      modelLabel: provider.modelLabel,
     };
   }
 
@@ -67,7 +76,7 @@ export function getSystemConfig(): CapabilityConfig[] {
       providerId: "per-language",
       providerLabel: "Varies by language — see perLanguage",
       modelLabel: "Varies by language — see perLanguage",
-      perLanguage,
+      perLanguage: ttsPerLanguage,
     },
     {
       capability: "ET",
@@ -79,9 +88,13 @@ export function getSystemConfig(): CapabilityConfig[] {
     {
       capability: "EO",
       capabilityLabel: "Evaluation Oral (pronunciation assessment)",
-      providerId: eo.id,
-      providerLabel: eo.label,
-      modelLabel: eo.modelLabel,
+      // No single global provider for EO either, as of 2026-08-31 — Mistral
+      // Voxtral (direct audio call) for English/French, Azure + Deepgram
+      // (judged by Mistral) for the rest. perLanguage is the real answer.
+      providerId: "per-language",
+      providerLabel: "Varies by language — see perLanguage",
+      modelLabel: "Varies by language — see perLanguage",
+      perLanguage: eoPerLanguage,
     },
     {
       capability: "CEFR_EVAL",

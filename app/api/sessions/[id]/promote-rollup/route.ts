@@ -5,9 +5,10 @@ export const runtime = "nodejs";
 /**
  * POST /api/sessions/:id/promote-rollup
  * Overwrites a conversation session's headline pronunciation_scores with its latest
- * re-run from LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (currently
- * azure-ensemble) — see promoteConversationRollup for why this exists and what it
- * deliberately bypasses. No-op-turned-error for anything other than a
+ * re-run from its live pronunciation provider (Voxtral for en/fr, azure-ensemble
+ * for the rest — see liveConversationPronunciationProviderId in
+ * lib/pronunciation-rollup.ts) — see promoteConversationRollup for why this exists
+ * and what it deliberately bypasses. No-op-turned-error for anything other than a
  * fully-covered source: 'conversation' session. Gated by middleware.ts
  * (admin cookie required).
  */

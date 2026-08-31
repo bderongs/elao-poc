@@ -6,7 +6,6 @@ import type { SessionSummary } from "@/lib/types";
 import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { RecomputeRollupButton } from "@/components/RecomputeRollupButton";
 import { PromoteHeadlineButton } from "@/components/PromoteHeadlineButton";
-import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
 import styles from "./admin.module.css";
 
 export interface ProviderOption {
@@ -106,6 +105,7 @@ export function FullEvaluationPanel({
   pendingPronunciationIds,
   pendingEvalIds,
   canPromoteHeadline,
+  livePronunciationProviderId,
 }: {
   sessionId: string;
   sessionSource: SessionSummary["source"];
@@ -116,6 +116,7 @@ export function FullEvaluationPanel({
   pendingPronunciationIds: string[];
   pendingEvalIds: string[];
   canPromoteHeadline: boolean;
+  livePronunciationProviderId: string;
 }) {
   const router = useRouter();
   // Only providers without an existing (or in-flight) result are selected/
@@ -257,7 +258,7 @@ export function FullEvaluationPanel({
         ))}
       </div>
       {canPromoteHeadline && (
-        <PromoteHeadlineButton sessionId={sessionId} providerId={LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID} />
+        <PromoteHeadlineButton sessionId={sessionId} providerId={livePronunciationProviderId} />
       )}
 
       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6, marginTop: canPromoteHeadline ? 10 : 0 }}>

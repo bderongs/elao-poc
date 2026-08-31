@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { computePronunciationAvg, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID } from "@/lib/pronunciation-rollup";
+import { computePronunciationAvg, liveConversationPronunciationProviderId } from "@/lib/pronunciation-rollup";
 import { getSystemConfig } from "@/lib/system-config";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
@@ -631,8 +631,9 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
 
 /**
  * Overwrites a live-conversation session's headline `pronunciation_scores`
- * with its latest LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (currently
- * azure-ensemble) pronunciation-lab re-run — the one deliberate way to let a fresh
+ * with its latest re-run from that session's live pronunciation provider
+ * (liveConversationPronunciationProviderId — Voxtral for en/fr,
+ * azure-ensemble for the rest) — the one deliberate way to let a fresh
  * replay (e.g. after a prompt/calibration tweak to that provider) become the
  * number shown on the session, bypassing the protection in
  * recomputeSessionRollup. Unlike that function, this never touches
@@ -655,11 +656,12 @@ export async function promoteConversationRollup(sessionId: string): Promise<void
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("source")
+    .select("source, language")
     .eq("id", sessionId)
     .single();
   if (sessionError || !session) throw new Error(sessionError?.message ?? "session not found");
   if (session.source !== "conversation") throw new Error("promote-rollup is only for conversation sessions");
+  const liveProviderId = liveConversationPronunciationProviderId(session.language as string | null);
 
   const { data: turns, error: turnsError } = await supabase
     .from("session_turns")
@@ -674,7 +676,7 @@ export async function promoteConversationRollup(sessionId: string): Promise<void
     .from("session_turn_evaluations")
     .select("turn_id, result_json, error, created_at")
     .in("turn_id", turnIds)
-    .eq("provider_id", LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID)
+    .eq("provider_id", liveProviderId)
     .order("created_at", { ascending: false });
   if (evalsError) throw new Error(evalsError.message);
 
@@ -695,7 +697,7 @@ export async function promoteConversationRollup(sessionId: string): Promise<void
     const latest = latestByTurn.get(turnId);
     if (!latest || latest.error || !latest.result_json) {
       throw new Error(
-        `every recorded turn needs a successful ${LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID} pronunciation-lab run before promoting — run it from the gear first`,
+        `every recorded turn needs a successful ${liveProviderId} pronunciation-lab run before promoting — run it from the gear first`,
       );
     }
     results.push(latest.result_json);

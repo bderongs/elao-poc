@@ -21,6 +21,7 @@ export function RunEvaluationGear({
   pendingPronunciationIds,
   pendingEvalIds,
   canPromoteHeadline,
+  livePronunciationProviderId,
 }: {
   sessionId: string;
   sessionSource: SessionSummary["source"];
@@ -31,6 +32,7 @@ export function RunEvaluationGear({
   pendingPronunciationIds: string[];
   pendingEvalIds: string[];
   canPromoteHeadline: boolean;
+  livePronunciationProviderId: string;
 }) {
   const [open, setOpen] = useState(false);
   const anyPending = pendingPronunciationIds.length > 0 || pendingEvalIds.length > 0;
@@ -74,6 +76,7 @@ export function RunEvaluationGear({
             pendingPronunciationIds={pendingPronunciationIds}
             pendingEvalIds={pendingEvalIds}
             canPromoteHeadline={canPromoteHeadline}
+            livePronunciationProviderId={livePronunciationProviderId}
           />
         </div>
       )}

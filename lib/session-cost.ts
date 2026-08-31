@@ -58,6 +58,13 @@ const MISTRAL_TEXT_PRICE_FALLBACK = MISTRAL_TEXT_PRICE_PER_M["mistral-large-late
 const MISTRAL_TRANSCRIBE_PER_MIN = 0.003; // voxtral-mini-latest, dedicated transcription endpoint
 const MISTRAL_TTS_PER_1K_CHARS = 0.016; // voxtral-mini-tts-2603
 
+// voxtral-small-latest on /v1/chat/completions (checked mistral.ai/pricing/api,
+// 2026-08-31) — audio and text share one request but are priced separately;
+// output (transcript + verdict JSON) is priced separately again.
+const VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN = 0.004;
+const VOXTRAL_SMALL_TEXT_INPUT_PRICE_PER_M = 0.1;
+const VOXTRAL_SMALL_OUTPUT_PRICE_PER_M = 0.4;
+
 const AZURE_STT_PER_HOUR = 1.0;
 const AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR = 0.3; // billed on top of STT, same recognition call
 const AZURE_NEURAL_TTS_PER_1M_CHARS = 15.0;
@@ -82,6 +89,7 @@ function mistralTextCostUsd(modelLabel: string, inputChars: number, outputChars:
 const CEFR_SYSTEM_PROMPT_CHARS = 14451;
 const ET_SYSTEM_PROMPT_CHARS = 820;
 const EO_JUDGE_SYSTEM_CHARS = 4824;
+const VOXTRAL_SYSTEM_PROMPT_CHARS = 3333; // lib/pronunciation/providers/voxtral.ts's SYSTEM_PROMPT
 
 export interface CostEstimate {
   usdPerSession: number;
@@ -123,7 +131,34 @@ export function estimateEtCostUsd(providerId: string, modelLabel: string): CostE
 }
 
 export function estimateEoCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
-  if (providerId !== "azure-ensemble") return null; // the voxtral direct-audio alternative isn't live today
+  if (providerId === "voxtral") {
+    // One /v1/chat/completions call per turn: the learner's raw audio (billed
+    // per audio-minute, not tokens) plus SYSTEM_PROMPT + the short per-turn
+    // text wrapper (billed as text-input tokens); output is the transcript +
+    // one small JSON verdict per word (billed as output tokens). Only
+    // voxtral-small-latest is priced — the modelLabel param isn't branched on
+    // since that's the only Voxtral chat model this provider uses.
+    const langLabelChars = 8; // avg of the 6 LANG_LABELS entries in voxtral.ts
+    const userTextWrapperChars = 156; // fixed literal chars in voxtral.ts's userText template
+    const textInputChars = VOXTRAL_SYSTEM_PROMPT_CHARS + userTextWrapperChars + langLabelChars + assistantCharsPerTurn;
+    const perWordJsonOutChars = 20 + AVG_SESSION.charsPerWord; // {"w":"<word>","v":"good"}, overhead + avg word
+    const outputChars = userCharsPerTurn /* transcript */ + userWordsPerTurn * perWordJsonOutChars + 100; // + turn_score/summary wrapper
+
+    const audioUsd = userAudioMinutesPerSession * VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN;
+    const textInUsd = (textInputChars / CHARS_PER_TOKEN / 1_000_000) * VOXTRAL_SMALL_TEXT_INPUT_PRICE_PER_M;
+    const outUsd = (outputChars / CHARS_PER_TOKEN / 1_000_000) * VOXTRAL_SMALL_OUTPUT_PRICE_PER_M;
+    const perCallUsd = audioUsd + textInUsd + outUsd;
+    const usd = perCallUsd * AVG_SESSION.userTurns;
+
+    return {
+      usdPerSession: usd,
+      note:
+        `${AVG_SESSION.userTurns.toFixed(1)} calls × (${(userAudioMinutesPerSession / AVG_SESSION.userTurns).toFixed(2)} min audio × $${VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN}/min` +
+        ` + ~${Math.round(textInputChars / CHARS_PER_TOKEN)} tok text in + ~${Math.round(outputChars / CHARS_PER_TOKEN)} tok out, ${modelLabel})`,
+    };
+  }
+
+  if (providerId !== "azure-ensemble") return null;
 
   const deepgramUsd = userAudioMinutesPerSession * DEEPGRAM_NOVA3_PRERECORDED_MONO_PER_MIN;
   const azureUsd =

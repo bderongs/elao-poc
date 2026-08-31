@@ -184,7 +184,7 @@ async function assess({
 
 export const voxtralProvider: PronunciationProvider = {
   id: "voxtral",
-  label: "Voxtral (direct audio, single call) — default",
+  label: "Voxtral (direct audio, single call)",
   modelLabel: mistralVoxtralModel(),
   assess,
 };

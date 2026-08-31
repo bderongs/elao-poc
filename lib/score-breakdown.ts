@@ -3,7 +3,7 @@ import { globalScoreByModel, latestEvaluationResult, LIVE_CONVERSATION_MODEL_ID 
 import {
   pronunciationScoreByProvider,
   pronunciationAvgAttribution,
-  LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID,
+  liveConversationPronunciationProviderId,
 } from "@/lib/pronunciation-rollup";
 import type { CefrResult, EvaluationRow, TurnEvaluationRow, SessionDetailRow } from "@/lib/types";
 
@@ -83,7 +83,7 @@ export function buildScoreBreakdown(params: {
   const pronunciationProviderIds =
     session.source === "conversation"
       ? session.pronunciation_scores
-        ? [LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID]
+        ? [liveConversationPronunciationProviderId(session.language)]
         : []
       : pronunciationAvgAttribution(turnEvaluations)?.providerIds ?? [];
   const pronunciationSourceId = pronunciationProviderIds.length === 1 ? pronunciationProviderIds[0] : null;

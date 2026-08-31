@@ -16,7 +16,7 @@ import { buildScoreBreakdown } from "@/lib/score-breakdown";
 import {
   pronunciationProviderFullyCovered,
   pronunciationProviderPending,
-  LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID,
+  liveConversationPronunciationProviderId,
 } from "@/lib/pronunciation-rollup";
 import { latestEvaluationResult, isEvalProviderPending, LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
 import { formatDateTime } from "@/lib/format-date";
@@ -56,12 +56,17 @@ export default async function AdminSessionDetailPage({
   const turnsWithAudioIds = turns.filter((t) => t.audio_url).map((t) => t.id);
   const canRunBatchEvaluation = turnsWithAudioIds.length > 0;
 
+  // This session's language decides which pronunciation provider is "the
+  // live one" (LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG in
+  // lib/pronunciation-rollup.ts — Voxtral for en/fr, azure-ensemble for the
+  // rest), since that's no longer a single global id.
+  const livePronunciationProviderId = liveConversationPronunciationProviderId(session.language);
+
   // Every provider call is a fresh, paid API request with no caching (see
   // lib/pronunciation/assess.ts) — surface which providers already have a
   // complete score for this session so the gear doesn't invite re-billing
-  // for results we already have. A live conversation session's
-  // LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (azure-ensemble) pronunciation score
-  // and mistral CEFR eval come from the live flow itself
+  // for results we already have. A live conversation session's live
+  // pronunciation score and mistral CEFR eval come from the live flow itself
   // (session.pronunciation_scores / session.evaluation_json), never from the
   // session_turn_evaluations/session_evaluations lab tables — same
   // attribution gap buildScoreBreakdown already accounts for above.
@@ -69,7 +74,7 @@ export default async function AdminSessionDetailPage({
     .filter(
       (p) =>
         (session.source === "conversation" &&
-          p.id === LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID &&
+          p.id === livePronunciationProviderId &&
           session.pronunciation_scores != null) ||
         pronunciationProviderFullyCovered(turnEvaluations, p.id, turnsWithAudioIds)
     )
@@ -92,13 +97,13 @@ export default async function AdminSessionDetailPage({
     .filter((p) => isEvalProviderPending(evaluations, p.id))
     .map((p) => p.id);
 
-  // Whether a fresh LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID (azure-ensemble)
-  // pronunciation-lab re-run exists for every recorded turn — i.e. there's
-  // something to promote over the live flow's original pronunciation_scores (see
+  // Whether a fresh live-pronunciation-provider (see livePronunciationProviderId
+  // above) lab re-run exists for every recorded turn — i.e. there's something
+  // to promote over the live flow's original pronunciation_scores (see
   // PromoteHeadlineButton / promoteConversationRollup).
   const canPromoteHeadline =
     session.source === "conversation" &&
-    pronunciationProviderFullyCovered(turnEvaluations, LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID, turnsWithAudioIds);
+    pronunciationProviderFullyCovered(turnEvaluations, livePronunciationProviderId, turnsWithAudioIds);
 
   return (
     <div>
@@ -164,6 +169,7 @@ export default async function AdminSessionDetailPage({
               pendingPronunciationIds={pendingPronunciationIds}
               pendingEvalIds={pendingEvalIds}
               canPromoteHeadline={canPromoteHeadline}
+              livePronunciationProviderId={livePronunciationProviderId}
             />
           ) : undefined
         }

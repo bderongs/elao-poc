@@ -50,7 +50,13 @@
       "Bash(curl -s 'https://prices.azure.com/api/retail/prices?$filter=contains\\(productName,%20%27Speech%27\\)')",
       "Bash(curl -s 'https://prices.azure.com/api/retail/prices?$filter=productName%20eq%20%27Azure%20Speech%27%20and%20armRegionName%20eq%20%27eastus%27')",
       "Bash(grep -n \"function buildCommonRules\\\\|^export function getSystemPrompt\\\\|en:\\\\|return \\\\`You are Alex\" lib/conversation-prompts.ts)",
-      "Bash(npx tsx -e ' *)"
+      "Bash(npx tsx -e ' *)",
+      "Bash(git -C /Users/baptiste/ELAO-Speaking diff --stat)",
+      "Bash(git -C /Users/baptiste/ELAO-Speaking diff .claude/settings.json)",
+      "Bash(git -C /Users/baptiste/ELAO-Speaking diff -- lib/pronunciation-rollup.ts lib/system-config.ts)",
+      "Bash(curl -s -D - -o /dev/null http://localhost:3417/admin/system-config)",
+      "Bash(pkill -f \"next dev -p 3417\")",
+      "Bash(git -C /Users/baptiste/ELAO-Speaking diff -- lib/session-cost.ts)"
     ]
   }
 }

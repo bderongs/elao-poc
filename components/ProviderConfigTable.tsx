@@ -52,20 +52,36 @@ function costForCapability(c: CapabilityConfig): CostEstimate | null {
       return estimateSttCostUsd(c.providerId);
     case "ET":
       return estimateEtCostUsd(c.providerId, c.modelLabel);
-    case "EO":
-      return estimateEoCostUsd(c.providerId, c.modelLabel);
     case "CEFR_EVAL":
       return estimateCefrEvalCostUsd(c.providerId, c.modelLabel);
     case "TTS":
+    case "EO":
       return null; // no single number — varies by language, see perLanguage rows
   }
 }
 
-function blendedTtsCost(perLanguage: NonNullable<CapabilityConfig["perLanguage"]>): CostEstimate {
+// Cost for one language's provider, generalized across every capability that
+// can have a perLanguage breakdown (currently TTS and EO) — mirrors
+// costForCapability's per-capability dispatch above.
+function costForLanguageProvider(capability: CapabilityConfig["capability"], p: { providerId: string; modelLabel: string }): CostEstimate | null {
+  switch (capability) {
+    case "TTS":
+      return estimateTtsCostUsd(p.providerId);
+    case "EO":
+      return estimateEoCostUsd(p.providerId, p.modelLabel);
+    default:
+      return null;
+  }
+}
+
+function blendedPerLanguageCost(
+  capability: CapabilityConfig["capability"],
+  perLanguage: NonNullable<CapabilityConfig["perLanguage"]>,
+): CostEstimate {
   const entries = Object.values(perLanguage);
-  const costs = entries.map((p) => estimateTtsCostUsd(p.providerId)?.usdPerSession ?? 0);
+  const costs = entries.map((p) => costForLanguageProvider(capability, p)?.usdPerSession ?? 0);
   const usdPerSession = costs.reduce((a, b) => a + b, 0) / entries.length;
-  return { usdPerSession, note: `Average across ${entries.length} languages' live TTS provider` };
+  return { usdPerSession, note: `Average across ${entries.length} languages' live provider` };
 }
 
 // Hover tooltip showing the cost estimate's basis (audio minutes, token
@@ -93,7 +109,7 @@ function CostCell({ estimate }: { estimate: CostEstimate | null }) {
  * views never visually drift apart.
  */
 export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) {
-  const rowCosts = config.map((c) => (c.perLanguage ? blendedTtsCost(c.perLanguage) : costForCapability(c)));
+  const rowCosts = config.map((c) => (c.perLanguage ? blendedPerLanguageCost(c.capability, c.perLanguage) : costForCapability(c)));
   const totalUsd = rowCosts.reduce((sum, c) => sum + (c?.usdPerSession ?? 0), 0);
 
   return (
@@ -139,7 +155,7 @@ export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) 
                     </td>
                     <td data-label="Provider">{p.providerLabel}</td>
                     <td data-label="Model">{p.modelLabel}</td>
-                    <CostCell estimate={estimateTtsCostUsd(p.providerId)} />
+                    <CostCell estimate={costForLanguageProvider(c.capability, p)} />
                   </tr>
                 ))}
             </Fragment>

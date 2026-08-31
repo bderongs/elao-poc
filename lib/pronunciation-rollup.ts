@@ -1,19 +1,43 @@
+import type { ConvLang } from "@/lib/conversation-prompts";
 import type { PronunciationAvg, TurnEvaluationRow } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 
 /**
  * The single source of truth for which lib/pronunciation/registry.ts
- * provider is live — app/api/pronunciation/route.ts calls
- * getProvider(LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID) directly, so this
- * constant IS the switch, not just a label for one. Was "azure-ensemble"
+ * provider is live PER LANGUAGE — app/api/pronunciation/route.ts resolves
+ * this map via liveConversationPronunciationProviderId(), so it IS the
+ * switch, not just a label for one. Was a single global "azure-ensemble"
  * until the client confirmed Voxtral looks better on real sessions (M8
- * Track M, 2026-08-10); switched back to "azure-ensemble" on 2026-08-14 at
- * the client's request (Azure + Deepgram evidence, judged by Mistral) — voxtral
- * remains registered and available as an on-demand comparison run from the
- * admin gear. See lib/system-config.ts, which surfaces this (and the other 4
- * capabilities' live provider) in the admin UI and per-session logs/records.
+ * Track M, 2026-08-10), briefly went all-Voxtral, then back to
+ * "azure-ensemble" everywhere on 2026-08-14 at the client's request. Split
+ * per-language on 2026-08-31: Voxtral (direct Mistral audio call) for
+ * English/French, azure-ensemble (Azure + Deepgram, judged by Mistral) for
+ * the rest — same shape as lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
+ * azure-ensemble remains registered and available as an on-demand comparison
+ * run from the admin gear for every language. See lib/system-config.ts,
+ * which surfaces this (and the other 4 capabilities' live provider) in the
+ * admin UI and per-session logs/records.
  */
-export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_ID = "azure-ensemble";
+export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG: Record<ConvLang, string> = {
+  en: "voxtral",
+  fr: "voxtral",
+  "nl-BE": "azure-ensemble",
+  es: "azure-ensemble",
+  it: "azure-ensemble",
+  de: "azure-ensemble",
+};
+
+const DEFAULT_PRONUNCIATION_PROVIDER_ID = "azure-ensemble";
+
+/**
+ * Resolves the live pronunciation provider id for a session/turn's language.
+ * Accepts a loose string (form-data language codes, nullable session.language
+ * columns on older rows) and falls back to the non-en/fr default for
+ * anything unrecognized, rather than throwing.
+ */
+export function liveConversationPronunciationProviderId(language: string | null | undefined): string {
+  return LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG[language as ConvLang] ?? DEFAULT_PRONUNCIATION_PROVIDER_ID;
+}
 
 /**
  * Session-level pronunciation aggregate from a set of per-turn results —
