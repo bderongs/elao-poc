@@ -369,6 +369,11 @@ interface SpeechaceReport {
 }
 
 const SPEECHACE_FETCH_HEADERS = { "User-Agent": "Mozilla/5.0", Accept: "application/json" };
+// A hung connection (seen in practice after a heavy day of Speechace traffic)
+// would otherwise stall one of the limited concurrent workers in
+// createSpeechaceImportSessions indefinitely, since fetch() has no default
+// timeout — one stuck request can tank the whole batch's throughput.
+const SPEECHACE_FETCH_TIMEOUT_MS = 15_000;
 
 function parseSpeechaceReportId(reportUrl: string): string {
   const match = reportUrl.match(/\/placement\/report\/([a-f0-9]+)\/?/i);
@@ -466,6 +471,7 @@ export async function createSpeechaceImportSession(
 
   const reportRes = await fetch(`https://speak.speechace.co/placement/api/report/${reportId}/`, {
     headers: SPEECHACE_FETCH_HEADERS,
+    signal: AbortSignal.timeout(SPEECHACE_FETCH_TIMEOUT_MS),
   });
   if (!reportRes.ok) throw new Error(`Speechace report fetch failed: HTTP ${reportRes.status}`);
   const report = (await reportRes.json()) as SpeechaceReport;
@@ -514,7 +520,7 @@ export async function createSpeechaceImportSession(
     try {
       const audioRes = await fetch(
         `https://speak.speechace.co/placement/api/question/attempt/${q.question_attempt_id}/audio/?token=${reportId}`,
-        { headers: SPEECHACE_FETCH_HEADERS },
+        { headers: SPEECHACE_FETCH_HEADERS, signal: AbortSignal.timeout(SPEECHACE_FETCH_TIMEOUT_MS) },
       );
       if (audioRes.ok) {
         const path = `${language}/${datePrefix}/${sessionId}/turn-${i}.wav`;
