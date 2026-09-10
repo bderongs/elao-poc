@@ -82,6 +82,10 @@ export default function Home() {
   const startedAtRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
   const isSpeakingRef = useRef(false);
+  /** Aborts the in-flight /api/chat SSE stream — set at the start of handleUserTurn,
+   *  used by handleBargeIn to stop the server generating more of a reply the user
+   *  already started talking over. */
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
   const sessionSavedRef = useRef(false);
   /**
    * Difficulty rung to target the NEXT examiner question — set by ET's most
@@ -779,6 +783,20 @@ export default function Home() {
       }
     };
 
+    // Barge-in: the user kept talking through lib/turn-vad.ts's BARGE_IN_MS
+    // while the avatar was still speaking. Cut the avatar off immediately —
+    // stop whatever's playing/queued and abort the /api/chat stream feeding
+    // it more chunks — instead of letting it talk over the user to the end
+    // of the sentence/reply. isSpeakingRef flips to false as a direct result
+    // of player.interrupt()'s onAmplitudeChange(0) call below, so by the time
+    // this utterance's onSpeechEnd fires it's processed immediately rather
+    // than buffered (willBuffer reads isSpeakingRef/isProcessingRef).
+    const handleBargeIn = () => {
+      if (!isSpeakingRef.current) return; // avatar already finished — nothing to interrupt
+      chatAbortControllerRef.current?.abort();
+      playerRef.current?.interrupt();
+    };
+
     // Start turn-taking — failure is non-fatal (avatar TTS still works).
     try {
       if (!micStreamRef.current) throw new Error("mic stream unavailable");
@@ -787,6 +805,7 @@ export default function Home() {
           if (!isSpeakingRef.current) setPartialUser("…"); // listening indicator — no live captions without a streaming ASR
         },
         onSpeechEnd: () => { void onSpeechEnd(); },
+        onBargeIn: handleBargeIn,
       });
       startTurnRecording(); // begin recording the first user turn
 
@@ -844,6 +863,8 @@ export default function Home() {
       // turn_stt_final includes any buffering wait (avatar still speaking),
       // so the two are logged separately rather than folded into one number.
       logClientEvent("turn_chat_request_sent", { turnLogId: logId, process, rung });
+      const abortController = new AbortController();
+      chatAbortControllerRef.current = abortController;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -857,6 +878,7 @@ export default function Home() {
           isStart,
           avoidDomain: domainStreakRef.current >= MAX_DOMAIN_STREAK ? currentDomainRef.current ?? undefined : undefined,
         }),
+        signal: abortController.signal,
       });
 
       if (!res.body) {
@@ -961,9 +983,16 @@ export default function Home() {
       // Any network error or malformed JSON in the SSE stream would otherwise
       // leave isProcessingRef permanently true — every subsequent user turn
       // buffers and nothing ever flushes, making the system appear deaf.
-      console.error("handleUserTurn failed:", err);
       isProcessingRef.current = false;
       setIsThinking(false);
+      if (err instanceof Error && err.name === "AbortError") {
+        // Deliberate: handleBargeIn() aborted this fetch because the user
+        // started talking over the avatar. Not an error — the interrupting
+        // turn (already being recorded) drives the next handleUserTurn call
+        // once the VAD finalizes it, so don't flush the (now stale) buffer.
+        return;
+      }
+      console.error("handleUserTurn failed:", err);
       setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
       processBufferedRef.current();
     }
@@ -1009,6 +1038,7 @@ export default function Home() {
 
     await stopTurnRecording();
     vadRef.current?.stop();
+    chatAbortControllerRef.current?.abort();
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
     // Stop session recorder BEFORE closing the player's AudioContext — the

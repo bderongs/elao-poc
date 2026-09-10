@@ -7,8 +7,15 @@ import styles from "@/components/admin.module.css";
 interface ImportResult {
   url: string;
   id?: string;
+  status?: "created" | "repaired" | "skipped";
   error?: string;
 }
+
+const STATUS_LABEL: Record<string, string> = {
+  created: "Imported",
+  repaired: "Repaired (was missing turns)",
+  skipped: "Already imported — skipped",
+};
 
 export default function ImportSpeechacePage() {
   const [urlsText, setUrlsText] = useState("");
@@ -53,7 +60,9 @@ export default function ImportSpeechacePage() {
         Creates a new session per Speechace placement report — pulls the session-level
         fluency and pronunciation scores plus every question&apos;s audio, so you can compare
         against our own pronunciation providers on the same recordings. Paste one URL per line
-        to import several at once.
+        to import several at once. Safe to re-run with the same list: already-imported
+        reports are skipped, and any that only partly imported last time (e.g. a big batch
+        got interrupted) are repaired instead of duplicated.
       </div>
 
       <form
@@ -114,6 +123,12 @@ export default function ImportSpeechacePage() {
 
       {results && (
         <div style={{ marginTop: 20, maxWidth: 480, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ color: "#9ca3af", fontSize: 13 }}>
+            {(["created", "repaired", "skipped"] as const)
+              .map((s) => `${results.filter((r) => r.status === s).length} ${STATUS_LABEL[s].split(" (")[0].toLowerCase()}`)
+              .concat(`${results.filter((r) => r.error).length} failed`)
+              .join(" · ")}
+          </div>
           {results.map((r, i) => (
             <div
               key={i}
@@ -135,9 +150,16 @@ export default function ImportSpeechacePage() {
               {r.error ? (
                 <span style={{ color: "#f87171", flexShrink: 0 }}>{r.error}</span>
               ) : (
-                <Link href={`/admin/${r.id}`} style={{ color: "#93c5fd", flexShrink: 0 }}>
-                  View session →
-                </Link>
+                <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                  {r.status && (
+                    <span style={{ color: r.status === "skipped" ? "#9ca3af" : "#4ade80", fontSize: 12 }}>
+                      {STATUS_LABEL[r.status] ?? r.status}
+                    </span>
+                  )}
+                  <Link href={`/admin/${r.id}`} style={{ color: "#93c5fd" }}>
+                    View session →
+                  </Link>
+                </span>
               )}
             </div>
           ))}

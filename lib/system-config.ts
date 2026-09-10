@@ -88,9 +88,12 @@ export function getSystemConfig(): CapabilityConfig[] {
     {
       capability: "EO",
       capabilityLabel: "Evaluation Oral (pronunciation assessment)",
-      // No single global provider for EO either, as of 2026-08-31 — Mistral
-      // Voxtral (direct audio call) for English/French, Azure + Deepgram
-      // (judged by Mistral) for the rest. perLanguage is the real answer.
+      // azure-ensemble (Azure + Deepgram, judged by Mistral) for every
+      // language as of 2026-09-09 — see LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG
+      // in lib/pronunciation-rollup.ts for why Voxtral was pulled back to an
+      // on-demand comparison provider. Kept as a perLanguage table (not
+      // collapsed to a single top-level provider) since this capability has
+      // varied by language before and likely will again.
       providerId: "per-language",
       providerLabel: "Varies by language — see perLanguage",
       modelLabel: "Varies by language — see perLanguage",

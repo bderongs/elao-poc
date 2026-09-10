@@ -31,6 +31,8 @@ export class StreamingAudioPlayer {
   /** setTimeout ids for pending onSentenceStart callbacks — cancelled on stop() so
    *  nothing fires after the player (and the AudioContext it timed against) is gone. */
   private pendingSentenceTimeouts: ReturnType<typeof setTimeout>[] = [];
+  /** Sources currently scheduled/playing, so interrupt() can cut them off immediately. */
+  private activeSources: AudioBufferSourceNode[] = [];
 
   constructor(
     onAmplitudeChange?: (amp: number) => void,
@@ -172,6 +174,7 @@ export class StreamingAudioPlayer {
     source.start(startAt);
     this.nextStartTime = startAt + buffer.duration;
     this.isPlaying = true;
+    this.activeSources.push(source);
 
     if (text && this.onSentenceStart) {
       const delayMs = Math.max(0, (startAt - now) * 1000);
@@ -183,11 +186,36 @@ export class StreamingAudioPlayer {
     }
 
     source.onended = () => {
+      this.activeSources = this.activeSources.filter((s) => s !== source);
       if (ctx.currentTime >= this.nextStartTime - 0.05) {
         this.isPlaying = false;
         this.onAmplitudeChange?.(0);
       }
     };
+  }
+
+  /**
+   * Barge-in: cut off whatever's currently playing/queued right away, without
+   * tearing down the AudioContext (unlike stop()) — the session carries on,
+   * only the avatar's current turn is cut short because the user started
+   * talking over it. Any chunks still in flight from the now-aborted /api/chat
+   * stream and handed to playChunk() after this will just play from nextStartTime
+   * (reset to "now" below) — callers should also abort that fetch so none arrive.
+   */
+  interrupt() {
+    this.pendingSentenceTimeouts.forEach((id) => clearTimeout(id));
+    this.pendingSentenceTimeouts = [];
+    this.activeSources.forEach((source) => {
+      try {
+        source.stop();
+      } catch {
+        // already stopped/ended — fine to ignore
+      }
+    });
+    this.activeSources = [];
+    if (this.audioContext) this.nextStartTime = this.audioContext.currentTime;
+    this.isPlaying = false;
+    this.onAmplitudeChange?.(0);
   }
 
   stop() {

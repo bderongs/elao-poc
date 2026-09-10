@@ -20,7 +20,10 @@ import { logServerEvent } from "@/lib/server-log";
 import type { PronunciationProvider, PronunciationAssessParams } from "@/lib/pronunciation/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 
-const SYSTEM_PROMPT = `You are an expert phonetician assessing the spoken pronunciation of a second-language learner. You are given the learner's audio recording directly as input — listen to it yourself and judge pronunciation the way an experienced human examiner listening in the room would. You are not given any transcript or other engine's output; your own hearing of the audio is the only evidence.
+// Exported so the Qwen dev-test scaffold (lib/pronunciation/providers/qwen.ts)
+// can reuse it verbatim — keeping the prompt identical isolates the model as
+// the only variable in a Voxtral-vs-Qwen comparison.
+export const SYSTEM_PROMPT = `You are an expert phonetician assessing the spoken pronunciation of a second-language learner. You are given the learner's audio recording directly as input — listen to it yourself and judge pronunciation the way an experienced human examiner listening in the room would. You are not given any transcript or other engine's output; your own hearing of the audio is the only evidence.
 
 First, transcribe exactly what the learner said (verbatim — include disfluencies like "euh"/"um" only if they'd affect scoring, otherwise a clean verbatim transcript of the words spoken).
 

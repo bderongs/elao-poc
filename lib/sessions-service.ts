@@ -397,16 +397,55 @@ function languageFromDialect(dialect: string | null | undefined): string {
 }
 
 /**
+ * A report URL's trailing slash is inconsistent across imports (some rows
+ * have it, some don't), and the id is otherwise unique, so match on it via
+ * `like` rather than an exact `source_url` comparison.
+ */
+async function findExistingSpeechaceSession(
+  supabase: SupabaseClient,
+  reportId: string,
+): Promise<{ id: string; language: string } | null> {
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("id, language")
+    .eq("source", "speechace")
+    .like("source_url", `%/placement/report/${reportId}%`)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/**
  * Creates a session from a competitor (Speechace) placement report, so its
  * results can be compared against ours. Marked `source: 'speechace'`.
  * Pulls the session-level fluency/pronunciation scores only — Speechace's
  * per-question breakdown is intentionally not imported — plus each
  * question's audio, so the same recordings can also be run through our own
  * pronunciation providers for a like-for-like comparison.
+ *
+ * Idempotent by report id: a session that already has its turns imported is
+ * skipped, and one whose session row exists but has zero turns (the batch
+ * got cut off before reaching the turn insert — see
+ * createSpeechaceImportSessions) is repaired in place rather than
+ * duplicated. This makes re-submitting the same URL list after a partial
+ * failure safe and cheap — already-complete rows are a fast no-op.
  */
-export async function createSpeechaceImportSession(reportUrl: string): Promise<{ id: string }> {
+export async function createSpeechaceImportSession(
+  reportUrl: string,
+): Promise<{ id: string; status: "created" | "repaired" | "skipped" }> {
   const supabase = getSupabaseServer();
   const reportId = parseSpeechaceReportId(reportUrl);
+
+  const existing = await findExistingSpeechaceSession(supabase, reportId);
+  if (existing) {
+    const { count, error: countError } = await supabase
+      .from("session_turns")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", existing.id);
+    if (countError) throw new Error(countError.message);
+    if (count && count > 0) return { id: existing.id, status: "skipped" };
+  }
 
   const reportRes = await fetch(`https://speak.speechace.co/placement/api/report/${reportId}/`, {
     headers: SPEECHACE_FETCH_HEADERS,
@@ -415,29 +454,33 @@ export async function createSpeechaceImportSession(reportUrl: string): Promise<{
   const report = (await reportRes.json()) as SpeechaceReport;
 
   const questions = (report.questions ?? []).slice().sort((a, b) => a.order - b.order);
-  const language = languageFromDialect(questions[0]?.dialect);
+  const language = existing?.language ?? languageFromDialect(questions[0]?.dialect);
   const datePrefix = new Date().toISOString().slice(0, 10);
 
-  const rubric = report.rubrics?.find((r) => r.default) ?? report.rubrics?.[0];
-  const scoreMap = rubric?.score_map;
+  let sessionId: string;
+  if (existing) {
+    sessionId = existing.id;
+  } else {
+    const rubric = report.rubrics?.find((r) => r.default) ?? report.rubrics?.[0];
+    const scoreMap = rubric?.score_map;
 
-  const { data: sessionRow, error: insertError } = await supabase
-    .from("sessions")
-    .insert({
-      language,
-      source: "speechace",
-      source_url: reportUrl,
-      speechace_scores: {
-        fluency: bandToPercent(report.scoring?.fluency?.score, scoreMap),
-        pronunciation: bandToPercent(report.scoring?.pronunciation?.score, scoreMap),
-        overall: bandToPercent(report.scoring?.overall?.score, scoreMap),
-      },
-    })
-    .select("id")
-    .single();
-  if (insertError || !sessionRow) throw new Error(insertError?.message ?? "session insert failed");
-
-  const sessionId = sessionRow.id as string;
+    const { data: sessionRow, error: insertError } = await supabase
+      .from("sessions")
+      .insert({
+        language,
+        source: "speechace",
+        source_url: reportUrl,
+        speechace_scores: {
+          fluency: bandToPercent(report.scoring?.fluency?.score, scoreMap),
+          pronunciation: bandToPercent(report.scoring?.pronunciation?.score, scoreMap),
+          overall: bandToPercent(report.scoring?.overall?.score, scoreMap),
+        },
+      })
+      .select("id")
+      .single();
+    if (insertError || !sessionRow) throw new Error(insertError?.message ?? "session insert failed");
+    sessionId = sessionRow.id as string;
+  }
 
   const turnRows: Array<{
     session_id: string;
@@ -458,9 +501,11 @@ export async function createSpeechaceImportSession(reportUrl: string): Promise<{
       );
       if (audioRes.ok) {
         const path = `${language}/${datePrefix}/${sessionId}/turn-${i}.wav`;
+        // upsert: a repaired session (see findExistingSpeechaceSession above)
+        // can hit a path a prior, interrupted attempt already uploaded.
         const { error: uploadError } = await supabase.storage
           .from("recordings")
-          .upload(path, await audioRes.blob(), { contentType: "audio/wav" });
+          .upload(path, await audioRes.blob(), { contentType: "audio/wav", upsert: true });
         if (uploadError) console.warn(`[speechace-import] turn ${i} audio upload failed:`, uploadError.message);
         else audioUrl = supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;
       } else {
@@ -485,7 +530,29 @@ export async function createSpeechaceImportSession(reportUrl: string): Promise<{
     if (turnsError) console.error("[speechace-import] turn insert failed:", turnsError.message);
   }
 
-  return { id: sessionId };
+  return { id: sessionId, status: existing ? "repaired" : "created" };
+}
+
+// A big paste (300+ URLs) run at full Promise.all concurrency previously
+// overwhelmed Speechace/Supabase and got cut off mid-batch by the function
+// timeout, leaving many sessions created with zero turns. Capping concurrency
+// keeps each run well-behaved; the idempotent skip/repair logic in
+// createSpeechaceImportSession means re-submitting the same list afterwards
+// (whether it finished or got cut off again) always just finishes the job
+// instead of duplicating work.
+const SPEECHACE_IMPORT_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /**
@@ -495,17 +562,15 @@ export async function createSpeechaceImportSession(reportUrl: string): Promise<{
  */
 export async function createSpeechaceImportSessions(
   urls: string[],
-): Promise<Array<{ url: string; id?: string; error?: string }>> {
-  return Promise.all(
-    urls.map(async (url) => {
-      try {
-        const { id } = await createSpeechaceImportSession(url);
-        return { url, id };
-      } catch (e) {
-        return { url, error: e instanceof Error ? e.message : String(e) };
-      }
-    }),
-  );
+): Promise<Array<{ url: string; id?: string; status?: "created" | "repaired" | "skipped"; error?: string }>> {
+  return mapWithConcurrency(urls, SPEECHACE_IMPORT_CONCURRENCY, async (url) => {
+    try {
+      const { id, status } = await createSpeechaceImportSession(url);
+      return { url, id, status };
+    } catch (e) {
+      return { url, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
 }
 
 /** Appends another recording to an existing session — "add a recording if we have one". */

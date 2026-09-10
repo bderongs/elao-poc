@@ -22,8 +22,11 @@ export interface PronunciationResult {
    * 'azure'    = server-side Azure Pronunciation Assessment REST result (historical
    *              — kept for reading old sessions; azure-ensemble is admin-only now).
    * 'voxtral'  = single-call direct audio assessment (lib/pronunciation/providers/voxtral.ts).
+   * 'qwen'     = single-call direct audio assessment via Qwen3-Omni, dev-test-only
+   *              scaffold (lib/pronunciation/providers/qwen.ts), not wired into
+   *              system-config — see that file's header comment.
    */
-  source?: "deepgram" | "azure" | "voxtral";
+  source?: "deepgram" | "azure" | "voxtral" | "qwen";
 }
 
 export interface PronunciationAssessParams {

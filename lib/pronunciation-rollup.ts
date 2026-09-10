@@ -13,14 +13,24 @@ import type { PronunciationResult } from "@/lib/pronunciation/types";
  * per-language on 2026-08-31: Voxtral (direct Mistral audio call) for
  * English/French, azure-ensemble (Azure + Deepgram, judged by Mistral) for
  * the rest — same shape as lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
- * azure-ensemble remains registered and available as an on-demand comparison
- * run from the admin gear for every language. See lib/system-config.ts,
- * which surfaces this (and the other 4 capabilities' live provider) in the
- * admin UI and per-session logs/records.
+ * Reverted to azure-ensemble everywhere on 2026-09-09: a SpeechAce-vs-Voxtral
+ * comparison on low-level (A1/A2) French imports showed Voxtral's single-call
+ * self-transcription hallucinating whole clauses on unclear/heavily-accented
+ * audio and then scoring its own invented transcript as well-pronounced
+ * (e.g. session c2fa80af turn 4 — actual "Par de moins de vol." scored 85
+ * as "Parlez-moi de vos loisirs"), which a same-model self-consistency check
+ * only partially catches. azure-ensemble doesn't share this failure since it
+ * grades against an independently-produced transcript rather than its own.
+ * Voxtral remains registered as an on-demand comparison run from the admin
+ * gear for every language — not removed, just no longer the live default —
+ * pending a lighter-weight fix (e.g. an independent phonetic-alignment
+ * anchor; Qwen-Audio is shortlisted for a follow-up comparison). See
+ * lib/system-config.ts, which surfaces this (and the other 4 capabilities'
+ * live provider) in the admin UI and per-session logs/records.
  */
 export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG: Record<ConvLang, string> = {
-  en: "voxtral",
-  fr: "voxtral",
+  en: "azure-ensemble",
+  fr: "azure-ensemble",
   "nl-BE": "azure-ensemble",
   es: "azure-ensemble",
   it: "azure-ensemble",
