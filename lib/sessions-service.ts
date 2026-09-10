@@ -400,20 +400,37 @@ function languageFromDialect(dialect: string | null | undefined): string {
  * A report URL's trailing slash is inconsistent across imports (some rows
  * have it, some don't), and the id is otherwise unique, so match on it via
  * `like` rather than an exact `source_url` comparison.
+ *
+ * A batch that ran before this dedup logic existed can have left more than
+ * one row for the same report id (one real import plus zero-turn junk from
+ * a run that got cut off). Picking an arbitrary match risked "skipping" the
+ * empty one and leaving a complete import unrepaired-looking, or "repairing"
+ * the empty one into a second complete session alongside the original. So:
+ * prefer whichever match already has turns (the real one); only fall back to
+ * an arbitrary/empty match if none do.
  */
 async function findExistingSpeechaceSession(
   supabase: SupabaseClient,
   reportId: string,
 ): Promise<{ id: string; language: string } | null> {
-  const { data, error } = await supabase
+  const { data: matches, error } = await supabase
     .from("sessions")
     .select("id, language")
     .eq("source", "speechace")
-    .like("source_url", `%/placement/report/${reportId}%`)
-    .limit(1)
-    .maybeSingle();
+    .like("source_url", `%/placement/report/${reportId}%`);
   if (error) throw new Error(error.message);
-  return data;
+  if (!matches?.length) return null;
+  if (matches.length === 1) return matches[0];
+
+  for (const match of matches) {
+    const { count, error: countError } = await supabase
+      .from("session_turns")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", match.id);
+    if (countError) throw new Error(countError.message);
+    if (count && count > 0) return match;
+  }
+  return matches[0];
 }
 
 /**
