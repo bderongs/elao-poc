@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { adminColors } from "@/lib/admin-theme";
 
 /**
  * Re-derives an uploaded session's transcript + pronunciation_scores from
@@ -41,14 +42,14 @@ export function RecomputeRollupButton({ sessionId }: { sessionId: string }) {
           border: "none",
           padding: 0,
           fontSize: 11,
-          color: "#9ca3af",
+          color: adminColors.muted,
           textDecoration: "underline",
           cursor: running ? "default" : "pointer",
         }}
       >
         {running ? "Recomputing…" : "Recompute global score"}
       </button>
-      {error && <div style={{ marginTop: 6, fontSize: 11, color: "#f87171" }}>{error}</div>}
+      {error && <div style={{ marginTop: 6, fontSize: 11, color: adminColors.danger }}>{error}</div>}
     </div>
   );
 }

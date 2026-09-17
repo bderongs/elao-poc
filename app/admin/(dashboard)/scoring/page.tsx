@@ -1,10 +1,11 @@
 import { scoreBarColor, CONFIDENCE_COLOR, ExplainerCard } from "@/components/ScoreDisplay";
 import { computeCompositeCefrScore } from "@/lib/cefr-score";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
-const label: React.CSSProperties = { fontSize: 13, lineHeight: 1.6, color: "#cbd5e1" };
-const linkStyle: React.CSSProperties = { color: "#93c5fd", textDecoration: "underline dotted" };
+const label: React.CSSProperties = { fontSize: 13, lineHeight: 1.6, color: adminColors.text };
+const linkStyle: React.CSSProperties = { color: adminColors.ink, textDecoration: "underline dotted" };
 
 // Fake, but complete: every field filled in, and the +5% bonus actually
 // triggers (pronunciation and fluency both >= 9/10), so the card
@@ -38,13 +39,13 @@ function LinkedBar({ href, label: rowLabel, value, max = 100 }: { href: string; 
       href={href}
       style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginBottom: 4, textDecoration: "none", color: "inherit" }}
     >
-      <span style={{ width: 84, color: "#dbeafe", flexShrink: 0, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
+      <span style={{ width: 84, color: adminColors.ink, flexShrink: 0, textDecoration: "underline dotted", textUnderlineOffset: 3 }}>
         {rowLabel}
       </span>
-      <div style={{ flex: 1, height: 5, background: "rgba(0,0,0,0.35)", borderRadius: 3 }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: scoreBarColor(pct), borderRadius: 3 }} />
+      <div style={{ flex: 1, height: 5, background: adminColors.border, borderRadius: 3 }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: adminColors.ink, borderRadius: 3 }} />
       </div>
-      <span style={{ width: 24, textAlign: "right", color: "#fff" }}>{Math.round(value)}</span>
+      <span style={{ width: 24, textAlign: "right", color: adminColors.ink }}>{Math.round(value)}</span>
     </a>
   );
 }
@@ -57,32 +58,34 @@ export default function ScoringGuidePage() {
       <div
         style={{
           maxWidth: 340,
-          padding: 12,
-          background: "linear-gradient(135deg, #1e3a8a 0%, #4f46e5 100%)",
-          borderRadius: 8,
+          padding: 20,
+          background: adminColors.surface,
+          border: `1px solid ${adminColors.border}`,
+          borderRadius: 14,
           marginBottom: 6,
-          color: "#fff",
+          color: adminColors.ink,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
           <a href="#score-global" style={{ color: "inherit", textDecoration: "none" }}>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 700, letterSpacing: 1 }}>
+            <div style={{ fontSize: 11, color: adminColors.faint, fontWeight: 400, letterSpacing: "0.12em" }}>
               ORAL ASSESSMENT
             </div>
-            <div style={{ fontSize: 36, fontWeight: 800, lineHeight: 1.1, textDecoration: "underline dotted" }}>
+            <div style={{ fontSize: 36, fontWeight: 400, lineHeight: 1.1, textDecoration: "underline dotted", fontFamily: "'Outfit',sans-serif" }}>
               {composite.level}
             </div>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>Score {composite.score}/100</div>
+            <div style={{ fontSize: 12, color: adminColors.text }}>Score {composite.score}/100</div>
           </a>
           <a
             href="#score-confidence"
             style={{
-              padding: "2px 8px",
-              borderRadius: 10,
+              padding: "3px 9px",
+              borderRadius: 100,
               fontSize: 10,
               fontWeight: 700,
-              background: CONFIDENCE_COLOR[exampleResult.confidence],
-              color: "#000",
+              background: adminColors.accentTint,
+              border: `1px solid ${adminColors.accentBorder}`,
+              color: adminColors.accentInk,
               marginTop: 4,
               textDecoration: "none",
             }}
@@ -96,7 +99,7 @@ export default function ScoringGuidePage() {
         <LinkedBar href="#score-vocab" label="Vocab & Gram." value={exampleResult.dimensions.vocabulary_grammar!} max={10} />
         <LinkedBar href="#score-communication" label="Communication" value={exampleResult.dimensions.communication!} max={10} />
       </div>
-      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 28 }}>
+      <div style={{ fontSize: 11, color: adminColors.faint, marginBottom: 28 }}>
         Fake, complete example — click any row for how it&apos;s computed. (Same card as a session&apos;s detail page.)
       </div>
 

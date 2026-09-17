@@ -1,5 +1,6 @@
 import { getSystemConfig } from "@/lib/system-config";
 import { ProviderConfigTable } from "@/components/ProviderConfigTable";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export default function SystemConfigPage() {
   return (
     <div>
       <h1 className={styles.pageTitle}>System configuration</h1>
-      <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 20, maxWidth: 620 }}>
+      <div style={{ color: adminColors.muted, fontSize: 13, marginBottom: 20, maxWidth: 620 }}>
         Which provider/model the live conversation is currently using for
         each capability. Read-only — switching a live provider is an
         intentional code change (see the LIVE_..._PROVIDER_ID constant in

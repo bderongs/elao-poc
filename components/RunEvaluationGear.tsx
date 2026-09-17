@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { FullEvaluationPanel, type ProviderOption } from "@/components/FullEvaluationPanel";
 import type { SessionSummary } from "@/lib/types";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 /**
@@ -58,8 +59,8 @@ export function RunEvaluationGear({
               width: 8,
               height: 8,
               borderRadius: "50%",
-              background: "#fbbf24",
-              boxShadow: "0 0 0 2px #0f172a",
+              background: adminColors.warning,
+              boxShadow: `0 0 0 2px ${adminColors.surface}`,
             }}
           />
         )}

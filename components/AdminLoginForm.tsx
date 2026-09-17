@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { adminColors } from "@/lib/admin-theme";
 
 const inputStyle: React.CSSProperties = {
   padding: "8px 10px",
   borderRadius: 4,
-  border: "1px solid #334155",
-  background: "#0f172a",
-  color: "#e5e7eb",
+  border: `1px solid ${adminColors.border}`,
+  background: adminColors.bg,
+  color: adminColors.ink,
   fontSize: 14,
 };
 
@@ -71,7 +72,7 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
       />
 
       {error === "forbidden" && (
-        <div style={{ color: "#f87171", fontSize: 12 }}>That account doesn&apos;t have admin access.</div>
+        <div style={{ color: adminColors.danger, fontSize: 12 }}>That account doesn&apos;t have admin access.</div>
       )}
 
       <form onSubmit={submitPassword} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -84,7 +85,7 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
           style={inputStyle}
         />
         {passwordStatus === "error" && passwordError && (
-          <div style={{ color: "#f87171", fontSize: 12 }}>{passwordError}</div>
+          <div style={{ color: adminColors.danger, fontSize: 12 }}>{passwordError}</div>
         )}
         <button
           type="submit"
@@ -93,7 +94,7 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
             padding: "8px 10px",
             borderRadius: 4,
             border: "none",
-            background: "#4f46e5",
+            background: adminColors.ink,
             color: "#fff",
             fontWeight: 600,
             fontSize: 14,
@@ -105,20 +106,20 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
         </button>
       </form>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#4b5563", fontSize: 11 }}>
-        <div style={{ flex: 1, height: 1, background: "#334155" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, color: adminColors.muted, fontSize: 11 }}>
+        <div style={{ flex: 1, height: 1, background: adminColors.border }} />
         or
-        <div style={{ flex: 1, height: 1, background: "#334155" }} />
+        <div style={{ flex: 1, height: 1, background: adminColors.border }} />
       </div>
 
       {linkStatus === "sent" ? (
-        <div style={{ color: "#e5e7eb", fontSize: 13, textAlign: "center" }}>
+        <div style={{ color: adminColors.ink, fontSize: 13, textAlign: "center" }}>
           Check <strong>{email}</strong> for a sign-in link.
         </div>
       ) : (
         <form onSubmit={submitMagicLink} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {linkStatus === "error" && linkError && (
-            <div style={{ color: "#f87171", fontSize: 12 }}>{linkError}</div>
+            <div style={{ color: adminColors.danger, fontSize: 12 }}>{linkError}</div>
           )}
           <button
             type="submit"
@@ -126,9 +127,9 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
             style={{
               padding: "8px 10px",
               borderRadius: 4,
-              border: "1px solid #334155",
+              border: `1px solid ${adminColors.border}`,
               background: "none",
-              color: "#e5e7eb",
+              color: adminColors.ink,
               fontWeight: 600,
               fontSize: 14,
               cursor: linkStatus === "sending" ? "default" : "pointer",

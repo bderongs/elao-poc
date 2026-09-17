@@ -148,6 +148,7 @@ export default async function AdminSessionDetailPage({
             sourceLabel={breakdown.cefrSourceLabel ?? undefined}
             pronunciationSourceLabel={breakdown.pronunciationSourceLabel ?? undefined}
             showDetails={false}
+            theme="light"
           />
         </div>
       ) : (

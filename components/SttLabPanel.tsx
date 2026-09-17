@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { diffWords, diffSimilarity } from "@/lib/text-diff";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "./admin.module.css";
 
 /** Green = fully reproduced, amber = mostly, red = drifted meaningfully. */
@@ -72,7 +73,7 @@ export function SttLabPanel({
           <div>
             {ops.map((op, idx) =>
               op.type === "same" ? (
-                <span key={idx} style={{ color: "#e5e7eb" }}>
+                <span key={idx} style={{ color: adminColors.ink }}>
                   {op.text}{" "}
                 </span>
               ) : op.type === "removed" ? (

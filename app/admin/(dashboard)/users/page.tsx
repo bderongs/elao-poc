@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/current-user";
 import { UserRoleControl } from "@/components/UserRoleControl";
 import { UserPasswordControl } from "@/components/UserPasswordControl";
 import { formatDateTime } from "@/lib/format-date";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -74,8 +75,8 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                     <span
                       className={styles.badge}
                       style={{
-                        background: u.role === "admin" ? "#4f46e5" : "#334155",
-                        color: u.role === "admin" ? "#fff" : "#cbd5e1",
+                        background: u.role === "admin" ? adminColors.ink : adminColors.hairline,
+                        color: u.role === "admin" ? "#fff" : adminColors.text,
                       }}
                     >
                       {u.role}

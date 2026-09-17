@@ -1,4 +1,5 @@
 import { AdminLoginForm } from "@/components/AdminLoginForm";
+import { adminColors } from "@/lib/admin-theme";
 
 export default async function AdminLoginPage({
   searchParams,
@@ -14,23 +15,24 @@ export default async function AdminLoginPage({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#0f172a",
-        color: "#e5e7eb",
-        fontFamily: "system-ui, sans-serif",
+        background: adminColors.sidebarBg,
+        color: adminColors.sidebarText,
+        fontFamily: "'DM Sans', system-ui, sans-serif",
       }}
     >
       <div
         style={{
-          background: "#1e293b",
+          background: adminColors.surface,
+          color: adminColors.ink,
           padding: 32,
-          borderRadius: 8,
+          borderRadius: 12,
           width: 320,
           display: "flex",
           flexDirection: "column",
           gap: 12,
         }}
       >
-        <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>ELAO Admin</h1>
+        <h1 style={{ fontFamily: "'Outfit', 'DM Sans', sans-serif", fontSize: 18, fontWeight: 500, margin: 0 }}>ELAO Admin</h1>
         <AdminLoginForm next={next} error={error} />
       </div>
     </div>

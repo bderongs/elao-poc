@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 interface ImportResult {
@@ -56,7 +57,7 @@ export default function ImportSpeechacePage() {
   return (
     <div>
       <h1 className={styles.pageTitle}>Import Speechace reports</h1>
-      <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 20, maxWidth: 480 }}>
+      <div style={{ color: adminColors.muted, fontSize: 13, marginBottom: 20, maxWidth: 480 }}>
         Creates a new session per Speechace placement report — pulls the session-level
         fluency and pronunciation scores plus every question&apos;s audio, so you can compare
         against our own pronunciation providers on the same recordings. Paste one URL per line
@@ -68,8 +69,8 @@ export default function ImportSpeechacePage() {
       <form
         onSubmit={submit}
         style={{
-          background: "#1e293b",
-          border: "1px solid #1e293b",
+          background: adminColors.surface,
+          border: `1px solid ${adminColors.border}`,
           borderRadius: 8,
           padding: 20,
           maxWidth: 480,
@@ -78,7 +79,7 @@ export default function ImportSpeechacePage() {
           gap: 14,
         }}
       >
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#9ca3af" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: adminColors.muted }}>
           Report URLs (one per line)
           <textarea
             value={urlsText}
@@ -88,9 +89,9 @@ export default function ImportSpeechacePage() {
             style={{
               padding: "8px 10px",
               borderRadius: 4,
-              border: "1px solid #334155",
-              background: "#0f172a",
-              color: "#e5e7eb",
+              border: `1px solid ${adminColors.border}`,
+              background: adminColors.bg,
+              color: adminColors.ink,
               fontSize: 14,
               fontFamily: "inherit",
               resize: "vertical",
@@ -107,7 +108,7 @@ export default function ImportSpeechacePage() {
             padding: "8px 10px",
             borderRadius: 4,
             border: "none",
-            background: "#4f46e5",
+            background: adminColors.ink,
             color: "#fff",
             fontWeight: 600,
             fontSize: 14,
@@ -123,7 +124,7 @@ export default function ImportSpeechacePage() {
 
       {results && (
         <div style={{ marginTop: 20, maxWidth: 480, display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ color: "#9ca3af", fontSize: 13 }}>
+          <div style={{ color: adminColors.muted, fontSize: 13 }}>
             {(["created", "repaired", "skipped"] as const)
               .map((s) => `${results.filter((r) => r.status === s).length} ${STATUS_LABEL[s].split(" (")[0].toLowerCase()}`)
               .concat(`${results.filter((r) => r.error).length} failed`)
@@ -135,8 +136,8 @@ export default function ImportSpeechacePage() {
               style={{
                 padding: "8px 12px",
                 borderRadius: 6,
-                border: `1px solid ${r.error ? "#7f1d1d" : "#166534"}`,
-                background: r.error ? "rgba(127, 29, 29, 0.15)" : "rgba(22, 101, 52, 0.15)",
+                border: `1px solid ${r.error ? adminColors.dangerBorder : "rgba(47, 158, 110, 0.35)"}`,
+                background: r.error ? adminColors.dangerBg : "rgba(47, 158, 110, 0.12)",
                 fontSize: 13,
                 display: "flex",
                 justifyContent: "space-between",
@@ -144,19 +145,19 @@ export default function ImportSpeechacePage() {
                 gap: 12,
               }}
             >
-              <span style={{ color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: adminColors.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {r.url}
               </span>
               {r.error ? (
-                <span style={{ color: "#f87171", flexShrink: 0 }}>{r.error}</span>
+                <span style={{ color: adminColors.danger, flexShrink: 0 }}>{r.error}</span>
               ) : (
                 <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                   {r.status && (
-                    <span style={{ color: r.status === "skipped" ? "#9ca3af" : "#4ade80", fontSize: 12 }}>
+                    <span style={{ color: r.status === "skipped" ? adminColors.muted : adminColors.success, fontSize: 12 }}>
                       {STATUS_LABEL[r.status] ?? r.status}
                     </span>
                   )}
-                  <Link href={`/admin/${r.id}`} style={{ color: "#93c5fd" }}>
+                  <Link href={`/admin/${r.id}`} style={{ color: adminColors.ink }}>
                     View session →
                   </Link>
                 </span>

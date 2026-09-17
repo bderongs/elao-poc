@@ -1,6 +1,7 @@
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
 import { scoreToLevel, computeCompositeCefrScore } from "@/lib/cefr-score";
+import { adminColors } from "@/lib/admin-theme";
 
 export { scoreToLevel };
 
@@ -72,10 +73,12 @@ export function Bar({
 // ─── explainer card (accent dot + anchorable id) ──────────────────────────────
 // Shared by /admin/scoring (the methodology writeup) and the session detail
 // page's per-category score breakdown, so both render the same card style.
+// Admin-only (unlike Bar/CefrPanel below) so this always uses the admin
+// light palette directly, no theme prop needed.
 
 const explainerCardStyle: React.CSSProperties = {
-  background: "#111827",
-  border: "1px solid #1e293b",
+  background: adminColors.surface,
+  border: `1px solid ${adminColors.border}`,
   borderRadius: 10,
   padding: "14px 18px",
   marginBottom: 14,
@@ -94,10 +97,10 @@ export function ExplainerCard({
   children: React.ReactNode;
 }) {
   return (
-    <div id={id} style={{ ...explainerCardStyle, borderLeft: `3px solid ${accent ?? "#334155"}` }}>
+    <div id={id} style={{ ...explainerCardStyle, borderLeft: `3px solid ${accent ?? adminColors.borderStrong}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {accent && <span style={{ width: 8, height: 8, borderRadius: "50%", background: accent, flexShrink: 0 }} />}
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb" }}>{title}</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: adminColors.ink }}>{title}</div>
       </div>
       {children}
     </div>

@@ -1,4 +1,5 @@
 import { wordColor } from "@/components/ScoreDisplay";
+import { adminColors } from "@/lib/admin-theme";
 
 export interface ComparisonRow {
   id: string;
@@ -32,7 +33,7 @@ export function ComparisonTable({ metrics }: { metrics: ComparisonMetric[] }) {
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
       <thead>
-        <tr style={{ color: "#9ca3af", textAlign: "left" }}>
+        <tr style={{ color: adminColors.muted, textAlign: "left" }}>
           <th style={{ fontWeight: 500, paddingBottom: 4 }}>Source</th>
           <th style={{ fontWeight: 500, paddingBottom: 4, textAlign: "right" }}>Score</th>
           <th style={{ fontWeight: 500, paddingBottom: 4, textAlign: "right" }}>Δ</th>
@@ -84,20 +85,20 @@ function MetricSection({ label, rows, referenceLabel, referenceScore, caveat, cu
   return (
     <>
       <tr>
-        <td colSpan={3} style={{ paddingTop: 14, paddingBottom: caveat ? 2 : 4, fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <td colSpan={3} style={{ paddingTop: 14, paddingBottom: caveat ? 2 : 4, fontSize: 11, fontWeight: 700, color: adminColors.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
           {label}
         </td>
       </tr>
       {caveat && (
         <tr>
-          <td colSpan={3} style={{ paddingBottom: 6, fontSize: 11, color: "#6b7280", textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
+          <td colSpan={3} style={{ paddingBottom: 6, fontSize: 11, color: adminColors.faint, textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
             {caveat}
           </td>
         </tr>
       )}
       {hasReference && (
         <tr>
-          <td style={{ padding: "3px 0", color: "#9ca3af" }}>{referenceLabel}</td>
+          <td style={{ padding: "3px 0", color: adminColors.muted }}>{referenceLabel}</td>
           <td style={{ padding: "3px 0", textAlign: "right" }}>
             <ScorePill value={referenceScore!} />
           </td>
@@ -105,20 +106,20 @@ function MetricSection({ label, rows, referenceLabel, referenceScore, caveat, cu
         </tr>
       )}
       {sorted.map((r) => (
-        <tr key={r.id} style={{ borderTop: "1px solid #334155" }}>
+        <tr key={r.id} style={{ borderTop: `1px solid ${adminColors.border}` }}>
           <td style={{ padding: "3px 0" }}>
             {r.label}
             {r.id === currentId && (
-              <span style={{ marginLeft: 6, color: "#93c5fd", fontWeight: 700, fontSize: 11 }}>● current</span>
+              <span style={{ marginLeft: 6, color: adminColors.ink, fontWeight: 700, fontSize: 11 }}>● current</span>
             )}
             {r.id === closestId && (
               <span style={{ marginLeft: 6, color: "#4ade80", fontWeight: 700, fontSize: 11 }}>✓ closest</span>
             )}
           </td>
           <td style={{ padding: "3px 0", textAlign: "right" }}>
-            {r.score != null ? <ScorePill value={r.score} /> : <span style={{ color: "#6b7280" }}>not yet run</span>}
+            {r.score != null ? <ScorePill value={r.score} /> : <span style={{ color: adminColors.faint }}>not yet run</span>}
           </td>
-          <td style={{ padding: "3px 0", textAlign: "right", fontSize: 11, fontWeight: 600, color: r.diff != null ? diffColor(r.diff) : "#4b5563" }}>
+          <td style={{ padding: "3px 0", textAlign: "right", fontSize: 11, fontWeight: 600, color: r.diff != null ? diffColor(r.diff) : adminColors.faint }}>
             {r.diff != null ? `Δ${Math.round(r.diff * 10) / 10}` : "—"}
           </td>
         </tr>

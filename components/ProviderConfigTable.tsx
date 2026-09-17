@@ -10,6 +10,7 @@ import {
   formatUsd,
   type CostEstimate,
 } from "@/lib/session-cost";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -91,7 +92,7 @@ function CostCell({ estimate }: { estimate: CostEstimate | null }) {
   return (
     <td data-label="Est. cost / session">
       <span className={styles.tooltipWrap}>
-        <span tabIndex={0} style={{ cursor: "default", borderBottom: "1px dotted #6b7280" }}>
+        <span tabIndex={0} style={{ cursor: "default", borderBottom: `1px dotted ${adminColors.faint}` }}>
           {formatUsd(estimate.usdPerSession)}
         </span>
         <span className={styles.tooltipBox} style={{ width: 240 }}>
@@ -150,7 +151,7 @@ export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) 
               {c.perLanguage &&
                 Object.entries(c.perLanguage).map(([lang, p]) => (
                   <tr key={`${c.capability}-${lang}`}>
-                    <td data-label="Capability" style={{ paddingLeft: 24, color: "#9ca3af", fontSize: 13 }}>
+                    <td data-label="Capability" style={{ paddingLeft: 24, color: adminColors.muted, fontSize: 13 }}>
                       {LANGUAGE_LABELS[lang] ?? lang}
                     </td>
                     <td data-label="Provider">{p.providerLabel}</td>

@@ -1,0 +1,36 @@
+/* Admin-section design tokens (see lib/admin-theme.ts, the source of truth
+   for these values — keep the two in sync). Lives here, not in
+   admin.module.css, because CSS Modules' "pure" mode rejects a bare
+   :root block with no locally-scoped selector; admin.module.css's rules
+   reference these via var(). */
+:root {
+  --admin-bg: #f7f5f0;
+  --admin-surface: #ffffff;
+  --admin-panel: #f1eee6;
+  --admin-ink: #141d33;
+  --admin-ink-hover: #243052;
+  --admin-text: #5a5f6e;
+  --admin-muted: #6b6f7d;
+  --admin-faint: #8a8f9c;
+  --admin-border: #ddd9d0;
+  --admin-border-strong: #c9c4b8;
+  --admin-hairline: #efebe2;
+  --admin-accent: #f5b921;
+  --admin-accent-tint: #fdf0d0;
+  --admin-accent-border: #f0dda8;
+  --admin-accent-ink: #8a6410;
+  --admin-success: #2f9e6e;
+  --admin-danger: #b3261e;
+  --admin-danger-bg: #fbeae9;
+  --admin-danger-border: #f1c4c0;
+  --admin-warning: #8a6410;
+  --admin-warning-bg: #fdf0d0;
+
+  --admin-sidebar-bg: #141d33;
+  --admin-sidebar-text: #e8eaf0;
+  --admin-sidebar-muted: #9aa3b8;
+  --admin-sidebar-border: rgba(255, 255, 255, 0.08);
+  --admin-sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+  --admin-sidebar-active-bg: rgba(245, 185, 33, 0.16);
+  --admin-sidebar-active-accent: #f5b921;
+}

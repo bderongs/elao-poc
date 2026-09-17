@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { adminColors } from "@/lib/admin-theme";
 
 /**
  * Inline "set password" control for the admin Users table — a second,
@@ -24,7 +25,7 @@ export function UserPasswordControl({ userId }: { userId: string }) {
           padding: 0,
           fontSize: 13,
           fontWeight: 500,
-          color: "#93c5fd",
+          color: adminColors.ink,
           textDecoration: "underline",
           cursor: "pointer",
         }}
@@ -72,9 +73,9 @@ export function UserPasswordControl({ userId }: { userId: string }) {
             width: 130,
             padding: "4px 8px",
             borderRadius: 4,
-            border: "1px solid #334155",
-            background: "#0f172a",
-            color: "#e5e7eb",
+            border: `1px solid ${adminColors.border}`,
+            background: adminColors.bg,
+            color: adminColors.ink,
             fontSize: 12,
           }}
         />
@@ -85,7 +86,7 @@ export function UserPasswordControl({ userId }: { userId: string }) {
             padding: "4px 8px",
             borderRadius: 4,
             border: "none",
-            background: "#4f46e5",
+            background: adminColors.ink,
             color: "#fff",
             fontSize: 12,
             fontWeight: 600,
@@ -101,13 +102,13 @@ export function UserPasswordControl({ userId }: { userId: string }) {
             setStatus("idle");
             setErrorMessage(null);
           }}
-          style={{ background: "none", border: "none", color: "#6b7280", fontSize: 12, cursor: "pointer" }}
+          style={{ background: "none", border: "none", color: adminColors.muted, fontSize: 12, cursor: "pointer" }}
         >
           Cancel
         </button>
       </div>
-      {status === "done" && <div style={{ fontSize: 11, color: "#4ade80" }}>Password set.</div>}
-      {status === "error" && errorMessage && <div style={{ fontSize: 11, color: "#f87171" }}>{errorMessage}</div>}
+      {status === "done" && <div style={{ fontSize: 11, color: adminColors.success }}>Password set.</div>}
+      {status === "error" && errorMessage && <div style={{ fontSize: 11, color: adminColors.danger }}>{errorMessage}</div>}
     </form>
   );
 }

@@ -1,3 +1,4 @@
+import "./globals.css";
 import { GlobalDebugPanel } from "@/components/GlobalDebugPanel";
 
 export const metadata = {

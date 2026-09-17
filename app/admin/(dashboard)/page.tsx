@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listSessions } from "@/lib/sessions-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { formatDateTime } from "@/lib/format-date";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +85,7 @@ export default async function AdminSessionsPage({
                           speechace
                         </span>
                       ) : (
-                        <span style={{ color: "#6b7280" }}>conversation</span>
+                        <span style={{ color: adminColors.muted }}>conversation</span>
                       )}
                     </td>
                     <td data-label="Language">{s.language ?? "—"}</td>

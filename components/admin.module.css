@@ -1,23 +1,26 @@
-/* Shared look for the admin tool: top nav shell, session list, session
+/* Shared look for the admin tool: left nav shell, session list, session
    detail, and the eval lab panel. Plain CSS module (no framework) — the
    rest of the app has none either, and this keeps the admin section
    self-contained.
 
-   Palette (CSS modules don't allow a bare :root custom-property block —
-   "pure" mode requires every rule to be locally scoped — so these are
-   inlined rather than referenced as var()):
-     bg #0b1120 · panel #111827 · card #1e293b · border #1e293b
-     border-strong #334155 · text #e5e7eb · muted #9ca3af · faint #6b7280
-     accent #4f46e5 · accent-text #93c5fd */
+   Palette: matches the user app's light design system (see
+   doc/new_design/README.md and lib/admin-theme.ts, the source of truth for
+   these values — keep the two in sync). The sidebar keeps its own dark
+   tokens on purpose: it's the one visual cue that this is the admin area,
+   not the user app.
+
+   The --admin-* custom properties these rules reference via var() are
+   defined in app/globals.css, not here: CSS Modules' "pure" mode rejects a
+   bare :root block with no locally-scoped selector. */
 
 /* ─── shell / left sidebar ─────────────────────────────────────────────── */
 
 .shell {
   display: flex;
   min-height: 100vh;
-  background: #0b1120;
-  color: #e5e7eb;
-  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--admin-bg);
+  color: var(--admin-ink);
+  font-family: "DM Sans", system-ui, -apple-system, sans-serif;
   /* Safety net, inherited by everything below: a stray long token (a raw
      transcript run, an LLM-generated sentence with no good break point)
      wraps instead of forcing its container wider than the viewport. */
@@ -34,21 +37,21 @@
   display: flex;
   flex-direction: column;
   padding: 20px 14px;
-  border-right: 1px solid #1e293b;
-  background: #0b1120;
+  border-right: 1px solid var(--admin-sidebar-border);
+  background: var(--admin-sidebar-bg);
 }
 
 .brand {
   font-size: 14px;
   font-weight: 700;
-  color: #e5e7eb;
+  color: var(--admin-sidebar-text);
   text-decoration: none;
   white-space: nowrap;
   padding: 0 8px;
 }
 
 .brandAccent {
-  color: #93c5fd;
+  color: var(--admin-sidebar-active-accent);
 }
 
 .sidebarNav {
@@ -64,7 +67,7 @@
   gap: 10px;
   font-size: 13px;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--admin-sidebar-muted);
   text-decoration: none;
   padding: 8px 10px;
   border-radius: 8px;
@@ -75,15 +78,15 @@
 }
 
 .sidebarNavLink:hover {
-  color: #e5e7eb;
-  background: #1e293b;
+  color: var(--admin-sidebar-text);
+  background: var(--admin-sidebar-hover-bg);
 }
 
 .sidebarNavLinkActive,
 .sidebarNavLinkActive:hover {
   color: #fff;
-  background: rgba(79, 70, 229, 0.18);
-  box-shadow: inset 2px 0 0 #4f46e5;
+  background: var(--admin-sidebar-active-bg);
+  box-shadow: inset 2px 0 0 var(--admin-sidebar-active-accent);
 }
 
 /* ─── account (bottom of sidebar) ──────────────────────────────────────── */
@@ -91,7 +94,7 @@
 .sidebarAccount {
   margin-top: auto;
   padding-top: 16px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--admin-sidebar-border);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -110,8 +113,8 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: #4f46e5;
-  color: #fff;
+  background: var(--admin-sidebar-active-accent);
+  color: var(--admin-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -126,7 +129,7 @@
 .sidebarAccountName {
   font-size: 13px;
   font-weight: 600;
-  color: #e5e7eb;
+  color: var(--admin-sidebar-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -134,7 +137,7 @@
 
 .sidebarAccountMeta {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--admin-sidebar-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -143,8 +146,8 @@
 .signOut {
   width: 100%;
   background: none;
-  border: 1px solid #334155;
-  color: #9ca3af;
+  border: 1px solid var(--admin-sidebar-border);
+  color: var(--admin-sidebar-muted);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 12px;
@@ -152,8 +155,8 @@
 }
 
 .signOut:hover {
-  color: #e5e7eb;
-  border-color: #9ca3af;
+  color: var(--admin-sidebar-text);
+  border-color: var(--admin-sidebar-muted);
 }
 
 .main {
@@ -178,7 +181,7 @@
     gap: 20px;
     padding: 12px 16px;
     border-right: none;
-    border-bottom: 1px solid #1e293b;
+    border-bottom: 1px solid var(--admin-sidebar-border);
   }
 
   .sidebarNav {
@@ -212,14 +215,15 @@
 /* ─── page header ──────────────────────────────────────────────────────── */
 
 .pageTitle {
+  font-family: "Outfit", "DM Sans", system-ui, sans-serif;
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
   margin: 0 0 20px;
 }
 
 .backLink {
   display: inline-block;
-  color: #93c5fd;
+  color: var(--admin-ink);
   font-size: 13px;
   text-decoration: none;
   margin-bottom: 16px;
@@ -230,16 +234,16 @@
 }
 
 .errorBox {
-  color: #f87171;
+  color: var(--admin-danger);
   font-size: 13px;
   padding: 10px 14px;
-  border: 1px solid #7f1d1d;
+  border: 1px solid var(--admin-danger-border);
   border-radius: 8px;
-  background: rgba(127, 29, 29, 0.15);
+  background: var(--admin-danger-bg);
 }
 
 .emptyState {
-  color: #9ca3af;
+  color: var(--admin-faint);
   font-size: 13px;
   padding: 40px 0;
   text-align: center;
@@ -259,7 +263,7 @@
 /* ─── session list table (responsive: collapses to cards under 640px) ──── */
 
 .tableCard {
-  border: 1px solid #1e293b;
+  border: 1px solid var(--admin-border);
   border-radius: 10px;
   overflow-x: auto;
 }
@@ -272,8 +276,8 @@
 
 .table thead tr {
   text-align: left;
-  color: #9ca3af;
-  background: #111827;
+  color: var(--admin-muted);
+  background: var(--admin-panel);
 }
 
 .table th {
@@ -286,7 +290,7 @@
 
 .table td {
   padding: 10px 14px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--admin-border);
 }
 
 .table tbody tr {
@@ -294,11 +298,11 @@
 }
 
 .table tbody tr:hover {
-  background: rgba(30, 41, 59, 0.5);
+  background: rgba(20, 29, 51, 0.05);
 }
 
 .rowLink {
-  color: #93c5fd;
+  color: var(--admin-ink);
   text-decoration: none;
   font-weight: 500;
 }
@@ -320,7 +324,7 @@
   }
   .table tr {
     padding: 10px 14px;
-    border-top: 1px solid #1e293b;
+    border-top: 1px solid var(--admin-border);
   }
   .table tbody tr:first-child {
     border-top: none;
@@ -334,7 +338,7 @@
   }
   .table td::before {
     content: attr(data-label);
-    color: #6b7280;
+    color: var(--admin-faint);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -376,17 +380,17 @@
   position: fixed;
   z-index: 21;
   width: 220px;
-  background: #111827;
-  border: 1px solid #334155;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border-strong);
   border-radius: 10px;
   padding: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 30px rgba(20, 29, 51, 0.15);
 }
 
 .scorePopoverGroup + .scorePopoverGroup {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--admin-border);
 }
 
 .scorePopoverGroupTitle {
@@ -394,7 +398,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #6b7280;
+  color: var(--admin-faint);
   margin-bottom: 6px;
 }
 
@@ -413,8 +417,8 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  border: 1px solid #6b7280;
-  color: #9ca3af;
+  border: 1px solid var(--admin-faint);
+  color: var(--admin-muted);
   font-size: 10px;
   font-style: italic;
   font-family: Georgia, serif;
@@ -429,16 +433,16 @@
   top: calc(100% + 8px);
   left: 0;
   width: 260px;
-  background: #111827;
-  border: 1px solid #334155;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border-strong);
   border-radius: 8px;
   padding: 10px 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 30px rgba(20, 29, 51, 0.15);
   font-size: 12px;
   font-weight: 400;
   text-transform: none;
   letter-spacing: normal;
-  color: #e5e7eb;
+  color: var(--admin-ink);
   white-space: normal;
 }
 
@@ -449,7 +453,7 @@
 
 .tooltipTitle {
   font-weight: 700;
-  color: #93c5fd;
+  color: var(--admin-ink);
   margin-bottom: 6px;
 }
 
@@ -457,15 +461,15 @@
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  color: #9ca3af;
+  color: var(--admin-muted);
   padding: 1px 0;
 }
 
 .tooltipHint {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid #1e293b;
-  color: #6b7280;
+  border-top: 1px solid var(--admin-border);
+  color: var(--admin-faint);
   font-size: 11px;
 }
 
@@ -480,7 +484,7 @@
 }
 
 .pageInfo {
-  color: #6b7280;
+  color: var(--admin-faint);
 }
 
 .pageLinks {
@@ -489,7 +493,7 @@
 }
 
 .pageLink {
-  color: #93c5fd;
+  color: var(--admin-ink);
   text-decoration: none;
 }
 
@@ -498,7 +502,7 @@
 }
 
 .pageLinkDisabled {
-  color: #374151;
+  color: var(--admin-faint);
 }
 
 /* ─── tabs (e.g. admin Users page) ────────────────────────────────────── */
@@ -507,7 +511,7 @@
   display: flex;
   gap: 4px;
   margin-bottom: 16px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .tab {
@@ -517,24 +521,24 @@
   padding: 8px 14px;
   font-size: 13px;
   font-weight: 500;
-  color: #9ca3af;
+  color: var(--admin-muted);
   text-decoration: none;
   border-bottom: 2px solid transparent;
 }
 
 .tab:hover {
-  color: #e5e7eb;
+  color: var(--admin-ink);
 }
 
 .tabActive {
-  color: #e5e7eb;
-  border-bottom-color: #4f46e5;
+  color: var(--admin-ink);
+  border-bottom-color: var(--admin-ink);
 }
 
 .tabCount {
   font-size: 11px;
-  color: #6b7280;
-  background: #111827;
+  color: var(--admin-muted);
+  background: var(--admin-panel);
   border-radius: 999px;
   padding: 1px 7px;
 }
@@ -550,9 +554,9 @@
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  border: 1px solid #334155;
+  border: 1px solid var(--admin-border-strong);
   background: none;
-  color: #9ca3af;
+  color: var(--admin-muted);
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -561,8 +565,8 @@
 }
 
 .gearButton:hover {
-  color: #e5e7eb;
-  border-color: #9ca3af;
+  color: var(--admin-ink);
+  border-color: var(--admin-muted);
 }
 
 .gearPopover {
@@ -572,7 +576,7 @@
   z-index: 20;
   width: 340px;
   max-width: calc(100vw - 40px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 30px rgba(20, 29, 51, 0.15);
   border-radius: 8px;
 }
 
@@ -583,14 +587,14 @@
   width: 100%;
   background: none;
   border: none;
-  color: #e5e7eb;
+  color: var(--admin-ink);
   font-size: 13px;
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
   padding: 0 0 10px;
   margin-bottom: 10px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .detailHeaderRow {
@@ -603,7 +607,7 @@
 
 .detailMeta {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--admin-muted);
   margin-bottom: 16px;
 }
 
@@ -613,7 +617,7 @@
 
 .audioLabel {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--admin-muted);
   margin-bottom: 4px;
 }
 
@@ -623,8 +627,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #111827;
-  border: 1px solid #1e293b;
+  background: var(--admin-panel);
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
   padding: 8px 12px;
   max-width: 420px;
@@ -644,7 +648,7 @@
   height: 26px;
   border-radius: 50%;
   border: none;
-  background: #4f46e5;
+  background: var(--admin-ink);
   color: #fff;
   font-size: 10px;
   line-height: 1;
@@ -655,13 +659,13 @@
 }
 
 .audioPlayButton:hover {
-  background: #4338ca;
+  background: var(--admin-ink-hover);
 }
 
 .audioSeek {
   flex: 1;
   min-width: 0;
-  accent-color: #4f46e5;
+  accent-color: var(--admin-ink);
   height: 4px;
   cursor: pointer;
 }
@@ -669,7 +673,7 @@
 .audioTime {
   flex-shrink: 0;
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--admin-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -684,20 +688,20 @@
   min-width: 0;
   padding: 12px;
   border-radius: 8px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--admin-border);
 }
 
 .turnCardUser {
-  background: #1e293b;
+  background: var(--admin-surface);
 }
 
 .turnCardAssistant {
-  background: #111827;
+  background: var(--admin-panel);
 }
 
 .turnMeta {
   font-size: 10px;
-  color: #6b7280;
+  color: var(--admin-faint);
   margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -711,8 +715,8 @@
 /* ─── generic card (comparison panel, full-evaluation panel, etc.) ──────── */
 
 .card {
-  background: #1e293b;
-  border: 1px solid #1e293b;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
   border-radius: 8px;
   padding: 14px;
   margin-bottom: 16px;
@@ -722,7 +726,7 @@
 
 .evalLab {
   margin-top: 32px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--admin-border);
   padding-top: 20px;
 }
 
@@ -740,7 +744,7 @@
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #e5e7eb;
+  color: var(--admin-ink);
 }
 
 /* A provider that already has a result for this session — shown instead of
@@ -750,7 +754,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #9ca3af;
+  color: var(--admin-muted);
   cursor: default;
 }
 
@@ -762,7 +766,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #fbbf24;
+  color: var(--admin-warning);
   cursor: default;
 }
 
@@ -773,8 +777,8 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
+  background: rgba(47, 158, 110, 0.15);
+  color: var(--admin-success);
   font-size: 10px;
   line-height: 1;
   flex-shrink: 0;
@@ -784,20 +788,25 @@
   padding: 6px 16px;
   border-radius: 6px;
   border: none;
-  background: #4f46e5;
+  background: var(--admin-ink);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
 
+.runButton:hover {
+  background: var(--admin-ink-hover);
+}
+
 .runButton:disabled {
-  background: #334155;
+  background: var(--admin-hairline);
+  color: var(--admin-faint);
   cursor: default;
 }
 
 .evalTableWrap {
   overflow-x: auto;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--admin-border);
   border-radius: 10px;
 }

@@ -3,15 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CefrRung } from "@/lib/cefr-rung";
+import { adminColors } from "@/lib/admin-theme";
 
 const RUNGS: CefrRung[] = ["A1", "A2", "B1", "B2", "C1"];
 
 const selectStyle: React.CSSProperties = {
   padding: "6px 8px",
   borderRadius: 4,
-  border: "1px solid #334155",
-  background: "#0f172a",
-  color: "#e5e7eb",
+  border: `1px solid ${adminColors.border}`,
+  background: adminColors.bg,
+  color: adminColors.ink,
   fontSize: 13,
 };
 
@@ -106,7 +107,7 @@ export function ConversationSettingsRow({
                 padding: "6px 10px",
                 borderRadius: 4,
                 border: "none",
-                background: "#4f46e5",
+                background: adminColors.ink,
                 color: "#fff",
                 fontWeight: 600,
                 fontSize: 12,
@@ -125,7 +126,7 @@ export function ConversationSettingsRow({
                   border: "none",
                   padding: 0,
                   fontSize: 12,
-                  color: "#93c5fd",
+                  color: adminColors.ink,
                   textDecoration: "underline",
                   cursor: pending ? "default" : "pointer",
                 }}
@@ -134,7 +135,7 @@ export function ConversationSettingsRow({
               </button>
             )}
           </div>
-          {error && <div style={{ fontSize: 11, color: "#f87171" }}>{error}</div>}
+          {error && <div style={{ fontSize: 11, color: adminColors.danger }}>{error}</div>}
         </div>
       </td>
     </>

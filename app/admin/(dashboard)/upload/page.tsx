@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 export default function UploadRecordingPage() {
@@ -37,7 +38,7 @@ export default function UploadRecordingPage() {
   return (
     <div>
       <h1 className={styles.pageTitle}>Upload a recording</h1>
-      <div style={{ color: "#9ca3af", fontSize: 13, marginBottom: 20, maxWidth: 480 }}>
+      <div style={{ color: adminColors.muted, fontSize: 13, marginBottom: 20, maxWidth: 480 }}>
         Creates a new session from a single audio file, so you can run the pronunciation lab
         against any recording — not only one captured through a live conversation.
       </div>
@@ -45,8 +46,8 @@ export default function UploadRecordingPage() {
       <form
         onSubmit={submit}
         style={{
-          background: "#1e293b",
-          border: "1px solid #1e293b",
+          background: adminColors.surface,
+          border: `1px solid ${adminColors.border}`,
           borderRadius: 8,
           padding: 20,
           maxWidth: 420,
@@ -55,17 +56,17 @@ export default function UploadRecordingPage() {
           gap: 14,
         }}
       >
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#9ca3af" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: adminColors.muted }}>
           Audio file
           <input
             ref={fileRef}
             type="file"
             accept="audio/*"
-            style={{ fontSize: 13, color: "#e5e7eb" }}
+            style={{ fontSize: 13, color: adminColors.ink }}
           />
         </label>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#9ca3af" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: adminColors.muted }}>
           Language
           <select
             value={language}
@@ -73,9 +74,9 @@ export default function UploadRecordingPage() {
             style={{
               padding: "8px 10px",
               borderRadius: 4,
-              border: "1px solid #334155",
-              background: "#0f172a",
-              color: "#e5e7eb",
+              border: `1px solid ${adminColors.border}`,
+              background: adminColors.bg,
+              color: adminColors.ink,
               fontSize: 14,
             }}
           >
@@ -97,7 +98,7 @@ export default function UploadRecordingPage() {
             padding: "8px 10px",
             borderRadius: 4,
             border: "none",
-            background: "#4f46e5",
+            background: adminColors.ink,
             color: "#fff",
             fontWeight: 600,
             fontSize: 14,

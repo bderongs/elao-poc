@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { adminColors } from "@/lib/admin-theme";
 
 /**
  * Promote/revoke admin toggle for the admin Users table. Self-demotion is
@@ -23,7 +24,7 @@ export function UserRoleControl({
   const [error, setError] = useState<string | null>(null);
 
   if (role === "admin" && isSelf) {
-    return <span style={{ fontSize: 12, color: "#4b5563" }}>Can&apos;t revoke your own access</span>;
+    return <span style={{ fontSize: 12, color: adminColors.faint }}>Can&apos;t revoke your own access</span>;
   }
 
   const toggle = async () => {
@@ -57,14 +58,14 @@ export function UserRoleControl({
           padding: 0,
           fontSize: 13,
           fontWeight: 500,
-          color: role === "admin" ? "#f87171" : "#93c5fd",
+          color: role === "admin" ? adminColors.danger : adminColors.ink,
           textDecoration: "underline",
           cursor: pending ? "default" : "pointer",
         }}
       >
         {pending ? "Saving…" : role === "admin" ? "Revoke admin" : "Make admin"}
       </button>
-      {error && <div style={{ marginTop: 4, fontSize: 11, color: "#f87171" }}>{error}</div>}
+      {error && <div style={{ marginTop: 4, fontSize: 11, color: adminColors.danger }}>{error}</div>}
     </div>
   );
 }

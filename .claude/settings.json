@@ -56,7 +56,27 @@
       "Bash(git -C /Users/baptiste/ELAO-Speaking diff -- lib/pronunciation-rollup.ts lib/system-config.ts)",
       "Bash(curl -s -D - -o /dev/null http://localhost:3417/admin/system-config)",
       "Bash(pkill -f \"next dev -p 3417\")",
-      "Bash(git -C /Users/baptiste/ELAO-Speaking diff -- lib/session-cost.ts)"
+      "Bash(git -C /Users/baptiste/ELAO-Speaking diff -- lib/session-cost.ts)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" \"app/admin/\\(dashboard\\)/users/page.tsx\")",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/UserRoleControl.tsx components/UserPasswordControl.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" \"app/admin/\\(dashboard\\)/settings/page.tsx\")",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/ConversationSettingsRow.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" \"app/admin/\\(dashboard\\)/scoring/page.tsx\")",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" \"app/admin/\\(dashboard\\)/[id]/page.tsx\")",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/ScoreBreakdownPanel.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/ComparisonTable.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\\\\|rgba\\(251\" components/FullEvaluationPanel.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/FullEvaluationPanel.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/RecomputeRollupButton.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/ProviderConfigTable.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" components/SttLabPanel.tsx)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" \"app/admin/\\(dashboard\\)/upload/page.tsx\")",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,8\\\\}\" \"app/admin/\\(dashboard\\)/import-speechace/page.tsx\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3411/admin/login)",
+      "Bash(curl -s http://localhost:3411/admin/login)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3411/admin)",
+      "Bash(curl -s http://localhost:3411/admin)",
+      "Bash(pkill -f \"next dev -p 3411\")"
     ]
   }
 }

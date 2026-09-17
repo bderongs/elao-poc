@@ -6,6 +6,7 @@ import type { SessionSummary } from "@/lib/types";
 import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { RecomputeRollupButton } from "@/components/RecomputeRollupButton";
 import { PromoteHeadlineButton } from "@/components/PromoteHeadlineButton";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "./admin.module.css";
 
 export interface ProviderOption {
@@ -67,7 +68,7 @@ function ProviderRow({
           style={{
             marginLeft: 6,
             fontSize: 10,
-            color: "#9ca3af",
+            color: adminColors.muted,
             background: "none",
             border: "none",
             textDecoration: "underline",
@@ -220,7 +221,7 @@ export function FullEvaluationPanel({
   return (
     <div className={styles.card}>
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Run full evaluation</div>
-      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 10 }}>
+      <div style={{ fontSize: 11, color: adminColors.muted, marginBottom: 10 }}>
         Runs every checked provider against every recorded turn (pronunciation) and the full transcript (CEFR) —
         results appear side-by-side in Score breakdown below.
       </div>
@@ -229,12 +230,12 @@ export function FullEvaluationPanel({
         <div
           style={{
             fontSize: 11,
-            color: "#fbbf24",
+            color: adminColors.warning,
             padding: "8px 10px",
             marginBottom: 10,
-            border: "1px solid rgba(251, 191, 36, 0.35)",
+            border: `1px solid ${adminColors.accentBorder}`,
             borderRadius: 6,
-            background: "rgba(251, 191, 36, 0.08)",
+            background: adminColors.warningBg,
           }}
         >
           This session was recorded live — pronunciation-provider runs here are saved for comparison below but
@@ -242,7 +243,7 @@ export function FullEvaluationPanel({
         </div>
       )}
 
-      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6 }}>Pronunciation (every recorded turn)</div>
+      <div style={{ fontSize: 11, color: adminColors.muted, marginBottom: 6 }}>Pronunciation (every recorded turn)</div>
       <div className={styles.evalLabControls} style={{ marginBottom: 10 }}>
         {pronunciationProviders.map((p) => (
           <ProviderRow
@@ -261,7 +262,7 @@ export function FullEvaluationPanel({
         <PromoteHeadlineButton sessionId={sessionId} providerId={livePronunciationProviderId} />
       )}
 
-      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6, marginTop: canPromoteHeadline ? 10 : 0 }}>
+      <div style={{ fontSize: 11, color: adminColors.muted, marginBottom: 6, marginTop: canPromoteHeadline ? 10 : 0 }}>
         Transcript (CEFR eval)
       </div>
       <div className={styles.evalLabControls} style={{ marginBottom: 12 }}>
@@ -284,9 +285,9 @@ export function FullEvaluationPanel({
       </button>
 
       {error && <div className={styles.errorBox} style={{ marginTop: 8 }}>{error}</div>}
-      {summary && !error && <div style={{ marginTop: 8, fontSize: 12, color: "#4ade80" }}>{summary}</div>}
+      {summary && !error && <div style={{ marginTop: 8, fontSize: 12, color: adminColors.success }}>{summary}</div>}
       {anyPending && !summary && !error && (
-        <div style={{ marginTop: 8, fontSize: 12, color: "#9ca3af", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: adminColors.muted, display: "flex", alignItems: "center", gap: 6 }}>
           <ThinkingIndicator variant="inline" />
           Launched — waiting for result, this refreshes automatically.
         </div>

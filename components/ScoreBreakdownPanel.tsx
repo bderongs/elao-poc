@@ -2,6 +2,7 @@ import { CONFIDENCE_COLOR, ExplainerCard, scoreBarColor } from "@/components/Sco
 import { ComparisonTable, ScorePill } from "@/components/ComparisonTable";
 import type { ScoreBreakdown, ScoreCategory, ConfidenceRow } from "@/lib/score-breakdown";
 import type { SpeechaceScores } from "@/lib/types";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 const PRONUNCIATION_CAVEAT =
@@ -147,13 +148,13 @@ export function ScoreBreakdownPanel({
   );
 }
 
-const cardCopy: React.CSSProperties = { fontSize: 12, lineHeight: 1.5, color: "#cbd5e1", marginTop: 0, marginBottom: 10 };
+const cardCopy: React.CSSProperties = { fontSize: 12, lineHeight: 1.5, color: adminColors.text, marginTop: 0, marginBottom: 10 };
 
 function CategoryTitle({ anchor, label }: { anchor: string; label: string }) {
   return (
     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label}
-      <a href={`/admin/scoring#${anchor}`} style={{ fontSize: 11, fontWeight: 500, color: "#93c5fd" }}>
+      <a href={`/admin/scoring#${anchor}`} style={{ fontSize: 11, fontWeight: 500, color: adminColors.ink }}>
         Learn more →
       </a>
     </span>
@@ -163,8 +164,8 @@ function CategoryTitle({ anchor, label }: { anchor: string; label: string }) {
 function RawScore({ label, value }: { label: string; value: number | null }) {
   return (
     <div>
-      <div style={{ color: "#9ca3af", fontSize: 11, marginBottom: 2 }}>{label}</div>
-      {value != null ? <ScorePill value={value} /> : <span style={{ color: "#6b7280" }}>—</span>}
+      <div style={{ color: adminColors.muted, fontSize: 11, marginBottom: 2 }}>{label}</div>
+      {value != null ? <ScorePill value={value} /> : <span style={{ color: adminColors.faint }}>—</span>}
     </div>
   );
 }
@@ -177,7 +178,7 @@ function ConfidenceBadgeRows({ rows, currentId }: { rows: ConfidenceRow[]; curre
           <span>
             {r.label}
             {r.id === currentId && (
-              <span style={{ marginLeft: 6, color: "#93c5fd", fontWeight: 700, fontSize: 11 }}>● current</span>
+              <span style={{ marginLeft: 6, color: adminColors.ink, fontWeight: 700, fontSize: 11 }}>● current</span>
             )}
           </span>
           {r.confidence ? (
@@ -194,7 +195,7 @@ function ConfidenceBadgeRows({ rows, currentId }: { rows: ConfidenceRow[]; curre
               {r.confidence.toUpperCase()}
             </span>
           ) : (
-            <span style={{ color: "#6b7280", fontSize: 11 }}>not yet run</span>
+            <span style={{ color: adminColors.faint, fontSize: 11 }}>not yet run</span>
           )}
         </div>
       ))}

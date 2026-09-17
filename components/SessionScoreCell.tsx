@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { computeSessionMainScore, sessionScoreBreakdown } from "@/lib/cefr-score";
 import { wordColor, Bar } from "@/components/ScoreDisplay";
 import type { SessionSummary } from "@/lib/types";
+import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -70,7 +71,7 @@ export function SessionScoreCell({ session }: { session: SessionSummary }) {
     [],
   );
 
-  if (!main) return <span style={{ color: "#6b7280" }}>—</span>;
+  if (!main) return <span style={{ color: adminColors.faint }}>—</span>;
 
   const cancelClose = () => {
     if (closeTimer.current) {
@@ -129,7 +130,7 @@ export function SessionScoreCell({ session }: { session: SessionSummary }) {
               <div key={g.title} className={styles.scorePopoverGroup}>
                 <div className={styles.scorePopoverGroupTitle}>{g.title}</div>
                 {g.rows.map((r) => (
-                  <Bar key={r.label} label={r.label} value={r.value} max={r.max} />
+                  <Bar key={r.label} label={r.label} value={r.value} max={r.max} theme="light" />
                 ))}
               </div>
             ))}
