@@ -16,8 +16,9 @@ out/
 # Large binary assets — serve from CDN or object storage instead
 *.fbx
 *.glb
-# ...except the placeholder avatar, committed until it's moved to a CDN
+# ...except the avatars in active use, committed until they're moved to a CDN
 !public/avatars/brunette-t.glb
+!public/avatars/woman_2.glb
 
 # build artifacts
 tsconfig.tsbuildinfo
@@ -27,7 +28,7 @@ tsconfig.tsbuildinfo
 
 # structured server logs (Mistral call timing/errors) — local debugging only
 logs/
-avatars/
+/avatars/
 
 # graphify generated knowledge graph (not part of the app)
 graphify-out/
