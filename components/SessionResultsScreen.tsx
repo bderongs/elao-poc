@@ -6,7 +6,7 @@ import { ClaimResultsForm } from "@/components/ClaimResultsForm";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
 
 const FR_CEFR_LABELS = {
-  eyebrow: "TON NIVEAU",
+  eyebrow: "VOTRE NIVEAU",
   score: "Score",
   strengths: "Points forts",
   toImprove: "À travailler",
@@ -14,11 +14,27 @@ const FR_CEFR_LABELS = {
   confidence: { high: "FIABLE", medium: "MOYEN", low: "INDICATIF" },
 };
 
+function Logo() {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
+        <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
+        <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
+        <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
+      </div>
+      <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, color: "#141D33", letterSpacing: "0.02em", lineHeight: 1 }}>
+        ELAO
+      </span>
+    </div>
+  );
+}
+
 /**
- * The "done" phase screen — replaces the old bare CefrPanel + audio + full
- * transcript dump. Leads with a thank-you, keeps the score card as the
- * centerpiece, offers the account sign-up right under it, and tucks the
- * recording/transcript behind a collapsed section most users won't open.
+ * The "done" phase screen (doc/new_design's visual language, extended past
+ * screen 4 — the handoff itself stops at "analyse en cours"). Leads with a
+ * thank-you, keeps the score card as the centerpiece, offers the account
+ * sign-up right under it, and tucks the recording/transcript behind a
+ * collapsed section most users won't open.
  */
 export function SessionResultsScreen({
   cefrResult,
@@ -27,6 +43,7 @@ export function SessionResultsScreen({
   audioBlobUrl,
   transcriptPanel,
   sessionId,
+  onRestart,
 }: {
   cefrResult: CefrResult | null;
   pronunciationAvg: PronunciationAvg | null;
@@ -34,69 +51,64 @@ export function SessionResultsScreen({
   audioBlobUrl: string | null;
   transcriptPanel: React.ReactNode;
   sessionId: string | null;
+  onRestart: () => void;
 }) {
   return (
-    <div style={{ flex: 1, overflow: "auto" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: "32px 16px 48px", display: "flex", flexDirection: "column", gap: 20 }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto", background: "#F7F5F0" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 36px", flexShrink: 0 }}>
+        <Logo />
+        <span
+          onClick={onRestart}
+          style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+        >
+          Nouvelle session
+        </span>
+      </div>
+
+      <div style={{ maxWidth: 560, width: "100%", margin: "0 auto", padding: "12px 24px 60px", display: "flex", flexDirection: "column", gap: 20 }}>
         {/* Hero */}
-        <div style={{ textAlign: "center" }}>
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: "50%",
-              background: "rgba(74, 222, 128, 0.15)",
-              color: "#4ade80",
-              fontSize: 28,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              margin: "0 auto 14px",
-            }}
-          >
-            ✓
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#f1f5f9" }}>Merci d&apos;avoir passé le test !</div>
-          <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>Voici ton résultat.</div>
+        <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
+          <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 32, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
+            Merci d&apos;avoir passé le test.
+          </h2>
+          <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>Voici votre résultat.</p>
         </div>
 
         {cefrResult && (
-          <div style={{ boxShadow: "0 8px 30px rgba(0,0,0,0.35)", borderRadius: 12, overflow: "hidden" }}>
-            <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={FR_CEFR_LABELS} />
-          </div>
+          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={FR_CEFR_LABELS} theme="light" />
         )}
 
         {evalFailed && !cefrResult && (
           <div
             style={{
               padding: 16,
-              borderRadius: 8,
-              background: "#3f1d1d",
-              border: "1px solid #7f1d1d",
-              color: "#fecaca",
-              fontSize: 13,
+              borderRadius: 12,
+              background: "#FDF0D0",
+              border: "1px solid #F0DDA8",
+              color: "#8A6410",
+              fontSize: 14,
             }}
           >
-            L&apos;évaluation n&apos;a pas pu être finalisée, mais ta session a bien été enregistrée.
+            L&apos;évaluation n&apos;a pas pu être finalisée, mais votre session a bien été enregistrée.
           </div>
         )}
 
-        {sessionId && <ClaimResultsForm sessionId={sessionId} />}
+        {sessionId && <ClaimResultsForm sessionId={sessionId} light />}
 
-        <CollapsibleSection title="Voir le détail : enregistrement et transcription" defaultOpen={false}>
+        <CollapsibleSection title="Voir le détail : enregistrement et transcription" defaultOpen={false} light>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 12 }}>
             {audioBlobUrl && (
-              <div style={{ padding: "10px 12px", borderRadius: 8, background: "#0f172a", border: "1px solid #1e293b" }}>
-                <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>
+              <div style={{ padding: "16px 18px", borderRadius: 14, background: "#FFFFFF", border: "1px solid #E4E0D7" }}>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.1em", marginBottom: 10 }}>
                   ÉCOUTER
                 </div>
-                <audio controls src={audioBlobUrl} style={{ width: "100%", height: 32, accentColor: "#4f46e5" }} />
-                <div style={{ fontSize: 10, color: "#475569", marginTop: 4 }}>
+                <audio controls src={audioBlobUrl} style={{ width: "100%", height: 32, accentColor: "#141D33" }} />
+                <div style={{ fontSize: 12, color: "#8A8F9C", marginTop: 8 }}>
                   Les mots colorés dans la transcription ci-dessous indiquent la qualité de prononciation.
                 </div>
               </div>
             )}
-            <div style={{ border: "1px solid #1e293b", borderRadius: 8, overflow: "hidden", maxHeight: 480, display: "flex", flexDirection: "column" }}>
+            <div style={{ border: "1px solid #E4E0D7", borderRadius: 14, overflow: "hidden", maxHeight: 480, display: "flex", flexDirection: "column", background: "#FFFFFF" }}>
               {transcriptPanel}
             </div>
           </div>

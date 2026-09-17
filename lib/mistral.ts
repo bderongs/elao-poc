@@ -3,6 +3,7 @@ import { logServerEvent } from "@/lib/server-log";
 
 const MISTRAL_API = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_TRANSCRIBE_API = "https://api.mistral.ai/v1/audio/transcriptions";
+export const MISTRAL_REALTIME_SESSION_API = "https://api.mistral.ai/v1/client/sessions";
 
 export type MistralRole = "system" | "user" | "assistant";
 
@@ -27,7 +28,7 @@ export class MistralHttpError extends Error {
   }
 }
 
-function requireApiKey(): string {
+export function requireApiKey(): string {
   const key = process.env.MISTRAL_API_KEY;
   if (!key) throw new Error("MISTRAL_API_KEY missing");
   return key;
@@ -68,6 +69,17 @@ export function mistralVoxtralModel(): string {
  */
 export function mistralTranscribeModel(): string {
   return process.env.MISTRAL_TRANSCRIBE_MODEL ?? "voxtral-mini-latest";
+}
+
+/**
+ * Streaming counterpart to mistralTranscribeModel() — a WebSocket-based model
+ * the browser connects to directly (see app/api/realtime-token/route.ts and
+ * lib/realtime-stt.ts), transcribing audio as it arrives instead of after a
+ * full clip is uploaded. Separate env var since it's a different model family
+ * from the batch endpoint, not just a config tweak of it.
+ */
+export function mistralRealtimeTranscribeModel(): string {
+  return process.env.MISTRAL_REALTIME_TRANSCRIBE_MODEL ?? "voxtral-mini-transcribe-realtime-2602";
 }
 
 function buildMessages(system: string | undefined, messages: MistralMessage[]): MistralMessage[] {

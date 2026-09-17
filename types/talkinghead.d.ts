@@ -50,6 +50,43 @@ declare module "@met4citizen/talkinghead" {
     // target is actually mesh-wired. See components/TalkingHeadAvatar.tsx.
     isRunning: boolean;
     mtAvatar: Record<string, TalkingHeadMorphTargetState>;
+    // The loaded GLB's root node (named per `opt.modelRoot`, "Armature" by
+    // default) — a THREE.Object3D. Untyped here (no three.js dep in this
+    // ambient module) since we only need .traverse() to hide body/outfit
+    // meshes. See components/TalkingHeadAvatar.tsx.
+    armature: { traverse(callback: (obj: any) => void): void } | null;
+    // Plain flag the animation loop reads every frame (talkinghead.mjs) to
+    // pick the idle vs. speaking head-move/eye-contact/body-sway templates.
+    // Normally set internally by speakAudio()/speakText() — we bypass both
+    // (audio-driven lip-sync only, see the effect below) and set this
+    // directly instead. See components/TalkingHeadAvatar.tsx.
+    isSpeaking: boolean;
+    // Plays a short named animation (built-in gestures like "yes"/"no", or
+    // hand emoji gestures) — used here to trigger a small nod while the user
+    // is talking. See components/TalkingHeadAvatar.tsx.
+    playGesture(name: string, dur?: number, mirror?: boolean, ms?: number): void;
+    stopGesture(ms?: number): void;
+    // Per-morph-target min/max override maps, read once per morph target when
+    // showAvatar() builds its internal state (talkinghead.mjs's mtTemp
+    // construction) — every frame's final `.applied` value is clipped to
+    // this range. Mutated in place, before showAvatar(), to hard-cap how far
+    // headRotateX/Y/Z can swing regardless of what internal logic (idle
+    // look-away, a gesture, ...) computed for them. See components/TalkingHeadAvatar.tsx.
+    mtMinExceptions: Record<string, number>;
+    mtMaxExceptions: Record<string, number>;
+    // Per-mood animation templates (body sway ranges, pose-change frequency,
+    // etc.) — a plain object, mutated in place to tone down the built-in
+    // "neutral" mood's idle sway. See components/TalkingHeadAvatar.tsx.
+    animMoods: Record<string, any>;
+    // Shared idle/speaking eye-contact + gaze-wander template (referenced
+    // from inside animMoods' own anims array) — mutated in place to shrink
+    // how far the eyes/head swing during a "glance away" cycle.
+    // See components/TalkingHeadAvatar.tsx.
+    animTemplateEyes: Record<string, any>;
+    // Named gesture/emoji-reaction templates (e.g. "yes"/"no" head nods,
+    // hand gestures) — mutated in place to soften the built-in "yes" nod's
+    // amplitude. See components/TalkingHeadAvatar.tsx.
+    animEmojis: Record<string, any>;
   }
 }
 

@@ -9,7 +9,7 @@ import type { ConvLang } from "@/lib/conversation-prompts";
 // Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
 // every session_evaluations row with it, so scoring drift across prompt
 // edits stays distinguishable from drift across models.
-export const CEFR_PROMPT_VERSION = "v1";
+export const CEFR_PROMPT_VERSION = "v2";
 
 // Single source of truth for the WPM → fluency mapping baked into
 // CEFR_SYSTEM_PROMPT below — also read by the admin system-config page to
@@ -117,6 +117,10 @@ B2-C1: Natural delivery, idiomatic range, rare errors, handles abstract topics w
 C1: Near-native fluency, wide and precise vocabulary, errors rare and minor, full register control.
     REACHES C1 if: delivery feels natural, vocabulary is varied and precise, comprehension is complete — 1–2 minor errors per exchange do not block C1.
 C2: Indistinguishable from an educated native speaker across all five dimensions.
+
+LEVEL-APPROPRIATE EXPECTATIONS — read this before scoring:
+- Judge a candidate against what their apparent level actually requires, not against a fixed idea of "good answers". Do NOT penalise an A1/A2-range transcript for lacking vocabulary range, complex structures, or elaboration it was never asked to produce — a run of short, correct, on-topic answers at that level is strong evidence for that band, not a ceiling that caps the score below it.
+- PAUSE-AWARE FLUENCY AT THE TOP END: the WPM figure below is measured over the whole utterance including thinking pauses. A candidate producing precise, complex, native-like language whose measured WPM falls short of the top band because of long, deliberate pauses before answering a genuinely demanding question should still score high on fluency — treat the WPM bands as a floor check for a struggling speaker, not a hard ceiling on someone whose actual output is otherwise flawless.
 
 SPOKEN LANGUAGE CALIBRATION — read this before scoring:
 

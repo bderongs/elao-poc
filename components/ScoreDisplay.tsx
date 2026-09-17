@@ -38,27 +38,33 @@ export function Bar({
   label,
   value,
   max = 100,
+  theme = "dark",
 }: {
   label: string;
   value: number;
   max?: number;
+  /** "light" matches the "Salle claire" design (doc/new_design) — a single
+   *  ink fill on a pale track, no traffic-light colouring. Default "dark"
+   *  keeps the admin/dashboard look unchanged. */
+  theme?: "dark" | "light";
 }) {
   const pct = Math.round((value / max) * 100);
+  const light = theme === "light";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginBottom: 3 }}>
-      <span style={{ width: 80, color: "#9ca3af", flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1, height: 5, background: "rgba(0,0,0,0.35)", borderRadius: 3 }}>
+      <span style={{ width: 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
+      <div style={{ flex: 1, height: 5, background: light ? "#E4E0D7" : "rgba(0,0,0,0.35)", borderRadius: 3 }}>
         <div
           style={{
             width: `${pct}%`,
             height: "100%",
-            background: scoreBarColor(pct),
+            background: light ? "#141D33" : scoreBarColor(pct),
             borderRadius: 3,
             transition: "width 0.4s ease",
           }}
         />
       </div>
-      <span style={{ width: 28, textAlign: "right", color: "#e5e7eb" }}>{Math.round(value)}</span>
+      <span style={{ width: 28, textAlign: "right", color: light ? "#141D33" : "#e5e7eb" }}>{Math.round(value)}</span>
     </div>
   );
 }
@@ -118,6 +124,7 @@ export function CefrPanel({
   pronunciationSourceLabel,
   showDetails = true,
   labels,
+  theme = "dark",
 }: {
   result: CefrResult;
   pronunciationAvg: PronunciationAvg | null;
@@ -127,8 +134,13 @@ export function CefrPanel({
   showDetails?: boolean;
   /** Overrides for the handful of hardcoded structural labels — defaults keep the admin view's English copy unchanged. */
   labels?: CefrPanelLabels;
+  /** "light" matches the "Salle claire" design (doc/new_design) — used only
+   *  by SessionResultsScreen. Default "dark" keeps the admin/dashboard
+   *  detail pages unchanged. */
+  theme?: "dark" | "light";
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
+  const light = theme === "light";
   // All 4 components on a 0-10 scale for uniform bar display
   const pronScore  = pronunciationAvg  ? pronunciationAvg.pronunciation / 10 : null;
   const fluency    = result.dimensions.fluency;
@@ -144,58 +156,92 @@ export function CefrPanel({
     ["Communication", comm],
   ];
 
+  const eyebrowColor = light ? "#8A8F9C" : "rgba(255,255,255,0.6)";
+  const mutedColor = light ? "#8A8F9C" : "rgba(255,255,255,0.5)";
+  const faintColor = light ? "#8A8F9C" : "rgba(255,255,255,0.45)";
+  const bodyColor = light ? "#5A5F6E" : "rgba(255,255,255,0.7)";
+  const dividerColor = light ? "1px solid #EFEBE2" : "1px solid rgba(255,255,255,0.1)";
+
   return (
     <div
-      style={{
-        padding: 12,
-        background: "linear-gradient(135deg, #1e3a8a 0%, #4f46e5 100%)",
-        borderRadius: 8,
-      }}
+      style={
+        light
+          ? { padding: 24, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }
+          : { padding: 12, background: "linear-gradient(135deg, #1e3a8a 0%, #4f46e5 100%)", borderRadius: 8 }
+      }
     >
       {/* Header row */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: light ? 16 : 6 }}>
         <div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 700, letterSpacing: 1 }}>
+          <div
+            style={{
+              fontSize: light ? 11 : 10,
+              color: eyebrowColor,
+              fontWeight: light ? 400 : 700,
+              fontFamily: light ? "'IBM Plex Mono',monospace" : undefined,
+              letterSpacing: light ? "0.12em" : 1,
+            }}
+          >
             {t.eyebrow}
           </div>
-          <div style={{ fontSize: 36, fontWeight: 800, lineHeight: 1.1 }}>{compositeLevel}</div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>
+          <div
+            style={
+              light
+                ? { fontSize: 48, fontWeight: 400, lineHeight: 1.1, color: "#141D33", fontFamily: "'Outfit',sans-serif" }
+                : { fontSize: 36, fontWeight: 800, lineHeight: 1.1 }
+            }
+          >
+            {compositeLevel}
+          </div>
+          <div style={{ fontSize: light ? 13 : 10, color: light ? "#5A5F6E" : "rgba(255,255,255,0.6)" }}>
             {t.score} {compositeScore}/100
           </div>
-          {sourceLabel && (
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>via {sourceLabel}</div>
-          )}
+          {sourceLabel && <div style={{ fontSize: 10, color: faintColor, marginTop: 2 }}>via {sourceLabel}</div>}
         </div>
         <span
-          style={{
-            padding: "2px 8px",
-            borderRadius: 10,
-            fontSize: 10,
-            fontWeight: 700,
-            background: CONFIDENCE_COLOR[result.confidence] ?? "#9ca3af",
-            color: "#000",
-            marginTop: 4,
-          }}
+          style={
+            light
+              ? {
+                  padding: "4px 10px",
+                  borderRadius: 100,
+                  fontSize: 11,
+                  fontFamily: "'IBM Plex Mono',monospace",
+                  letterSpacing: "0.06em",
+                  background: "#FDF0D0",
+                  border: "1px solid #F0DDA8",
+                  color: "#8A6410",
+                  marginTop: 4,
+                }
+              : {
+                  padding: "2px 8px",
+                  borderRadius: 10,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  background: CONFIDENCE_COLOR[result.confidence] ?? "#9ca3af",
+                  color: "#000",
+                  marginTop: 4,
+                }
+          }
         >
           {t.confidence[result.confidence] ?? result.confidence.toUpperCase()}
         </span>
       </div>
 
       {/* 4 equal-weight dimension bars (all 0-10) */}
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: light ? 16 : 8 }}>
         {dim4.map(([label, val]) =>
           val !== null ? (
-            <Bar key={label} label={label} value={val} max={10} />
+            <Bar key={label} label={label} value={val} max={10} theme={theme} />
           ) : (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginBottom: 3 }}>
-              <span style={{ width: 80, color: "#9ca3af", flexShrink: 0 }}>{label}</span>
-              <span style={{ color: "#4b5563", fontSize: 10 }}>n/a</span>
+              <span style={{ width: 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
+              <span style={{ color: light ? "#8A8F9C" : "#4b5563", fontSize: 10 }}>n/a</span>
             </div>
           )
         )}
       </div>
       {pronunciationAvg && pronunciationSourceLabel && (
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.45)", marginTop: -4, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: faintColor, marginTop: -4, marginBottom: light ? 16 : 8 }}>
           Pronunciation via {pronunciationSourceLabel}
         </div>
       )}
@@ -204,9 +250,9 @@ export function CefrPanel({
         <>
           {/* Strengths */}
           {result.strengths?.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{t.strengths}</div>
-              <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5 }}>
+            <div style={{ marginBottom: light ? 12 : 6 }}>
+              <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.strengths}</div>
+              <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
                 {result.strengths.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
@@ -214,9 +260,9 @@ export function CefrPanel({
 
           {/* Areas for improvement */}
           {result.areas_for_improvement?.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{t.toImprove}</div>
-              <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5 }}>
+            <div style={{ marginBottom: light ? 12 : 6 }}>
+              <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.toImprove}</div>
+              <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
                 {result.areas_for_improvement.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
@@ -224,9 +270,9 @@ export function CefrPanel({
 
           {/* Notable errors */}
           {result.notable_errors?.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{t.notableErrors}</div>
-              <ul style={{ margin: 0, paddingLeft: 14, fontSize: 11, lineHeight: 1.5, color: "#fca5a5" }}>
+            <div style={{ marginBottom: light ? 12 : 6 }}>
+              <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.notableErrors}</div>
+              <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#B3542E" : "#fca5a5" }}>
                 {result.notable_errors.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
@@ -234,7 +280,7 @@ export function CefrPanel({
 
           {/* Summary */}
           {result.summary && (
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.5, borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 6 }}>
+            <div style={{ fontSize: light ? 14 : 11, color: bodyColor, lineHeight: 1.5, borderTop: dividerColor, paddingTop: light ? 12 : 6 }}>
               {result.summary}
             </div>
           )}

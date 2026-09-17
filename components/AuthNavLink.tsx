@@ -9,7 +9,7 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
  * homepage (app/page.tsx) otherwise has zero auth awareness. Renders nothing
  * until the client-side auth check resolves, to avoid a wrong flash.
  */
-export function AuthNavLink() {
+export function AuthNavLink({ light = false }: { light?: boolean }) {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -29,7 +29,12 @@ export function AuthNavLink() {
   return (
     <a
       href={loggedIn ? "/dashboard" : "/login"}
-      style={{ fontSize: 13, color: "#94a3b8", textDecoration: "none" }}
+      style={{
+        fontSize: 14,
+        color: light ? "#6B6F7D" : "#94a3b8",
+        fontFamily: light ? "'DM Sans',system-ui,sans-serif" : undefined,
+        textDecoration: "none",
+      }}
     >
       {loggedIn ? "Mes sessions" : "Se connecter"}
     </a>

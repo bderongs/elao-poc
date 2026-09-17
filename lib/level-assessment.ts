@@ -18,7 +18,7 @@
 import { mistralComplete, mistralChatModel } from "@/lib/mistral";
 import { logServerEvent } from "@/lib/server-log";
 import type { ConvLang } from "@/lib/conversation-prompts";
-import { CEFR_LADDER, type CefrRung } from "@/lib/cefr-rung";
+import { CEFR_LADDER, zoneForRung, type CefrRung } from "@/lib/cefr-rung";
 
 /** Mirrors the step logic that used to live inline in the conversation prompt's
  *  ADAPTIVE DIFFICULTY rule: stepSize rungs per turn (admin-configurable, see
@@ -39,6 +39,21 @@ Given the question asked and the speaker's answer (transcribed by speech recogni
 
 Return ONLY JSON, no markdown fences: {"verdict": "well"|"adequate"|"struggled"}`;
 
+// Small, rung-conditional addenda to the base judging criteria above — see
+// doc/adaptive-levels-plan.md §3.3. B1/B2/C1 (the tuned, working range) get
+// no addendum at all, i.e. the exact behaviour that existed before this.
+const FOUNDATION_ADDENDUM = `
+At A1/A2, weight comprehension and basic accuracy over elaboration: a short but correct, on-topic answer is "well" for this rung, not "adequate" — a true beginner's short answer is often their ceiling, not hesitation. Reserve "struggled" for answers that are actually off-topic, incomprehensible, or show the question wasn't understood.`;
+const MASTERY_ADDENDUM = `
+At C2, the transcript may follow a real thinking pause the speaker took before answering a deliberately hard question — that pause is not part of what you're judging (you only see the text). A precise, well-constructed answer is "well" regardless of how long it took to arrive.`;
+
+function zoneAddendum(rung: CefrRung): string {
+  const zone = zoneForRung(rung);
+  if (zone === "foundation") return FOUNDATION_ADDENDUM;
+  if (zone === "mastery") return MASTERY_ADDENDUM;
+  return "";
+}
+
 export async function assessTranscript(params: {
   language: ConvLang;
   questionAsked: string;
@@ -51,7 +66,7 @@ export async function assessTranscript(params: {
   try {
     const raw = await mistralComplete({
       model: mistralChatModel(),
-      system: SYSTEM_PROMPT,
+      system: SYSTEM_PROMPT + zoneAddendum(params.currentRung),
       messages: [
         {
           role: "user",

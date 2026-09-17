@@ -3,18 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { TurnVad } from "@/lib/turn-vad";
+import { RealtimeStt } from "@/lib/realtime-stt";
+import { REALTIME_STT_ENABLED } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import { logClientEvent } from "@/lib/client-log";
-import { isCefrRung, type CefrRung } from "@/lib/cefr-rung";
+import { isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
 import { isTopicDomain, type TopicDomain } from "@/lib/topic-domain";
 import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
-import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { EvaluatingScreen } from "@/components/EvaluatingScreen";
 import { SessionResultsScreen } from "@/components/SessionResultsScreen";
 import { AuthNavLink } from "@/components/AuthNavLink";
+import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
+import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   UserWords,
   UtteranceBadges,
@@ -30,14 +34,37 @@ const TalkingHeadAvatar = dynamic(
 
 type Lang = "fr" | "en" | "nl-BE" | "es" | "it" | "de";
 
-const LANGUAGES: Array<{ code: Lang; label: string; flag: string }> = [
-  { code: "fr", label: "Français", flag: "🇫🇷" },
-  { code: "en", label: "English", flag: "🇬🇧" },
-  { code: "nl-BE", label: "Nederlands (BE)", flag: "🇧🇪" },
-  { code: "es", label: "Español", flag: "🇪🇸" },
-  { code: "it", label: "Italiano", flag: "🇮🇹" },
-  { code: "de", label: "Deutsch", flag: "🇩🇪" },
+const LANGUAGES: Array<{ code: Lang; label: string; meta: string }> = [
+  { code: "fr", label: "Français", meta: "FR · FRANCE" },
+  { code: "en", label: "English", meta: "EN · UK" },
+  { code: "nl-BE", label: "Nederlands", meta: "NL · BELGIQUE" },
+  { code: "es", label: "Español", meta: "ES · ESPAÑA" },
+  { code: "it", label: "Italiano", meta: "IT · ITALIA" },
+  { code: "de", label: "Deutsch", meta: "DE · DEUTSCHLAND" },
 ];
+
+/** French name of each assessment language, for the picker's CTA — interface copy stays French regardless of the language chosen (doc/new_design). */
+const LANG_NAME_FR: Record<Lang, string> = {
+  fr: "français",
+  en: "anglais",
+  "nl-BE": "néerlandais",
+  es: "espagnol",
+  it: "italien",
+  de: "allemand",
+};
+
+/** Neutral filler sent through the normal chat pipeline when the user hits "Passer" — treated as a real (weak) answer, not a special protocol message. */
+const SKIP_TEXT: Record<Lang, string> = {
+  fr: "Je préfère passer cette question.",
+  en: "I'd rather skip this question.",
+  "nl-BE": "Ik sla deze vraag liever over.",
+  es: "Prefiero saltarme esta pregunta.",
+  it: "Preferisco saltare questa domanda.",
+  de: "Ich überspringe diese Frage lieber.",
+};
+
+/** French word for small counts (0-3), used in the "N questions sur 3 terminées" caption. */
+const FR_COUNT_WORD = ["Aucune", "Une", "Deux", "Trois"];
 
 type Msg = {
   role: "user" | "assistant";
@@ -46,11 +73,52 @@ type Msg = {
   audioUrl?: string;                   // per-turn recording URL (set after evaluation)
 };
 
+/**
+ * Direct starting-level mode (doc/adaptive-levels-plan.md §4): `?level=A1`
+ * .. `?level=C2` on the page URL overrides the session's starting rung, for
+ * routing extreme-level candidates straight into their zone instead of
+ * always climbing from A1. Read directly from window.location rather than
+ * next/navigation's useSearchParams — this is a plain client component with
+ * no Suspense boundary, and the value is only ever needed once, synchronously,
+ * at the moment startSession() runs (a user click, well after mount), so
+ * there's no SSR/hydration concern to justify that hook here.
+ */
+function getLevelOverrideFromUrl(): CefrRung | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("level");
+  return isCefrRung(raw) ? raw : null;
+}
+
+/** `?debug=1` shows the live DebugPanel (transcript, current rung, per-turn ET
+ *  verdicts). Same read-once-from-window.location pattern as the level override
+ *  above, for the same reason (client-only, no Suspense boundary needed). */
+function getDebugFlagFromUrl(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("debug") === "1";
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const [language, setLanguage] = useState<Lang>("fr");
   const [sessionStarted, setSessionStarted] = useState(false);
+  /** Pre-session onboarding: "welcome" (sign in / continue as guest) -> optionally
+   *  "confirm-preference" (returning signed-in user, stored language+rung) -> "language" (today's picker)
+   *  -> "instructions" (mic check, doc/new_design screen 2). */
+  const [preSessionStep, setPreSessionStep] = useState<"welcome" | "confirm-preference" | "language" | "instructions">("welcome");
+  const [micStatus, setMicStatus] = useState<"pending" | "granted" | "denied">("pending");
+  const [micDeviceLabel, setMicDeviceLabel] = useState<string | null>(null);
+  /** 0-1, sampled from the real mic input — drives both the mic-check meter and the live "userSpeaking" bars. */
+  const [micLevel, setMicLevel] = useState(0);
+  /** Indicator state for the conversation screen (doc/new_design screen 3): which of the three pills is shown. */
+  const [turnState, setTurnState] = useState<"avatarSpeaking" | "userSpeaking" | "thinking">("thinking");
+  /** True only while the turn-boundary VAD (lib/turn-vad.ts) has actually detected
+   *  the user's voice — unlike turnState's "userSpeaking" (mic just open, no audio
+   *  activity implied), this drives the avatar's small listening nod. */
+  const [isUserTalking, setIsUserTalking] = useState(false);
+  const [repeatUsed, setRepeatUsed] = useState(false);
+  /** A signed-in user's remembered language+rung (profiles.last_language/last_rung), fetched once on mount. */
+  const [storedPreference, setStoredPreference] = useState<{ language: Lang; rung: CefrRung } | null>(null);
   const [history, setHistory] = useState<Msg[]>([]);
   const [partialUser, setPartialUser] = useState("");
   const [streamingAssistant, setStreamingAssistant] = useState("");
@@ -71,6 +139,11 @@ export default function Home() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const audioBlobUrlRef = useRef<string | null>(null);
+  /** `?debug=1` — fixed for the life of the page load, read once on mount. */
+  const [debugMode] = useState<boolean>(() => getDebugFlagFromUrl());
+  /** ET verdict/rung history for the DebugPanel — only ever appended to when
+   *  debugMode is true, so this costs nothing for normal sessions. */
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
 
   const vadRef = useRef<TurnVad | null>(null);
   const playerRef = useRef<StreamingAudioPlayer | null>(null);
@@ -82,6 +155,13 @@ export default function Home() {
   const startedAtRef = useRef<number | null>(null);
   const isProcessingRef = useRef(false);
   const isSpeakingRef = useRef(false);
+  /** True once the current turn's /api/chat SSE stream has sent its "done" event —
+   *  i.e. no more "audio" events (sentence chunks) are coming. Gates the audio
+   *  player's amp===0 callback below: without it, the gap between two sentence
+   *  chunks (TTS chunk N finishes playing before chunk N+1 has arrived from the
+   *  server) reads as "avatar stopped talking" and flashes the userSpeaking
+   *  banner mid-reply. Reset to false at the start of each handleUserTurn. */
+  const streamDoneRef = useRef(false);
   /** Aborts the in-flight /api/chat SSE stream — set at the start of handleUserTurn,
    *  used by handleBargeIn to stop the server generating more of a reply the user
    *  already started talking over. */
@@ -91,8 +171,9 @@ export default function Home() {
    * Difficulty rung to target the NEXT examiner question — set by ET's most
    * recently COMPLETED result (lib/level-assessment.ts), best-effort. A never
    * waits for ET to finish; it just reads whatever this holds when it fires.
-   * "A2" matches the old inline prompt's default starting point (turn 1 is
-   * always the A1 warm-up, handled separately — see startSession/handleUserTurn).
+   * "A2" matches the old inline prompt's default starting point. Turn 1
+   * targets conversationSettingsRef.current.startingRung instead of always
+   * "A1" — see startSession/handleUserTurn and the `?level=` override below.
    */
   const currentRungRef = useRef<CefrRung>("A2");
   /** Bank question strings already offered this session (any rung) — Track
@@ -163,6 +244,21 @@ export default function Home() {
    * internal stream).
    */
   const micStreamRef = useRef<MediaStream | null>(null);
+  /** Streaming STT (lib/realtime-stt.ts) — null when disabled, not yet
+   *  connected, or after a failure; onSpeechEnd falls back to the batch
+   *  /api/transcribe path whenever this can't produce a transcript. */
+  const realtimeSttRef = useRef<RealtimeStt | null>(null);
+  /** Dedicated analyser + AudioContext for the real mic-level meter (mic-check
+   *  card and the live "userSpeaking" bars) — separate from the player's
+   *  TTS-only analyser, and alive from the instructions step through the
+   *  whole session. */
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Audio chunks (base64 + sentence text) played for the CURRENT assistant
+   *  turn — cached so "Répéter la question" can replay them without a second
+   *  TTS call. Reset at the start of each new turn in handleUserTurn. */
+  const currentTurnAudioChunksRef = useRef<Array<{ text: string; audio: string }>>([]);
 
   // Derived: average pronunciation scores across all scored user turns
   const pronunciationAvg = useMemo<PronunciationAvg | null>(() => {
@@ -222,6 +318,43 @@ export default function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elapsed, phase]);
+
+  // ── onboarding: resolve welcome-screen step once on mount ──
+  // A signed-in returning user (cookie still valid — AuthNavLink does the
+  // same check) skips the welcome screen's sign-in CTA entirely: if they
+  // have a remembered language+rung (profiles.last_language/last_rung), land
+  // on "confirm-preference"; otherwise (new account, or one that's only ever
+  // gone through the guest/claim flow) fall through straight to "language",
+  // today's picker. A signed-out visitor stays on "welcome".
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabaseBrowser().auth.getUser();
+      if (cancelled) return;
+      if (!data.user) return; // stays "welcome"
+
+      const res = await fetch("/api/profile-preferences");
+      const pref = res.ok ? await res.json() : null;
+      if (cancelled) return;
+
+      if (pref && LANGUAGES.some((l) => l.code === pref.language) && isCefrRung(pref.rung)) {
+        setStoredPreference({ language: pref.language, rung: pref.rung });
+        setLanguage(pref.language);
+        setPreSessionStep("confirm-preference");
+      } else {
+        setPreSessionStep("language");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ── instructions step: open the mic + start the level meter as soon as it mounts ──
+  useEffect(() => {
+    if (preSessionStep === "instructions") void ensureMicStream();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preSessionStep]);
 
   // ── save session via the server API (no direct Supabase access from the browser) ──
   const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult) => {
@@ -471,7 +604,23 @@ export default function Home() {
         nextRung,
         verdict,
       });
-      if (isCefrRung(nextRung)) currentRungRef.current = nextRung;
+      if (isCefrRung(nextRung)) {
+        if (debugMode) {
+          setDebugEvents((prev) => [
+            ...prev,
+            {
+              questionAsked,
+              userAnswer,
+              previousRung: currentRungRef.current,
+              nextRung,
+              verdict,
+              zone: zoneForRung(nextRung),
+            },
+          ]);
+        }
+        currentRungRef.current = nextRung;
+        vadRef.current?.setExtendedPauseTolerance(nextRung === "C2");
+      }
     } catch (e) {
       logClientEvent("et_failed", { turnLogId, process: etProcess, error: String(e) });
     }
@@ -501,6 +650,26 @@ export default function Home() {
     } catch (e) {
       logClientEvent("tt_failed", { turnLogId, process: ttProcess, error: String(e) });
     }
+  };
+
+  /** "Répéter la question" — replays the current turn's already-synthesized
+   *  audio chunks (cached in currentTurnAudioChunksRef) instead of asking the
+   *  server for new TTS. Allowed once per question (doc/new_design). */
+  const handleRepeatQuestion = () => {
+    if (repeatUsed || turnState !== "userSpeaking") return;
+    const chunks = currentTurnAudioChunksRef.current;
+    if (!chunks.length) return;
+    setRepeatUsed(true);
+    setTurnState("avatarSpeaking");
+    for (const c of chunks) playerRef.current?.playChunk(c.audio, c.text);
+  };
+
+  /** "Passer" — advances to the next question without an answer, by sending
+   *  a neutral filler through the normal chat pipeline (doc/new_design). */
+  const handleSkipQuestion = () => {
+    if (turnState !== "userSpeaking" || isProcessingRef.current) return;
+    if (!window.confirm("Passer cette question sans y répondre ?")) return;
+    void handleUserTurn(SKIP_TEXT[language] ?? SKIP_TEXT.fr);
   };
 
   /** Cancels any in-progress caption word-reveal timers (see scheduleWordReveal). */
@@ -540,31 +709,117 @@ export default function Home() {
     }
   }
 
+  /** Samples micAnalyserRef's RMS level into micLevel every 80ms — throttled
+   *  well below the analyser's own rate since this only ever drives a coarse
+   *  visual meter, not audio processing. */
+  function startMicLevelLoop(stream: MediaStream) {
+    if (micAnalyserRef.current) return; // already running
+    try {
+      const ctx = new AudioContext();
+      micAudioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      micAnalyserRef.current = analyser;
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      micLevelIntervalRef.current = setInterval(() => {
+        analyser.getByteTimeDomainData(data);
+        let sumSquares = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sumSquares += v * v;
+        }
+        const rms = Math.sqrt(sumSquares / data.length);
+        setMicLevel(Math.min(1, rms * 4)); // empirical gain — normal speech should read well above the floor
+      }, 80);
+    } catch (e) {
+      console.warn("Mic level meter unavailable:", e);
+    }
+  }
+
+  function stopMicLevelLoop() {
+    if (micLevelIntervalRef.current) clearInterval(micLevelIntervalRef.current);
+    micLevelIntervalRef.current = null;
+    micAnalyserRef.current = null;
+    void micAudioCtxRef.current?.close().catch(() => {});
+    micAudioCtxRef.current = null;
+    setMicLevel(0);
+  }
+
+  /** Acquires (or reuses) the assessment mic stream — called from the
+   *  instructions/mic-check step, and again (as a no-op reuse) from
+   *  startSession, which no longer opens its own getUserMedia stream. */
+  const ensureMicStream = async (): Promise<MediaStream | null> => {
+    if (micStreamRef.current) return micStreamRef.current;
+    try {
+      // Fidelity-first constraints for the ASSESSMENT stream — see the
+      // constraints note this function's callers used to carry inline:
+      // noiseSuppression/autoGainControl OFF preserve phoneme detail,
+      // echoCancellation stays ON to keep the avatar's own voice out.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: false, channelCount: 1, sampleRate: 48000 },
+        video: false,
+      });
+      micStreamRef.current = stream;
+      setMicStatus("granted");
+      const label = stream.getAudioTracks()[0]?.label;
+      setMicDeviceLabel(label && label.trim() ? label : "Micro par défaut");
+      startMicLevelLoop(stream);
+      return stream;
+    } catch (e) {
+      console.warn("Mic permission error:", e);
+      setMicStatus("denied");
+      return null;
+    }
+  };
+
   // ── session ──
   const startSession = async () => {
     setSessionStarted(true);
     sessionSavedRef.current = false;
     startedAtRef.current = Date.now();
 
+    // Direct starting-level mode (doc/adaptive-levels-plan.md §4): a
+    // `?level=` URL param, when present and valid, wins over a signed-in
+    // user's remembered rung (profiles.last_rung, resolved by the welcome
+    // screen's mount effect below), which in turn wins over the per-language
+    // admin default fetched below — a session-start override, not a
+    // replacement of the admin mechanism (stepSize below still comes from
+    // the fetch either way).
+    const levelOverride = getLevelOverrideFromUrl();
+    const effectiveOverride = levelOverride ?? storedPreference?.rung ?? null;
+    if (effectiveOverride) {
+      conversationSettingsRef.current = { ...conversationSettingsRef.current, startingRung: effectiveOverride };
+    }
+
     // Fire-and-forget: resolve this language's admin-configured starting rung
     // + ET step size (lib/conversation-settings-service.ts). Not awaited —
     // the mic-permission prompt and STT connect below already take real time,
     // and currentRungRef's starting value/stepSize are only actually
-    // consumed after the user answers the fixed-A1 turn 1, so there's ample
-    // time for this to resolve. Falls back to conversationSettingsRef's
-    // seeded default if the fetch fails or hasn't resolved in time.
+    // consumed after the user answers turn 1, so there's ample time for this
+    // to resolve. Falls back to conversationSettingsRef's seeded default (or
+    // levelOverride, applied synchronously above) if the fetch fails or
+    // hasn't resolved in time.
     fetch(`/api/conversation-settings?language=${language}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((settings) => {
         if (settings && isCefrRung(settings.startingRung) && Number.isInteger(settings.stepSize)) {
-          conversationSettingsRef.current = settings;
+          // effectiveOverride always wins over the admin-configured starting
+          // rung for THIS session, but stepSize is still taken from the
+          // fetch — neither the URL param nor the stored preference pick the
+          // pacing, only the starting point.
+          conversationSettingsRef.current = effectiveOverride
+            ? { startingRung: effectiveOverride, stepSize: settings.stepSize }
+            : settings;
           // currentRungRef.current is set synchronously from the (still-default)
           // seed a few lines below, before this fetch can possibly resolve —
           // apply the real value here too once it lands. Safe to do
           // unconditionally: this always resolves long before ET could have
           // produced its first real update (which needs the opening turn to
           // finish playing, the user to answer, and STT to finalize first).
-          currentRungRef.current = settings.startingRung;
+          currentRungRef.current = conversationSettingsRef.current.startingRung;
+          vadRef.current?.setExtendedPauseTolerance(conversationSettingsRef.current.startingRung === "C2");
         }
       })
       .catch(() => {});
@@ -583,7 +838,9 @@ export default function Home() {
     // below runs before the next render, so clear the ref directly or the new
     // session's first /api/chat call would include the previous transcript.
     historyRef.current = [];
+    setDebugEvents([]);
     setPartialUser("");
+    setIsUserTalking(false);
     setStreamingAssistant("");
     clearPendingReveals();
     currentRungRef.current = conversationSettingsRef.current.startingRung;
@@ -593,6 +850,9 @@ export default function Home() {
     setElapsed(0);
     setChatError(null);
     setIsThinking(false);
+    setTurnState("thinking");
+    setRepeatUsed(false);
+    currentTurnAudioChunksRef.current = [];
     bufferedTurnsRef.current = [];
     if (audioBlobUrlRef.current) {
       URL.revokeObjectURL(audioBlobUrlRef.current);
@@ -612,10 +872,20 @@ export default function Home() {
       // leaking back into the mic despite echoCancellation was getting
       // mistaken for a real user turn (see lib/turn-vad.ts).
       vadRef.current?.setAvatarSpeaking(amp > 0);
+      // Drives the conversation screen's indicator pill (doc/new_design
+      // screen 3): avatar audible -> "avatarSpeaking"; avatar just stopped
+      // -> "userSpeaking" (mic open, waiting for the next utterance).
+      // Gated on streamDoneRef: the queue also empties momentarily BETWEEN
+      // two sentence chunks whenever chunk N+1's TTS hasn't come back from
+      // the server yet — that's not the avatar finishing, so only treat
+      // amp===0 as "done talking" once the SSE stream has actually ended.
+      if (amp > 0 && !wasSpeaking) setTurnState("avatarSpeaking");
+      const reallyDone = wasSpeaking && amp === 0 && streamDoneRef.current;
+      if (reallyDone) setTurnState("userSpeaking");
       // When the last audio chunk finishes playing, flush any queued user turns.
       // This is the correct moment — the SSE stream ends before audio finishes,
       // so flushing from the SSE callback would overlap with playback.
-      if (wasSpeaking && amp === 0) {
+      if (reallyDone) {
         processBufferedRef.current();
         playbackDoneWaiterRef.current?.();
         playbackDoneWaiterRef.current = null;
@@ -629,38 +899,24 @@ export default function Home() {
     // AND turn-boundary VAD (lib/turn-vad.ts taps this same stream below —
     // no separate getUserMedia call needed now that STT isn't a live SDK
     // with its own internal mic stream).
-    try {
-      // Fidelity-first constraints for the ASSESSMENT stream:
-      // - noiseSuppression OFF: browser noise suppression is telephony-grade
-      //   and strips broadband fricative energy (/s/ /θ/ /f/ /ʃ/) — exactly
-      //   the phonemes pronunciation assessment needs intact.
-      // - autoGainControl OFF: AGC pumping distorts phoneme energy; levels are
-      //   normalised later in blobToWav16kMono instead.
-      // - echoCancellation stays ON: it keeps the avatar's question (playing
-      //   through the speakers while the turn recorder runs) out of the clip.
-      micStreamRef.current = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          autoGainControl: false,
-          echoCancellation: true,
-          noiseSuppression: false,
-          channelCount: 1,
-          sampleRate: 48000,
-        },
-        video: false,
-      });
+    // Reuses the stream already opened (and metered) on the instructions
+    // step — see ensureMicStream — rather than requesting getUserMedia again.
+    const sessionMicStream = await ensureMicStream();
+    if (sessionMicStream && playerRef.current) {
       // Mix the mic into the player's session-recording destination so the
       // listen-back audio captures both sides (avatar TTS + user voice).
-      if (playerRef.current) {
-        playerRef.current.addMicStream(micStreamRef.current);
-      }
-    } catch (e) {
-      console.warn("Mic stream for recording unavailable:", e);
+      playerRef.current.addMicStream(sessionMicStream);
     }
 
     // ── Turn-taking: client-side VAD (lib/turn-vad.ts) detects when the user
-    // has stopped talking; Voxtral transcribes the recorded clip once it has
-    // (app/api/transcribe, Mistral's dedicated transcription endpoint) ──────
-    const onSpeechEnd = async () => {
+    // has stopped talking; transcription is either streamed live to Mistral's
+    // realtime endpoint while the user talks (lib/realtime-stt.ts), or, as a
+    // fallback, a batch call once the clip is fully recorded (app/api/transcribe) ──
+    const onSpeechEnd = async (spokenMs: number) => {
+      // Wall-clock from the moment VAD considers the utterance final to the
+      // moment a transcript is actually in hand — logged below alongside
+      // sttPath so before/after latency is a single-field diff either way.
+      const sttStartMs = Date.now();
       // H-01 latency instrumentation: mark the moment VAD considers the
       // utterance final, tagged with whether it's about to sit in the
       // buffer (avatar still busy) — that wait is turn-taking, not pipeline
@@ -689,6 +945,14 @@ export default function Home() {
       // (the old behaviour) made the recorded window the gap between two
       // flushes — often under a second — instead of the real utterance,
       // producing near-empty recordings for any turn that got buffered.
+      //
+      // Realtime STT's finalize/start-next follow the exact same pattern, for
+      // the exact same reason: a fast follow-on utterance (short replies can
+      // finalize in just 1200ms) must never stream into a not-yet-reset
+      // accumulator. Both pairs fire synchronously, back-to-back, before any
+      // await below.
+      const realtimeTranscriptPromise = realtimeSttRef.current?.finalizeTurn() ?? null;
+      realtimeSttRef.current?.startTurn();
       const recordingPromise = stopTurnRecording();
       startTurnRecording();
 
@@ -700,23 +964,45 @@ export default function Home() {
       // why that's the exception here, not the rule elsewhere in this pipeline.
       let text = "";
       let wpm = 0;
-      try {
-        const form = new FormData();
-        form.append("audio", recording.blob, "turn.webm");
-        form.append("language", language);
-        form.append("turnLogId", turnLogId);
-        const res = await fetch("/api/transcribe", { method: "POST", body: form });
-        if (!res.ok) throw new Error(`transcribe API error ${res.status}`);
-        const data = (await res.json()) as { text: string; wpm: number };
-        text = data.text;
-        wpm = data.wpm;
-      } catch (e) {
-        console.error("Transcribe failed:", e);
-        return;
+      let sttPath: "realtime" | "batch-fallback" = "batch-fallback";
+      let fallbackReason: string | undefined = realtimeTranscriptPromise
+        ? undefined
+        : "realtime STT not available this turn";
+
+      if (realtimeTranscriptPromise) {
+        try {
+          text = await realtimeTranscriptPromise;
+          // No word-level timing exists in this protocol (confirmed against
+          // Mistral's realtime API directly) — spokenMs (lib/turn-vad.ts,
+          // excludes the trailing silence wait) is the only source for WPM.
+          wpm = spokenMs > 0 ? text.split(/\s+/).filter(Boolean).length / (spokenMs / 60000) : 0;
+          sttPath = "realtime";
+        } catch (e) {
+          fallbackReason = String(e instanceof Error ? e.message : e);
+        }
+      }
+
+      if (sttPath === "batch-fallback") {
+        try {
+          const form = new FormData();
+          form.append("audio", recording.blob, "turn.webm");
+          form.append("language", language);
+          form.append("turnLogId", turnLogId);
+          const res = await fetch("/api/transcribe", { method: "POST", body: form });
+          if (!res.ok) throw new Error(`transcribe API error ${res.status}`);
+          const data = (await res.json()) as { text: string; wpm: number };
+          text = data.text;
+          wpm = data.wpm;
+        } catch (e) {
+          console.error("Transcribe failed:", e);
+          return;
+        }
       }
       if (!text.trim()) return; // no speech recognized
 
-      logClientEvent("turn_stt_final", { turnLogId, buffered: willBuffer });
+      logClientEvent("turn_stt_final", {
+        turnLogId, buffered: willBuffer, sttPath, sttLatencyMs: Date.now() - sttStartMs, fallbackReason,
+      });
 
       // No more pass-1 SDK score (Azure used to supply one instantly) — EO's
       // pass-2 result (callPronunciationAPI below) overwrites this placeholder
@@ -803,11 +1089,37 @@ export default function Home() {
       vadRef.current = new TurnVad(micStreamRef.current, {
         onSpeechStart: () => {
           if (!isSpeakingRef.current) setPartialUser("…"); // listening indicator — no live captions without a streaming ASR
+          setIsUserTalking(true);
         },
-        onSpeechEnd: () => { void onSpeechEnd(); },
+        onSpeechEnd: (spokenMs) => {
+          setIsUserTalking(false);
+          void onSpeechEnd(spokenMs);
+        },
         onBargeIn: handleBargeIn,
+        // realtimeSttRef.current may still be null here (token mint above is
+        // still in flight) — pushAudio is a no-op via optional chaining until
+        // the .then() below assigns it, so early frames just get dropped.
+        onAudioFrame: (buffer) => { realtimeSttRef.current?.pushAudio(buffer); },
       });
+      // Seed with whatever currentRungRef already holds — turn 1 always
+      // targets A1 (see the isStart branch in handleUserTurn) unless the
+      // starting-level URL override applies, so this is only ever non-default
+      // when that override or an already-resolved admin setting put it there.
+      vadRef.current.setExtendedPauseTolerance(currentRungRef.current === "C2");
       startTurnRecording(); // begin recording the first user turn
+
+      // RealtimeStt mints its own token per turn internally (app/api/realtime-token) —
+      // construction is synchronous, only the network round trip inside
+      // startTurn() is async, so this never blocks session start. Needs
+      // vadRef.current for its actual AudioContext sample rate (not
+      // necessarily 48000, see TurnVad.getSampleRate()).
+      if (REALTIME_STT_ENABLED) {
+        realtimeSttRef.current = new RealtimeStt(
+          vadRef.current.getSampleRate(),
+          (event, data) => logClientEvent(`realtime_stt_${event}`, data ?? {})
+        );
+        realtimeSttRef.current.startTurn();
+      }
 
       // Session recording: TTS + mic audio mixed via the player's recordingDest.
       const ttsStream = playerRef.current?.getRecordingStream();
@@ -824,7 +1136,11 @@ export default function Home() {
 
   const handleUserTurn = async (userText: string, pronunciation?: PronunciationResult, turnLogId?: string) => {
     isProcessingRef.current = true;
+    streamDoneRef.current = false;
     setIsThinking(true);
+    setTurnState("thinking");
+    setRepeatUsed(false);
+    currentTurnAudioChunksRef.current = [];
     setChatError(null);
     const isStart = userText === "__START__";
     const isEnd   = userText === "__END__";
@@ -832,10 +1148,13 @@ export default function Home() {
     // opening/closing turns, which don't come from onFinal.
     const logId = turnLogId ?? (isStart ? "start" : isEnd ? "end" : "unknown");
     const process = chatProcessLabel(logId);
-    // The opening line always targets A1 (the warm-up) regardless of
-    // currentRungRef's default — everything after reads whatever ET's most
-    // recently completed result set it to (best-effort, see runTranscriptAssessment).
-    const rung: CefrRung = isStart ? "A1" : currentRungRef.current;
+    // The opening line targets conversationSettingsRef's starting rung — A1
+    // by default, or the `?level=` override / admin per-language setting
+    // (doc/adaptive-levels-plan.md §4) — instead of always A1, so a session
+    // routed straight to e.g. C2 doesn't open on an A1 warm-up. Everything
+    // after turn 1 reads whatever ET's most recently completed result set
+    // currentRungRef to (best-effort, see runTranscriptAssessment).
+    const rung: CefrRung = isStart ? conversationSettingsRef.current.startingRung : currentRungRef.current;
 
     try {
       // This turn's /api/chat call is allowed to overlap the previous turn's
@@ -932,8 +1251,13 @@ export default function Home() {
             }
             const { text: sentenceText, audio } = JSON.parse(data);
             playerRef.current?.playChunk(audio, sentenceText);
+            currentTurnAudioChunksRef.current.push({ text: sentenceText, audio });
           } else if (type === "done") {
             logClientEvent("turn_stream_done", { turnLogId: logId, process });
+            // From this point on no more "audio" events can arrive for this
+            // turn, so the audio player's amp===0 callback can now safely
+            // treat a drained queue as "the avatar is actually done talking".
+            streamDoneRef.current = true;
             const { fullText, usedQuestions } = JSON.parse(data);
             // Defense in depth: an empty-content assistant message stuck in
             // history gets sent back to Mistral on every future turn, which
@@ -1038,9 +1362,13 @@ export default function Home() {
 
     await stopTurnRecording();
     vadRef.current?.stop();
+    setIsUserTalking(false);
+    realtimeSttRef.current?.close();
+    realtimeSttRef.current = null;
     chatAbortControllerRef.current?.abort();
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
+    stopMicLevelLoop();
     // Stop session recorder BEFORE closing the player's AudioContext — the
     // combined stream is sourced from the player's MediaStreamDestinationNode,
     // so closing the AudioContext first would cut the stream before the
@@ -1113,32 +1441,33 @@ export default function Home() {
   const mm = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const ss = (elapsed % 60).toString().padStart(2, "0");
 
-  // Shared between the "active" sidebar and the full-width "done" panel —
-  // identical markup either way; `cefrResult` (null during "active") is what
-  // gates the pronunciation colouring/badges/audio on.
+  // Only ever shown inside SessionResultsScreen's collapsed section now that
+  // the live conversation screen (doc/new_design) has no transcript —
+  // `cefrResult` (always set by the time this renders) gates the
+  // pronunciation colouring/badges/audio on.
   const transcriptPanel = (
-    <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-      <div style={{ fontSize: 11, color: "#475569", fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
-        TRANSCRIPT
+    <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+      <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.1em", marginBottom: 10 }}>
+        TRANSCRIPTION
       </div>
       {history.length === 0 && (
-        <p style={{ color: "#334155", fontSize: 13 }}>La conversation s&apos;affichera ici…</p>
+        <p style={{ color: "#8A8F9C", fontSize: 13 }}>La conversation s&apos;affichera ici…</p>
       )}
       {history.map((m, i) => (
         <div
           key={i}
           style={{
             marginBottom: 10,
-            padding: "8px 10px",
-            background: m.role === "user" ? "#1e293b" : "#1e1b4b",
-            borderRadius: 6,
-            borderLeft: `3px solid ${m.role === "user" ? "#334155" : "#4f46e5"}`,
+            padding: "10px 12px",
+            background: m.role === "user" ? "#F7F5F0" : "#FDF0D0",
+            borderRadius: 8,
+            borderLeft: `3px solid ${m.role === "user" ? "#DDD9D0" : "#F0DDA8"}`,
           }}
         >
-          <div style={{ fontSize: 10, color: "#64748b", marginBottom: 4 }}>
-            {m.role === "user" ? "Vous" : "Avatar"}
+          <div style={{ fontSize: 11, color: "#8A8F9C", marginBottom: 4 }}>
+            {m.role === "user" ? "Vous" : "Léa"}
           </div>
-          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 14, lineHeight: 1.5, color: "#141D33" }}>
             {/* Coloured pronunciation words appear only after the CEFR
                 evaluation — during the session the transcript stays plain. */}
             {cefrResult && m.role === "user" && m.pronunciation?.words?.length ? (
@@ -1160,7 +1489,7 @@ export default function Home() {
                 console.warn(`[playback] turn ${i} audio failed to load`);
                 (e.currentTarget as HTMLAudioElement).style.display = "none";
               }}
-              style={{ width: "100%", height: 28, marginTop: 6, accentColor: "#4f46e5", display: "block" }}
+              style={{ width: "100%", height: 28, marginTop: 6, accentColor: "#141D33", display: "block" }}
             />
           )}
         </div>
@@ -1168,155 +1497,374 @@ export default function Home() {
     </div>
   );
 
-  return (
-    <main style={{ display: "flex", height: "100vh", flexDirection: "column", background: "#0f172a", color: "#f1f5f9" }}>
-      {/* ── header ── */}
-      <header
-        style={{
-          padding: "10px 20px",
-          borderBottom: "1px solid #1e293b",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexShrink: 0,
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>ELAO Speaking POC</h1>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <AuthNavLink />
-          {sessionStarted && (
-            <span style={{ fontFamily: "monospace", fontSize: 13, color: elapsed >= 180 ? "#4ade80" : "#94a3b8" }}>
-              {mm}:{ss} {elapsed >= 180 ? "✓" : ""}
-            </span>
-          )}
-          {sessionStarted && phase === "active" && (
-            <button onClick={endSession} style={btn("#10b981")}>
-              Terminer et évaluer
-            </button>
-          )}
-          {sessionStarted && phase === "done" && (
-            <button onClick={() => setSessionStarted(false)} style={btn("#4f46e5")}>
-              Nouvelle session
-            </button>
-          )}
-        </div>
-      </header>
+  const remaining = Math.max(0, 180 - elapsed);
+  const rmm = Math.floor(remaining / 60).toString().padStart(2, "0");
+  const rss = (remaining % 60).toString().padStart(2, "0");
+  const progressPercent = Math.min(100, (elapsed / 180) * 100);
+  const questionCount = 3;
+  const questionsAnswered = Math.min(questionCount, history.filter((m) => m.role === "user").length);
 
-      {/* ── pre-session: language picker + Start ── */}
-      {!sessionStarted && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflow: "auto" }}>
-          <div style={{ width: "100%", maxWidth: 560, textAlign: "center" }}>
-            <div style={{ fontSize: 48, marginBottom: 8 }}>🎙️</div>
-            <h2 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 600 }}>Choisis ta langue</h2>
-            <p style={{ margin: "0 0 28px", color: "#94a3b8", fontSize: 14 }}>
-              Sélectionne la langue de l&apos;évaluation orale, puis démarre la session.
-            </p>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: 10,
-                marginBottom: 32,
-              }}
-            >
-              {LANGUAGES.map((l) => (
-                <button
-                  key={l.code}
-                  onClick={() => setLanguage(l.code)}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "16px 10px",
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    background: language === l.code ? "#312e81" : "#1e293b",
-                    border: `2px solid ${language === l.code ? "#6366f1" : "#334155"}`,
-                    color: "#f1f5f9",
-                    transition: "background 0.15s, border-color 0.15s",
-                  }}
-                >
-                  <span style={{ fontSize: 28 }}>{l.flag}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>{l.label}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={startSession}
-              style={{
-                padding: "14px 48px",
-                background: "#4f46e5",
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 16,
-                fontWeight: 600,
-                letterSpacing: 0.3,
-                boxShadow: "0 4px 14px rgba(79, 70, 229, 0.4)",
-              }}
-            >
-              ▶ Démarrer
-            </button>
-          </div>
-        </div>
+  return (
+    <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
+      <style>{`
+        @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
+        @keyframes elaoBreathe { 0%,100% { transform:scale(1); opacity:0.5; } 50% { transform:scale(1.06); opacity:0.9; } }
+        @keyframes elaoDot { 0%,100% { opacity:0.25; } 50% { opacity:1; } }
+        .elao-btn-primary { transition: background 0.15s; }
+        .elao-btn-primary:hover:not(:disabled) { background:#243052 !important; }
+        .elao-btn-primary:disabled { opacity:0.5; cursor:default; }
+        .elao-lang-card:hover { border-color:#141D33 !important; }
+        .elao-text-action:hover { color:#141D33 !important; }
+        .elao-text-action.disabled { pointer-events:none; }
+      `}</style>
+
+      {debugMode && (
+        sessionStarted && phase === "active" ? (
+          <DebugPanel
+            transcript={history}
+            currentRung={debugEvents.length > 0 ? debugEvents[debugEvents.length - 1].nextRung : currentRungRef.current}
+            events={debugEvents}
+          />
+        ) : (
+          <MinimalDebugPanel level={getLevelOverrideFromUrl()} />
+        )
       )}
 
-      {/* ── body ──
-          "active": avatar left + transcript sidebar right.
-          "evaluating": full-screen takeover, no avatar/sidebar.
-          "done": avatar is gone, the analysis (panels, listen-back audio,
-          transcript) goes full screen. */}
-      {sessionStarted && phase === "active" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 520px", flex: 1, overflow: "hidden" }}>
-          <div style={{ position: "relative", overflow: "hidden" }}>
-            <TalkingHeadAvatar
-              analyser={avatarAnalyser}
-              audioContext={playerRef.current?.getAudioContext() ?? null}
-            />
+      {/* ── pre-session: welcome (sign in / continue as guest) ── */}
+      {!sessionStarted && preSessionStep === "welcome" && (
+        <>
+          <TopBar right={<AuthNavLink light />} />
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px 60px" }}>
+            <div style={{ width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
+              <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 32, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
+                Bienvenue
+              </h2>
+              <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
+                Créez un compte pour retrouver votre progression, ou continuez sans compte.
+              </p>
+              <div style={{ width: "100%", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22, textAlign: "left" }}>
+                <WelcomeAuthForm light />
+              </div>
+              <span
+                onClick={() => setPreSessionStep("language")}
+                className="elao-text-action"
+                style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+              >
+                Continuer sans compte
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
-            {/* Overlay: "thinking" cue while waiting on the avatar's reply —
-                the gap between end-of-speech and the first streamed token
-                previously had zero visual feedback. */}
-            {isThinking && (
-              <div style={{ position: "absolute", top: 16, right: 16 }}>
-                <ThinkingIndicator variant="badge" label="…" />
+      {/* ── pre-session: returning signed-in user, confirm remembered language+rung ── */}
+      {!sessionStarted && preSessionStep === "confirm-preference" && storedPreference && (
+        <>
+          <TopBar right={<AuthNavLink light />} />
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px 60px" }}>
+            <div style={{ width: "100%", maxWidth: 440, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
+              <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 32, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.25 }}>
+                Continuer en {LANGUAGES.find((l) => l.code === storedPreference.language)?.label}, niveau{" "}
+                {storedPreference.rung}&nbsp;?
+              </h2>
+              <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>On reprend là où vous vous étiez arrêté(e).</p>
+              <button className="elao-btn-primary" onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
+                Continuer
+              </button>
+              <span
+                onClick={() => setPreSessionStep("language")}
+                className="elao-text-action"
+                style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+              >
+                Changer de langue
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── pre-session: 1. choix de la langue (doc/new_design screen 1) ── */}
+      {!sessionStarted && preSessionStep === "language" && (
+        <>
+          <TopBar right={<AuthNavLink light />} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 40, padding: "0 24px 60px" }}>
+            <div style={{ textAlign: "center", maxWidth: 620, display: "flex", flexDirection: "column", gap: 14 }}>
+              <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 42, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
+                Bonjour. Dans quelle langue
+                <br />
+                allons-nous parler&nbsp;?
+              </h2>
+              <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.55 }}>
+                Une conversation de trois minutes avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
+              </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(160px, 236px))", gap: 14 }}>
+              {LANGUAGES.map((l) => {
+                const selected = language === l.code;
+                return (
+                  <div
+                    key={l.code}
+                    className="elao-lang-card"
+                    onClick={() => setLanguage(l.code)}
+                    style={{
+                      padding: "20px 22px",
+                      borderRadius: 12,
+                      background: "#FFFFFF",
+                      border: selected ? "2px solid #141D33" : "1px solid #DDD9D0",
+                      boxShadow: selected ? "0 2px 0 rgba(20,29,51,0.06)" : undefined,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 5,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 19, color: "#141D33" }}>{l.label}</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.1em" }}>
+                      {l.meta}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+              <button className="elao-btn-primary" onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
+                Continuer en {LANG_NAME_FR[language]}
+              </button>
+              <span style={{ fontSize: 13, color: "#8A8F9C" }}>Vous pourrez vérifier votre micro à l&apos;étape suivante.</span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── pre-session: 2. comment ça se passe — instructions + mic check (doc/new_design screen 2) ── */}
+      {!sessionStarted && preSessionStep === "instructions" && (
+        <>
+          <TopBar
+            right={
+              <span style={{ fontSize: 14, color: "#6B6F7D" }}>
+                {LANG_NAME_FR[language].charAt(0).toUpperCase() + LANG_NAME_FR[language].slice(1)} · évaluation orale
+              </span>
+            }
+          />
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "minmax(0,1fr) 420px", gap: 64, padding: "20px 24px 72px", alignItems: "center" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 36 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 38, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+                  Trois minutes, trois questions
+                </h2>
+                <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.6, maxWidth: 460 }}>
+                  Léa vous posera des questions simples sur votre quotidien. Répondez à voix haute, comme dans une
+                  vraie conversation.
+                </p>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {[
+                  ["Écoutez la question", "Vous pouvez la faire répéter une fois."],
+                  ["Parlez librement", "Hésiter, reprendre, se corriger : tout cela est normal."],
+                  ["Laissez un silence", "Léa comprend que vous avez terminé et enchaîne."],
+                ].map(([title, desc], i) => (
+                  <div key={title} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+                    <div
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: "50%",
+                        background: "#FDF0D0",
+                        color: "#8A6410",
+                        fontFamily: "'Outfit',sans-serif",
+                        fontSize: 15,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flex: "none",
+                      }}
+                    >
+                      {i + 1}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#141D33" }}>{title}</span>
+                      <span style={{ fontSize: 15, color: "#6B6F7D" }}>{desc}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                <button
+                  className="elao-btn-primary"
+                  onClick={startSession}
+                  disabled={micStatus === "pending"}
+                  style={primaryBtn("16px 36px")}
+                >
+                  Je suis prêt
+                </button>
+                <span style={{ fontSize: 14, color: "#8A8F9C" }}>Aucune note n&apos;est affichée pendant l&apos;épreuve.</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: 28, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em" }}>
+                VOTRE MICRO
+              </span>
+              <LevelBars count={12} flexBars height={64} color="#141D33" level={micStatus === "granted" ? Math.max(micLevel, 0.06) : 0} gapPx={4} />
+              <p style={{ margin: 0, fontSize: 15, color: "#5A5F6E", lineHeight: 1.5 }}>
+                {micStatus === "denied" ? (
+                  "Le micro est bloqué — autorisez l'accès dans les réglages du navigateur."
+                ) : (
+                  <>Dites «&nbsp;bonjour&nbsp;» pour vérifier que l&apos;on vous entend bien.</>
+                )}
+              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 4, borderTop: "1px solid #EFEBE2" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: micStatus === "granted" ? "#2F9E6E" : "#C9C4B8" }} />
+                <span style={{ fontSize: 15, color: "#141D33" }}>
+                  {micStatus === "granted"
+                    ? `Micro détecté — ${micDeviceLabel}`
+                    : micStatus === "denied"
+                      ? "Micro non détecté"
+                      : "Détection du micro…"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── 3. en conversation — three turn states, same frame throughout (doc/new_design screen 3) ──
+          There is deliberately no live transcript on screen — that stays
+          server-side/history-only until the results screen. */}
+      {sessionStarted && phase === "active" && (
+        <>
+          <TopBar
+            right={
+              <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 132, height: 4, background: "#E4E0D7", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${progressPercent}%`, height: "100%", background: "#141D33" }} />
+                  </div>
+                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 14, color: "#5A5F6E" }}>
+                    {rmm}:{rss} restantes
+                  </span>
+                </div>
+                <span
+                  onClick={endSession}
+                  className="elao-text-action"
+                  style={{ fontSize: 13, color: "#8A8F9C", cursor: "pointer" }}
+                >
+                  Terminer
+                </span>
+              </div>
+            }
+          />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 34, paddingBottom: 44, position: "relative" }}>
+            <div
+              style={{
+                position: "relative",
+                width: 520,
+                height: 420,
+                maxWidth: "90vw",
+                borderRadius: "200px 200px 24px 24px",
+                border: "1px solid #E0DBD1",
+                overflow: "hidden",
+                background: "#141D33",
+              }}
+            >
+              <TalkingHeadAvatar
+                analyser={avatarAnalyser}
+                audioContext={playerRef.current?.getAudioContext() ?? null}
+                isAvatarSpeaking={turnState === "avatarSpeaking"}
+                isUserSpeaking={isUserTalking}
+              />
+              {turnState === "userSpeaking" && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    borderRadius: "200px 200px 24px 24px",
+                    boxShadow: "0 0 0 8px rgba(245,185,33,0.35)",
+                    animation: "elaoBreathe 2.6s ease-in-out infinite",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+              {turnState === "avatarSpeaking" && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: 96,
+                    background: "linear-gradient(to top, rgba(247,245,240,0.95), rgba(247,245,240,0))",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </div>
+
+            {turnState === "avatarSpeaking" && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 22px", borderRadius: 100, background: "#141D33" }}>
+                  <WaveBars count={5} width={3} height={20} color="#F5B921" duration={0.9} />
+                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#FFFFFF" }}>Léa vous parle</span>
+                </div>
+                <span style={{ fontSize: 15, color: "#8A8F9C" }}>Écoutez — vous répondrez juste après.</span>
               </div>
             )}
-            {/* Overlay: live captions */}
-            {(partialUser || streamingAssistant || chatError) && (
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: 16,
-                  left: 16,
-                  right: 16,
-                  padding: "10px 14px",
-                  background: "rgba(0,0,0,0.72)",
-                  borderRadius: 8,
-                  backdropFilter: "blur(4px)",
-                }}
-              >
-                {partialUser && (
-                  <div style={{ fontStyle: "italic", color: "#94a3b8", fontSize: 14 }}>
-                    🎤 {partialUser}
-                  </div>
-                )}
-                {streamingAssistant && (
-                  <div style={{ color: "#e2e8f0", fontSize: 14 }}>{streamingAssistant}</div>
-                )}
-                {chatError && !streamingAssistant && (
-                  <div style={{ color: "#f87171", fontSize: 14 }}>{chatError}</div>
-                )}
+
+            {turnState === "userSpeaking" && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 26px", borderRadius: 100, background: "#FDF0D0", border: "1px solid #F0DDA8" }}>
+                  <LevelBars count={8} barWidth={4} height={26} color="#8A6410" level={Math.max(micLevel, 0.1)} gapPx={4} />
+                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>À vous — on vous écoute</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+                  <span
+                    onClick={handleRepeatQuestion}
+                    className={`elao-text-action${repeatUsed ? " disabled" : ""}`}
+                    style={{
+                      fontSize: 15,
+                      color: repeatUsed ? "#C9C4B8" : "#6B6F7D",
+                      borderBottom: repeatUsed ? "none" : "1px solid #C9C4B8",
+                      paddingBottom: 2,
+                      cursor: repeatUsed ? "default" : "pointer",
+                    }}
+                  >
+                    Répéter la question
+                  </span>
+                  <span
+                    onClick={handleSkipQuestion}
+                    className="elao-text-action"
+                    style={{ fontSize: 15, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+                  >
+                    Passer
+                  </span>
+                </div>
               </div>
+            )}
+
+            {turnState === "thinking" && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 24px", borderRadius: 100, background: "#EDEAE2", border: "1px solid #E0DBD1" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {[0, 0.2, 0.4].map((d) => (
+                      <div
+                        key={d}
+                        style={{ width: 7, height: 7, borderRadius: "50%", background: "#5A5F6E", animation: "elaoDot 1.4s ease-in-out infinite", animationDelay: `${d}s` }}
+                      />
+                    ))}
+                  </div>
+                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#3A4055" }}>Léa prépare la question suivante</span>
+                </div>
+                <span style={{ fontSize: 15, color: "#8A8F9C" }}>
+                  {FR_COUNT_WORD[questionsAnswered] ?? questionsAnswered} question{questionsAnswered !== 1 ? "s" : ""} sur{" "}
+                  {questionCount} terminée{questionsAnswered !== 1 ? "s" : ""}. Vous vous en sortez bien.
+                </span>
+              </div>
+            )}
+
+            {chatError && (
+              <div style={{ position: "absolute", bottom: 12, fontSize: 14, color: "#B3542E" }}>{chatError}</div>
             )}
           </div>
-
-          <aside style={{ borderLeft: "1px solid #1e293b", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            {transcriptPanel}
-          </aside>
-        </div>
+        </>
       )}
 
       {sessionStarted && phase === "evaluating" && (
@@ -1331,21 +1879,114 @@ export default function Home() {
           audioBlobUrl={audioBlob ? audioBlobUrlRef.current : null}
           transcriptPanel={transcriptPanel}
           sessionId={savedSessionId}
+          onRestart={() => setSessionStarted(false)}
         />
       )}
     </main>
   );
 }
 
-function btn(color: string): React.CSSProperties {
+/** Top bar shared by every pre-session/conversation screen (doc/new_design): ELAO logo left, contextual content right. */
+function TopBar({ right }: { right?: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 36px", flexShrink: 0 }}>
+      <Logo />
+      {right}
+    </div>
+  );
+}
+
+function Logo() {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
+        <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
+        <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
+        <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
+      </div>
+      <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, color: "#141D33", letterSpacing: "0.02em", lineHeight: 1 }}>
+        ELAO
+      </span>
+    </div>
+  );
+}
+
+/** Canned wave-bar animation (avatar speech, mic-check illustration) — see @keyframes elaoWave above. */
+function WaveBars({ count, width, height, color, duration, gap = 3 }: { count: number; width: number; height: number; color: string; duration: number; gap?: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap, height }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            width,
+            background: color,
+            borderRadius: 2,
+            height: "100%",
+            transformOrigin: "bottom",
+            animation: `elaoWave ${duration}s ease-in-out infinite`,
+            animationDelay: `${i * (duration * 0.11)}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Real mic-amplitude bars (mic-check meter, live "userSpeaking" indicator) — driven by `level` (0-1), not a canned animation. */
+function LevelBars({
+  count,
+  barWidth,
+  flexBars = false,
+  height,
+  color,
+  level,
+  gapPx = 4,
+}: {
+  count: number;
+  barWidth?: number;
+  flexBars?: boolean;
+  height: number;
+  color: string;
+  level: number;
+  gapPx?: number;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: gapPx, height }}>
+      {Array.from({ length: count }).map((_, i) => {
+        // Deterministic per-bar variation so the meter looks organic rather than a single flat block.
+        const variance = 0.55 + 0.45 * Math.abs(Math.sin(i * 2.1));
+        const h = Math.max(0.08, Math.min(1, level * variance));
+        return (
+          <div
+            key={i}
+            style={{
+              flex: flexBars ? 1 : undefined,
+              width: flexBars ? undefined : barWidth,
+              background: color,
+              borderRadius: 2,
+              height: "100%",
+              transform: `scaleY(${h})`,
+              transformOrigin: "bottom",
+              transition: "transform 90ms linear",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function primaryBtn(padding: string = "16px 40px"): React.CSSProperties {
   return {
-    padding: "6px 14px",
-    background: color,
-    color: "#fff",
-    border: "none",
-    borderRadius: 4,
-    cursor: "pointer",
-    fontSize: 13,
+    padding,
+    borderRadius: 10,
+    background: "#141D33",
+    color: "#FFFFFF",
+    fontFamily: "'Outfit',sans-serif",
+    fontSize: 18,
     fontWeight: 500,
+    border: "none",
+    cursor: "pointer",
   };
 }

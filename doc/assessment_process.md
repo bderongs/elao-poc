@@ -174,10 +174,11 @@ stale rung rather than wait.
 
 `lib/level-assessment.ts` asks a small model for one of three verdicts —
 `"well"`, `"adequate"`, `"struggled"` — given the question and the answer,
-then steps the CEFR ladder (`A1→A2→B1→B2→C1`) up, holds, or down by exactly
-one rung (`well`→up, `struggled`→down, `adequate`/unrecognized→hold), clamped
-to the ladder ends. This is the same step logic that used to live inline in
-the conversation prompt itself; it's just been moved to its own call so A no
+then steps the CEFR ladder (`A1→A2→B1→B2→C1→C2`, C2 added 2026-09 per
+`doc/adaptive-levels-plan.md`) up, holds, or down by exactly one rung
+(`well`→up, `struggled`→down, `adequate`/unrecognized→hold), clamped to the
+ladder ends. This is the same step logic that used to live inline in the
+conversation prompt itself; it's just been moved to its own call so A no
 longer has to reason about pacing on every single reply.
 
 ## The end-of-session score card

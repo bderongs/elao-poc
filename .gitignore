@@ -27,6 +27,7 @@ tsconfig.tsbuildinfo
 
 # structured server logs (Mistral call timing/errors) — local debugging only
 logs/
+avatars/
 
 # graphify generated knowledge graph (not part of the app)
 graphify-out/

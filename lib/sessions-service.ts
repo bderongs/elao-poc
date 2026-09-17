@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { computePronunciationAvg, liveConversationPronunciationProviderId } from "@/lib/pronunciation-rollup";
 import { getSystemConfig } from "@/lib/system-config";
+import { isCefrRung } from "@/lib/cefr-rung";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 
@@ -160,10 +161,18 @@ function parseJsonField<T>(form: FormData, key: string, fallback: T): T {
 /**
  * Persists a completed session: uploads the whole-session recording and each
  * turn's recording to Storage, then writes `sessions` + `session_turns`.
- * Called from POST /api/sessions (the only public, unauthenticated write
- * path — the live conversation UI posts here at the end of a session).
+ * Called from POST /api/sessions (the public write path — the live
+ * conversation UI posts here at the end of a session; `userId` is resolved
+ * server-side by the route from the request's own auth cookie, never trusted
+ * from the form body).
+ *
+ * When `userId` is present, the session is attached to that account at
+ * insert time (so it shows on /dashboard immediately, without requiring the
+ * separate guest→signup claim flow) and that account's remembered
+ * language/rung preference (profiles.last_language/last_rung) is updated —
+ * see upsertProfilePreference below.
  */
-export async function createSessionFromForm(form: FormData): Promise<{ id: string }> {
+export async function createSessionFromForm(form: FormData, userId?: string | null): Promise<{ id: string }> {
   const supabase = getSupabaseServer();
 
   const language = (form.get("language") as string | null) ?? "en";
@@ -212,6 +221,7 @@ export async function createSessionFromForm(form: FormData): Promise<{ id: strin
       // running server process (no per-session override exists today) — see
       // lib/system-config.ts.
       providers_json: getSystemConfig(),
+      user_id: userId ?? null,
     })
     .select("id")
     .single();
@@ -221,6 +231,8 @@ export async function createSessionFromForm(form: FormData): Promise<{ id: strin
   }
 
   const sessionId = sessionRow.id as string;
+
+  if (userId) await upsertProfilePreference(userId, language, cefrLevel);
 
   // ── per-turn recordings (answer-level replay) ──
   const turnRows: Array<{
@@ -265,6 +277,42 @@ export async function createSessionFromForm(form: FormData): Promise<{ id: strin
   }
 
   return { id: sessionId };
+}
+
+/**
+ * Normalizes a CEFR evaluation's free-form level string (lib/cefr-prompt.ts's
+ * schema allows "A0" and "<rung>+" variants like "B1+", neither of which is a
+ * valid CefrRung) down to the nearest rung on profiles.last_rung's check
+ * constraint. "A0" floors to "A1" (there's no rung below it); a trailing "+"
+ * is stripped (B1+ -> B1) since it's a within-rung nuance the welcome
+ * screen's coarse "continue at B1" prompt doesn't need.
+ */
+function normalizeToRung(level: string | null): import("@/lib/cefr-rung").CefrRung | null {
+  if (!level) return null;
+  if (level === "A0") return "A1";
+  const stripped = level.replace(/\+$/, "");
+  return isCefrRung(stripped) ? stripped : null;
+}
+
+/**
+ * Updates a signed-in user's remembered language + CEFR rung after a
+ * completed session, so the welcome screen (app/page.tsx) can offer
+ * "Continue in French at B1?" on their next visit. Best-effort: a failure
+ * here must never fail the session save itself, since the session is
+ * already durably written by the time this runs.
+ */
+async function upsertProfilePreference(userId: string, language: string, cefrLevel: string | null): Promise<void> {
+  const rung = normalizeToRung(cefrLevel);
+  const supabase = getSupabaseServer();
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      last_language: language,
+      ...(rung ? { last_rung: rung } : {}),
+      last_used_at: new Date().toISOString(),
+    })
+    .eq("id", userId);
+  if (error) console.error("[sessions] profile preference update failed:", error.message);
 }
 
 /**

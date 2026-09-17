@@ -10,27 +10,32 @@
  * rung's pool has cycled once.
  */
 
-import type { CefrRung } from "@/lib/cefr-rung";
+import { zoneForRung, type CefrRung } from "@/lib/cefr-rung";
 import { DOMAIN_LABEL, type TopicDomain } from "@/lib/topic-domain";
 
 // ─── Question bank (arrays so we can shuffle per phase) ──────────────────────
 
+// Every entry below is worded so a truthful minimal answer still has to be
+// a short clause, not a bare "yes"/"no"/single word — even at A1, plain
+// factual questions ("What's your phone number?", "What day is it today?")
+// were dropped entirely since they don't exercise language production at
+// all (see doc/assessment_process.md's note on close-ended A1/A2 questions).
 const PHASE1: string[] = [
   "What is your name?",
   "Where are you from?",
   "How old are you?",
-  "Do you have brothers or sisters?",
+  "Tell me about your brothers or sisters.",
   "What is your job or what do you study?",
-  "Do you like sport? Which one?",
+  "What sport do you like, and why?",
   "What do you like to eat?",
   "What do you usually eat in the morning?",
-  "Do you have a pet?",
-  "What is your favourite colour or food?",
-  "What day is it today?",
+  "Tell me about a pet you have, or one you'd like to have.",
+  "What is your favourite food, and why do you like it?",
+  "What's your favourite day of the week, and why?",
   "Where do you live?",
-  "What is your phone number?",
-  "Do you speak other languages?",
-  "What time do you wake up?",
+  "What languages do you speak?",
+  "What time do you wake up, and what do you do first?",
+  "Who do you live with?",
 ];
 
 const PHASE2: string[] = [
@@ -108,7 +113,24 @@ const C1_EXAMPLES: string[] = [
   "What's the trade-off nobody talks about when it comes to that?",
 ];
 
-const PHASE_BY_RUNG: Record<Exclude<CefrRung, "C1">, { label: string; questions: string[]; sliceSize: number }> = {
+// C2 examples — a genuine notch past C1: not just harder topics, but
+// questions designed to demand register control, self-aware qualification,
+// or reasoning under a constraint even a strong C1 speaker would have to
+// pause and construct carefully, not retrieve ready-made. Longer thinking
+// pauses before an answer are expected and NORMAL here — see the
+// "MASTERY-ZONE PACING" note in buildCommonRules, and lib/turn-vad.ts's
+// rung-aware silence timeout (Track: adaptive-levels plan, §3.4).
+const C2_EXAMPLES: string[] = [
+  "If you had to argue the opposite of what you just said, convincingly, how would you do it?",
+  "How would you explain that same idea to an expert, versus to a child — what actually changes?",
+  "What's a nuance in that view that most people miss entirely?",
+  "Where does that argument quietly fall apart if you push it far enough?",
+  "What would someone who fundamentally disagrees with you get right?",
+  "How would you phrase that more diplomatically if the stakes were much higher?",
+  "What assumption are you making there that you haven't actually justified?",
+];
+
+const PHASE_BY_RUNG: Record<Exclude<CefrRung, "C1" | "C2">, { label: string; questions: string[]; sliceSize: number }> = {
   A1: { label: "A1 rung — very simple, one concept at a time, short answers fine", questions: PHASE1, sliceSize: 4 },
   A2: { label: "A2 rung — simple sentences, familiar topics", questions: PHASE2, sliceSize: 5 },
   B1: { label: "B1 rung — descriptions, simple opinions, past/future", questions: PHASE3, sliceSize: 5 },
@@ -139,6 +161,12 @@ export function buildQuestionBank(
   if (targetRung === "C1") {
     return {
       bankText: `C1 rung — beyond the bank: invent nuanced, abstract, precision-demanding questions and follow-ups. Examples for inspiration:\n${C1_EXAMPLES.map(q => `- ${q}`).join("\n")}`,
+      updatedUsedQuestions: usedQuestions,
+    };
+  }
+  if (targetRung === "C2") {
+    return {
+      bankText: `C2 rung — beyond C1: invent questions that demand register control, self-aware qualification, or arguing a position under a constraint — genuinely harder than C1, not just a different topic. Examples for inspiration:\n${C2_EXAMPLES.map(q => `- ${q}`).join("\n")}`,
       updatedUsedQuestions: usedQuestions,
     };
   }
@@ -223,6 +251,13 @@ function buildCommonRules(
   const followups = FOLLOWUP_PROMPTS[language];
   const closing = CLOSING_EXAMPLES[language];
   const { avoidDomain, openerDomain } = opts;
+  // Foundation (A1/A2) and Mastery (C2) get small, additive deltas on top of
+  // the shared rules below instead of separate prompts — see
+  // doc/adaptive-levels-plan.md §3.2. B1-C1 (the tuned, working range) reads
+  // exactly the text it always has.
+  const zone = zoneForRung(rung);
+  const isFoundation = zone === "foundation";
+  const isMastery = zone === "mastery";
   return `
 LANGUAGE (read this first): speak entirely in ${languageName} at all times, never a stray word of another language.
 
@@ -232,22 +267,32 @@ Strict rules:
 - After each answer, move directly to the next question. Do NOT summarise, paraphrase, echo back, or confirm what the speaker said, in ANY form — not "So you live in…", not "You mentioned that…", and not a short recap glued to a discourse marker either (e.g. never "Paris, donc." / "Le 11e, donc, pour son dynamisme." — restating their answer and tacking on "donc"/"so"/"then" is still a paraphrase, it does not become a neutral pivot just because it's short). The next line should react to what they said without repeating any of its content back to them. Use ONLY one of these ready-made neutral pivots before the question, verbatim, varied each turn: ${pivots}. Do not invent your own variants — pick from this exact list.
 - When changing topics, use ONE of these ready-made bridges verbatim, varied each turn: ${bridges}. Keep it to those few words — do not over-explain the transition, and do not combine a bridge with a recap of the previous answer.
 - Never repeat a question. Never correct errors directly — use the correct form naturally in your reply.
+- Avoid questions answerable with a single word or a bare "yes"/"no" — when a factual question is unavoidable, pair it with a "why" or "which" so a full-sentence answer is the natural response, not an accident.
 - No bullet points, no markdown — this is voice.
 - NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "I understand", "I understood", "Understood", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead.
 - Do NOT be encouraging or complimentary about the learner's language ability. Stay neutral and professional.
 
 DIFFICULTY LADDER — you run a live, branching oral exam that converges on the speaker's true level, exactly like a human examiner. There is NO fixed question schedule; a separate process judges each answer and tells you which rung to target next.
 
-  Difficulty ladder (five rungs): A1 → A2 → B1 → B2 → C1.
+  Difficulty ladder (six rungs): A1 → A2 → B1 → B2 → C1 → C2.
     A1  Phase-1 bank: name, origin, age, simple facts. One concept, present tense.
     A2  Phase-2 bank: describe family/home/routine in simple sentences.
     B1  Phase-3 bank: opinions, descriptions, past and future, familiar topics developed.
     B2  Phase-4 bank: hypotheticals, abstract ideas, justify a view, compare, narrate experience.
     C1  Beyond the bank: nuanced/abstract debate, follow-ups that demand precision, concession, speculation ("What would change your mind about that?", "What's the strongest argument against your view?").
+    C2  Beyond C1: register control, arguing a position under a constraint, self-aware qualification — a genuine step up from C1, not just a harder topic ("If you had to argue the opposite of what you just said, how would you?").
 
   TARGET RUNG FOR THIS QUESTION: ${rung}. Ask your next question at this difficulty — see the ladder above for what that means in practice.
-
-SHORT ANSWER RULE: a very short or vague answer is worth pressing ONCE with a quick follow-up at the same difficulty — use one of: ${followups} — before moving to a new topic. Be direct; do not soften.
+${
+  isMastery
+    ? `\nMASTERY-ZONE PACING: at C2, a real thinking pause before the speaker answers is normal and expected — these questions are meant to require actual construction, not retrieval. Do NOT treat a pause as a comprehension problem or rush to rephrase the question; wait for the answer.`
+    : ""
+}
+SHORT ANSWER RULE: a very short or vague answer is worth pressing ONCE with a quick follow-up at the same difficulty — use one of: ${followups} — before moving to a new topic.${
+  isFoundation
+    ? " A brief, correct answer to a simple question is not evasion — but still ask ONE gentle follow-up for a reason or example (e.g. \"Why?\" / \"Give me an example.\") before moving to a new topic, so the exchange doesn't stay one word long; keep the follow-up encouraging in tone even though its content isn't a correction."
+    : " Be direct; do not soften."
+}
 
 REALISM AND TOPIC BREADTH: react to the CONTENT, not just the language — dig into what they said with ONE targeted follow-up question rather than firing an unrelated bank question. But "topic" here means the broad subject, not the specific angle of your last question: asking about their neighbourhood, then why it's family-friendly, then which OTHER neighbourhood they'd pick, then what they'd miss about the city, are all still the SAME topic (where they live) even though each question is worded differently — that does not count as variety. Rephrasing the same subject as a counter-argument, drawback, or opposite view (e.g. going from "what do you like about X" to "what's the strongest argument against X" or "what's the downside of X") is STILL the same topic, not a switch. A real examiner samples breadth across many life domains over the course of the exam; staying on one subject for many turns — even asking many different, deeper, or contrarian questions about it — is a failure mode, not thoroughness. A separate process tracks how long you've stayed on one subject and will tell you explicitly when it's time to move on (see below) — you don't need to count turns yourself.
 ${
@@ -256,14 +301,22 @@ ${
     : ""
 }${
   openerDomain
-    ? `\nOPENING TOPIC: for this session's warm-up question, ask about ${DOMAIN_LABEL[openerDomain]} rather than defaulting to "where are you from" (which you've been overusing as an opener) — keep it a simple A1-level question.`
+    ? `\nOPENING TOPIC: for this session's warm-up question, ask about ${DOMAIN_LABEL[openerDomain]} rather than defaulting to "where are you from" (which you've been overusing as an opener) — keep it at the ${rung} difficulty level (see the ladder above).`
     : ""
 }
 
 END RULE: If the user message is "__END__", do NOT ask another question. Instead deliver a single polite closing sentence (1-2 sentences max), close in spirit to: ${closing}. This closing sentence is mandatory content — it must actually say the conversation is ending; a bare pivot word alone (e.g. just ${pivots.split(" / ")[0]} with nothing else) is NOT a valid closing reply.
 
 QUESTION BANK USAGE: The bank below is for your target rung only — it's inspiration, not a script. Mix freely:
-- Invent your own questions at the CEFR difficulty of the current rung. Aim for roughly half your questions to be your own.
+- Invent your own questions at the CEFR difficulty of the current rung. Aim for roughly half your questions to be your own.${
+  isFoundation
+    ? " At this level, keep invented questions concrete and literal — same difficulty as the bank, never a step more abstract than it."
+    : ""
+}${
+  isMastery
+    ? " At this level, favour depth over breadth: a precise, constraint-heavy question on the current subject discriminates better than switching to a new one."
+    : ""
+}
 - Build follow-up questions from what the speaker actually said (their job, their city, their hobby) — personalised questions assess better than generic ones.
 - Never feel obliged to use a bank question when a better one fits the conversation.
 
@@ -281,6 +334,33 @@ const LANGUAGE_NAME: Record<ConvLang, string> = {
   en: "English",
 };
 
+// The opening turn's warm-up-question instruction, localized. Defaults to
+// today's exact wording ("simple A1-level question") when rung is A1 — the
+// common case, byte-for-byte unchanged. Any other rung (only reachable via
+// the starting-level URL override, see doc/adaptive-levels-plan.md §4) gets
+// a rung-aware variant instead, so a candidate routed straight to e.g. C2
+// doesn't open on "what's your name?".
+const OPENING_QUESTION_LINE: Record<ConvLang, (rung: CefrRung) => string> = {
+  fr: (rung) => rung === "A1"
+    ? "Termine par UNE question simple de mise en route (niveau A1) — varie la question : présentation, origine, métier, journée, etc."
+    : `Termine par UNE question d'ouverture de niveau ${rung} (voir l'échelle de difficulté ci-dessous) — garde-la courte.`,
+  "nl-BE": (rung) => rung === "A1"
+    ? "Eindig met ÉÉN eenvoudige opwarmvraag (A1-niveau) — varieer de vraag: voorstellen, herkomst, beroep, dagelijks leven, enz."
+    : `Eindig met ÉÉN openingsvraag op niveau ${rung} (zie de moeilijkheidsladder hieronder) — houd ze kort.`,
+  es: (rung) => rung === "A1"
+    ? "Termina con UNA pregunta sencilla de calentamiento (nivel A1) — varía la pregunta: presentación, origen, profesión, vida diaria, etc."
+    : `Termina con UNA pregunta de apertura de nivel ${rung} (ver la escala de dificultad más abajo) — mantenla breve.`,
+  it: (rung) => rung === "A1"
+    ? "Concludi con UNA semplice domanda di riscaldamento (livello A1) — varia la domanda: presentazione, provenienza, lavoro, vita quotidiana, ecc."
+    : `Concludi con UNA domanda di apertura di livello ${rung} (vedi la scala di difficoltà qui sotto) — mantienila breve.`,
+  de: (rung) => rung === "A1"
+    ? "Schließe mit EINER einfachen Aufwärmfrage (Niveau A1) — variiere die Frage: Vorstellung, Herkunft, Beruf, Alltag usw."
+    : `Schließe mit EINER Eröffnungsfrage auf Niveau ${rung} (siehe die Schwierigkeitsleiter unten) — halte sie kurz.`,
+  en: (rung) => rung === "A1"
+    ? "End with ONE simple warm-up question (A1 level) — vary which one: introduction, origin, occupation, daily life, etc."
+    : `End with ONE opening question at ${rung} level (see the difficulty ladder below) — keep it short.`,
+};
+
 export function getSystemPrompt(
   language: ConvLang,
   rung: CefrRung,
@@ -295,7 +375,7 @@ export function getSystemPrompt(
 OUVERTURE — compose ta propre introduction, différente à chaque session (ne réutilise jamais la même formulation) :
 - Salue brièvement et présente-toi explicitement avec la formule « je m'appelle [prénom] » (ne te contente pas de dire ton prénom seul).
 - Mentionne que la conversation durera environ 3 minutes pour évaluer le niveau de français.
-- Termine par UNE question simple de mise en route (niveau A1) — varie la question : présentation, origine, métier, journée, etc.
+- ${OPENING_QUESTION_LINE.fr(rung)}
 - Garde l'ensemble court : 2-3 phrases maximum.
 
 ${COMMON_RULES}
@@ -310,7 +390,7 @@ ${bank}
 OPENING — stel je eigen introductie samen, elke sessie anders (hergebruik nooit dezelfde formulering):
 - Groet kort en stel jezelf expliciet voor met « ik ben [voornaam] » (noem niet enkel je voornaam).
 - Vermeld dat het gesprek ongeveer 3 minuten duurt om het niveau Nederlands te evalueren.
-- Eindig met ÉÉN eenvoudige opwarmvraag (A1-niveau) — varieer de vraag: voorstellen, herkomst, beroep, dagelijks leven, enz.
+- ${OPENING_QUESTION_LINE["nl-BE"](rung)}
 - Houd het geheel kort: maximaal 2-3 zinnen.
 
 ${COMMON_RULES}
@@ -326,7 +406,7 @@ ${bank}
 APERTURA — compón tu propia introducción, distinta en cada sesión (nunca reutilices la misma formulación):
 - Saluda brevemente y preséntate explícitamente con «me llamo [nombre]» (no digas solo tu nombre).
 - Menciona que la conversación durará unos 3 minutos para evaluar el nivel de español.
-- Termina con UNA pregunta sencilla de calentamiento (nivel A1) — varía la pregunta: presentación, origen, profesión, vida diaria, etc.
+- ${OPENING_QUESTION_LINE.es(rung)}
 - Mantenlo breve: 2-3 frases como máximo.
 
 ${COMMON_RULES}
@@ -341,7 +421,7 @@ ${bank}
 APERTURA — componi la tua introduzione, diversa a ogni sessione (non riutilizzare mai la stessa formulazione):
 - Saluta brevemente e presentati esplicitamente con «mi chiamo [nome]» (non dire solo il tuo nome).
 - Indica che la conversazione durerà circa 3 minuti per valutare il livello di italiano.
-- Concludi con UNA semplice domanda di riscaldamento (livello A1) — varia la domanda: presentazione, provenienza, lavoro, vita quotidiana, ecc.
+- ${OPENING_QUESTION_LINE.it(rung)}
 - Tieni tutto breve: massimo 2-3 frasi.
 
 ${COMMON_RULES}
@@ -356,7 +436,7 @@ ${bank}
 ERÖFFNUNG — formuliere deine eigene Einleitung, jede Sitzung anders (verwende nie dieselbe Formulierung):
 - Begrüße kurz und stelle dich ausdrücklich mit „ich heiße [Vorname]" vor (nenne nicht nur deinen Vornamen).
 - Erwähne, dass das Gespräch etwa 3 Minuten dauert, um das Deutschniveau einzuschätzen.
-- Schließe mit EINER einfachen Aufwärmfrage (Niveau A1) — variiere die Frage: Vorstellung, Herkunft, Beruf, Alltag usw.
+- ${OPENING_QUESTION_LINE.de(rung)}
 - Halte alles kurz: höchstens 2-3 Sätze.
 
 ${COMMON_RULES}
@@ -371,7 +451,7 @@ ${bank}
 OPENING — compose your own introduction, different every session (never reuse the same wording):
 - Greet briefly and introduce yourself explicitly with "my name is [first name]" (don't just state your first name on its own).
 - Mention the conversation will last about 3 minutes to assess their English level.
-- End with ONE simple warm-up question (A1 level) — vary which one: introduction, origin, occupation, daily life, etc.
+- ${OPENING_QUESTION_LINE.en(rung)}
 - Keep the whole thing short: 2-3 sentences maximum.
 
 ${COMMON_RULES}

@@ -9,7 +9,7 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
  * back to "/" — this is a single-page app, so bouncing back to "/" would land
  * on the language picker with no memory of the just-finished session.
  */
-export function ClaimResultsForm({ sessionId }: { sessionId: string }) {
+export function ClaimResultsForm({ sessionId, light = false }: { sessionId: string; light?: boolean }) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -33,23 +33,22 @@ export function ClaimResultsForm({ sessionId }: { sessionId: string }) {
 
   return (
     <div
-      style={{
-        background: "#1e293b",
-        border: "1px solid #334155",
-        borderRadius: 10,
-        padding: 18,
-      }}
+      style={
+        light
+          ? { background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22 }
+          : { background: "#1e293b", border: "1px solid #334155", borderRadius: 10, padding: 18 }
+      }
     >
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#e5e7eb", marginBottom: 4 }}>
+      <div style={{ fontSize: light ? 16 : 14, fontFamily: light ? "'Outfit',sans-serif" : undefined, fontWeight: light ? 500 : 700, color: light ? "#141D33" : "#e5e7eb", marginBottom: 4 }}>
         Envie de garder ce résultat ?
       </div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 12 }}>
-        Crée un compte pour le retrouver plus tard, envoyé par email.
+      <div style={{ fontSize: light ? 14 : 12, color: light ? "#5A5F6E" : "#94a3b8", marginBottom: 12 }}>
+        Créez un compte pour le retrouver plus tard, envoyé par email.
       </div>
 
       {status === "sent" ? (
-        <div style={{ color: "#4ade80", fontSize: 13 }}>
-          Vérifie tes emails (<strong>{email}</strong>) pour confirmer.
+        <div style={{ color: light ? "#2F9E6E" : "#4ade80", fontSize: 13 }}>
+          Vérifiez vos emails (<strong>{email}</strong>) pour confirmer.
         </div>
       ) : (
         <form onSubmit={submit} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -63,10 +62,11 @@ export function ClaimResultsForm({ sessionId }: { sessionId: string }) {
               flex: "1 1 200px",
               padding: "8px 10px",
               borderRadius: 6,
-              border: "1px solid #334155",
-              background: "#0f172a",
-              color: "#e5e7eb",
+              border: `1px solid ${light ? "#DDD9D0" : "#334155"}`,
+              background: light ? "#F7F5F0" : "#0f172a",
+              color: light ? "#141D33" : "#e5e7eb",
               fontSize: 14,
+              fontFamily: light ? "'DM Sans',system-ui,sans-serif" : undefined,
             }}
           />
           <button
@@ -74,11 +74,12 @@ export function ClaimResultsForm({ sessionId }: { sessionId: string }) {
             disabled={status === "sending"}
             style={{
               padding: "8px 14px",
-              borderRadius: 6,
+              borderRadius: light ? 10 : 6,
               border: "none",
-              background: "#4f46e5",
+              background: light ? "#141D33" : "#4f46e5",
               color: "#fff",
-              fontWeight: 600,
+              fontFamily: light ? "'Outfit',sans-serif" : undefined,
+              fontWeight: light ? 500 : 600,
               fontSize: 14,
               cursor: status === "sending" ? "default" : "pointer",
               opacity: status === "sending" ? 0.7 : 1,
@@ -90,7 +91,7 @@ export function ClaimResultsForm({ sessionId }: { sessionId: string }) {
         </form>
       )}
       {status === "error" && errorMessage && (
-        <div style={{ color: "#f87171", fontSize: 12, marginTop: 8 }}>{errorMessage}</div>
+        <div style={{ color: light ? "#B3542E" : "#f87171", fontSize: 12, marginTop: 8 }}>{errorMessage}</div>
       )}
     </div>
   );

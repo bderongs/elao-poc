@@ -2,15 +2,18 @@
  * Client-side turn-boundary detection (energy-based VAD).
  *
  * Replaces the role Azure's streaming recognizer used to play in
- * lib/azure-stt.ts: deciding when the user has stopped talking. Now that
- * transcription is a Voxtral batch call (lib/mistral.ts's mistralTranscribe,
- * via app/api/transcribe) rather than a live streaming one, something has to
- * decide when to stop recording and send the clip — that's this file's only
- * job. It does NOT transcribe, record, or encode audio itself; app/page.tsx's
- * existing startTurnRecording/stopTurnRecording (MediaRecorder) and the new
- * transcribe call still own that. No live-partial-text callback either —
- * live captions are gone along with Azure; app/page.tsx shows a "…"
- * listening indicator between onSpeechStart and the transcript arriving.
+ * lib/azure-stt.ts: deciding when the user has stopped talking. This file
+ * does NOT transcribe, record, or encode audio itself — app/page.tsx's
+ * startTurnRecording/stopTurnRecording (MediaRecorder, still needed for
+ * pronunciation-assessment audio + session recording regardless of STT path)
+ * own that, and transcription itself is either a Voxtral batch call
+ * (lib/mistral.ts's mistralTranscribe, via app/api/transcribe) or, when
+ * available, lib/realtime-stt.ts streaming audio to Mistral's realtime
+ * endpoint via this file's onAudioFrame callback — fired only while genuine
+ * speech is detected, so neither silence nor avatar-TTS bleed gets streamed.
+ * No live-partial-text callback either — live captions are gone along with
+ * Azure; app/page.tsx shows a "…" listening indicator between onSpeechStart
+ * and the transcript arriving.
  *
  * Adapted from the RMS-threshold logic in the retired lib/whisper-stt.ts
  * (same SILENCE_MS/MIN_SPEECH_MS starting points), stripped down to pure
@@ -25,10 +28,15 @@
 
 export interface TurnVadCallbacks {
   onSpeechStart?: () => void;
-  onSpeechEnd?: () => void;
+  /** spokenMs excludes the trailing silence wait — see lastVoiceMs in finalize(). */
+  onSpeechEnd?: (spokenMs: number) => void;
   /** Fires once, per speech segment, when the user keeps talking through BARGE_IN_MS
    *  while the avatar is speaking — the caller's cue to stop TTS immediately. */
   onBargeIn?: () => void;
+  /** Fires per buffer while genuine speech (above the current threshold) is
+   *  detected — lib/realtime-stt.ts's audio feed, so silence/echo bleed
+   *  between utterances is never streamed to it. */
+  onAudioFrame?: (float32: Float32Array) => void;
 }
 
 /**
@@ -65,6 +73,17 @@ const ECHO_GUARD_TAIL_MS = 400;
  */
 const SILENCE_MS_SHORT = 1200;
 const SILENCE_MS_LONG = 2500;
+/**
+ * Same role as SILENCE_MS_LONG, but used instead of it when the caller has
+ * flagged (via setExtendedPauseTolerance) that the current question is at
+ * the Mastery (C2) difficulty zone — see doc/adaptive-levels-plan.md §3.4.
+ * A hard C2 question is designed to require real mid-answer thinking, not
+ * just retrieval, so a speaker trailing off mid-sentence there deserves more
+ * patience before the turn is cut than the default budget gives everyone
+ * else. Starting value only — flagged in the plan as needing empirical
+ * tuning against real recordings, not a considered constant yet.
+ */
+const SILENCE_MS_LONG_EXTENDED = 4000;
 /** Speech below this duration is treated as a short reply for SILENCE_MS purposes (ms). */
 const SHORT_UTTERANCE_MS = 1500;
 /** Ignore audio bursts shorter than this — likely background noise/breath (ms). */
@@ -86,11 +105,17 @@ export class TurnVad {
 
   private isSpeaking = false;
   private speechStartMs = 0;
+  /** Timestamp of the last buffer that was actually above threshold — used
+   *  instead of Date.now() at finalize() time, which would otherwise include
+   *  the full trailing silence wait and understate spokenMs/WPM. */
+  private lastVoiceMs = 0;
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private avatarSpeaking = false;
   private avatarGuardTailTimer: ReturnType<typeof setTimeout> | null = null;
   private bargeInTimer: ReturnType<typeof setTimeout> | null = null;
   private bargeInFired = false;
+  /** Set by setExtendedPauseTolerance — true while the current question is at the Mastery (C2) difficulty zone. */
+  private extendedPauseTolerance = false;
 
   constructor(stream: MediaStream, callbacks: TurnVadCallbacks) {
     this.cb = callbacks;
@@ -108,6 +133,13 @@ export class TurnVad {
     this.source.connect(this.processor);
     this.processor.connect(silentGain);
     silentGain.connect(this.audioContext.destination);
+  }
+
+  /** Tell the VAD whether the current question is at the Mastery (C2) difficulty
+   *  zone, so mid-answer thinking pauses get a longer silence budget before the
+   *  turn is considered finished — see SILENCE_MS_LONG_EXTENDED above. */
+  setExtendedPauseTolerance(enabled: boolean) {
+    this.extendedPauseTolerance = enabled;
   }
 
   /** Tell the VAD whether the avatar's TTS is currently audible, so it can raise its threshold against echo/bleed-through. */
@@ -131,9 +163,10 @@ export class TurnVad {
     const threshold = this.avatarSpeaking ? ECHO_GUARD_THRESHOLD : SILENCE_THRESHOLD;
 
     if (rms > threshold) {
+      this.lastVoiceMs = Date.now();
       if (!this.isSpeaking) {
         this.isSpeaking = true;
-        this.speechStartMs = Date.now();
+        this.speechStartMs = this.lastVoiceMs;
         this.bargeInFired = false;
         this.cb.onSpeechStart?.();
         // Only arm the barge-in timer against genuinely raised (echo-guard)
@@ -149,13 +182,15 @@ export class TurnVad {
           }, BARGE_IN_MS);
         }
       }
+      this.cb.onAudioFrame?.(float32);
       if (this.silenceTimer !== null) {
         clearTimeout(this.silenceTimer);
         this.silenceTimer = null;
       }
     } else if (this.isSpeaking && this.silenceTimer === null) {
       const spokenMs = Date.now() - this.speechStartMs;
-      const silenceMs = spokenMs < SHORT_UTTERANCE_MS ? SILENCE_MS_SHORT : SILENCE_MS_LONG;
+      const longBudget = this.extendedPauseTolerance ? SILENCE_MS_LONG_EXTENDED : SILENCE_MS_LONG;
+      const silenceMs = spokenMs < SHORT_UTTERANCE_MS ? SILENCE_MS_SHORT : longBudget;
       this.silenceTimer = setTimeout(() => this.finalize(), silenceMs);
     }
   }
@@ -166,9 +201,18 @@ export class TurnVad {
       clearTimeout(this.bargeInTimer);
       this.bargeInTimer = null;
     }
-    const spoke = this.isSpeaking && Date.now() - this.speechStartMs >= MIN_SPEECH_MS;
+    const spokenMs = this.lastVoiceMs - this.speechStartMs;
+    const spoke = this.isSpeaking && spokenMs >= MIN_SPEECH_MS;
     this.isSpeaking = false;
-    if (spoke) this.cb.onSpeechEnd?.();
+    if (spoke) this.cb.onSpeechEnd?.(spokenMs);
+  }
+
+  /** The AudioContext's actual sample rate — not necessarily the mic's native
+   *  rate, since a MediaStreamAudioSourceNode resamples to the context's rate
+   *  (which defaults to the output device's, not the mic's). lib/realtime-stt.ts
+   *  needs this to resample onAudioFrame's buffers correctly. */
+  getSampleRate(): number {
+    return this.audioContext?.sampleRate ?? 48000;
   }
 
   stop() {
