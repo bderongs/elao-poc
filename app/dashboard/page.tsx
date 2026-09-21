@@ -38,18 +38,17 @@ export default async function DashboardPage({
   return (
     <div>
       <div className={styles.hero}>
-        <div className={styles.heroEmoji}>🎙️</div>
-        <h1 className={styles.heroTitle}>Bonjour {user!.email}</h1>
-        <p className={styles.heroSubtitle}>Passe un nouveau test ou retrouve tes résultats précédents.</p>
+        <h1 className={styles.heroTitle}>Bonjour</h1>
+        <p className={styles.heroSubtitle}>Passez un nouveau test ou retrouvez vos résultats précédents.</p>
         <Link href="/" className={styles.heroCta}>
-          ▶ Passer un nouveau test
+          Passer un nouveau test
         </Link>
       </div>
 
-      <h2 className={styles.sectionTitle}>Mes sessions ({total})</h2>
+      <h2 className={styles.sectionTitle}>Mes sessions · {total}</h2>
 
       {sessions.length === 0 ? (
-        <div className={adminStyles.emptyState}>Aucune session pour l&apos;instant — lance ton premier test !</div>
+        <div className={styles.empty}>Aucune session pour l&apos;instant — lancez votre premier test !</div>
       ) : (
         <>
           <div className={styles.grid}>

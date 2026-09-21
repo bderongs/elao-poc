@@ -1,12 +1,12 @@
-/* User-facing dashboard shell: no sidebar (unlike the admin section), so its
-   own small module rather than reusing admin.module.css's .shell/.sidebar.
-   Same dark palette as admin.module.css for visual consistency across the app. */
+/* User-facing dashboard: mirrors the candidate app's look (app/page.tsx) —
+   cream page, navy ink, amber accent, Outfit headings, white rounded cards.
+   Fonts are loaded globally in app/layout.tsx. */
 
 .shell {
   min-height: 100vh;
-  background: #0b1120;
-  color: #e5e7eb;
-  font-family: system-ui, -apple-system, sans-serif;
+  background: #f7f5f0;
+  color: #141d33;
+  font-family: "DM Sans", system-ui, sans-serif;
   overflow-wrap: break-word;
   word-break: break-word;
 }
@@ -16,28 +16,43 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 16px 24px;
-  border-bottom: 1px solid #1e293b;
+  padding: 22px 36px;
 }
 
 .brand {
-  font-size: 14px;
-  font-weight: 700;
-  color: #e5e7eb;
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
   text-decoration: none;
-  white-space: nowrap;
 }
 
-.brandAccent {
-  color: #93c5fd;
+.logoBars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.logoBars span {
+  width: 4px;
+  background: #f5b921;
+  border-radius: 1px;
+}
+
+.brandName {
+  font-family: "Outfit", sans-serif;
+  font-size: 21px;
+  font-weight: 500;
+  color: #141d33;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .topbarRight {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 12px;
-  color: #9ca3af;
+  gap: 18px;
+  font-size: 14px;
+  color: #6b6f7d;
   min-width: 0;
 }
 
@@ -48,78 +63,102 @@
   max-width: 220px;
 }
 
+.signOut {
+  background: none;
+  border: none;
+  border-bottom: 1px solid #c9c4b8;
+  padding: 0 0 2px;
+  font: inherit;
+  font-size: 14px;
+  color: #6b6f7d;
+  cursor: pointer;
+}
+
+.signOut:hover {
+  color: #141d33;
+}
+
 .main {
   max-width: 900px;
   margin: 0 auto;
-  padding: 40px 20px 64px;
+  padding: 32px 24px 64px;
 }
 
 /* ─── hero ─────────────────────────────────────────────────────────────── */
 
 .hero {
   text-align: center;
-  margin-bottom: 40px;
-}
-
-.heroEmoji {
-  font-size: 40px;
-  margin-bottom: 8px;
+  margin-bottom: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
 }
 
 .heroTitle {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0 0 6px;
+  font-family: "Outfit", sans-serif;
+  font-size: 38px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0;
 }
 
 .heroSubtitle {
-  color: #94a3b8;
-  font-size: 14px;
-  margin: 0 0 20px;
+  color: #5a5f6e;
+  font-size: 17px;
+  line-height: 1.55;
+  margin: 0 0 8px;
 }
 
 .heroCta {
   display: inline-block;
-  padding: 12px 28px;
-  background: #4f46e5;
+  padding: 16px 40px;
+  background: #141d33;
   color: #fff;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 15px;
+  border-radius: 10px;
+  font-family: "Outfit", sans-serif;
+  font-weight: 500;
+  font-size: 18px;
   text-decoration: none;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
+  transition: background 0.15s;
+}
+
+.heroCta:hover {
+  background: #243052;
 }
 
 /* ─── session list ─────────────────────────────────────────────────────── */
 
 .sectionTitle {
-  font-size: 12px;
-  font-weight: 700;
-  color: #9ca3af;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: #8a8f9c;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.1em;
   margin: 0 0 14px;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 14px;
 }
 
 .sessionCard {
   display: block;
-  background: #1e293b;
-  border: 1px solid #1e293b;
-  border-radius: 10px;
-  padding: 16px;
+  background: #fff;
+  border: 1px solid #e4e0d7;
+  border-radius: 14px;
+  padding: 20px;
   text-decoration: none;
-  color: #e5e7eb;
+  color: #141d33;
   transition: border-color 0.15s ease;
 }
 
 .sessionCard:hover {
-  border-color: #4f46e5;
+  border-color: #141d33;
 }
 
 .sessionCardHeader {
@@ -127,21 +166,45 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 12px;
-}
-
-.sessionDate {
-  font-size: 12px;
-  color: #9ca3af;
+  margin-bottom: 14px;
 }
 
 .sessionLanguage {
-  font-size: 14px;
-  font-weight: 600;
+  font-family: "Outfit", sans-serif;
+  font-size: 19px;
+}
+
+.sessionDate {
+  font-size: 13px;
+  color: #6b6f7d;
+  margin-top: 2px;
 }
 
 .sessionMeta {
-  margin-top: 12px;
-  font-size: 12px;
-  color: #6b7280;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: #8a8f9c;
+}
+
+.empty {
+  background: #fff;
+  border: 1px solid #e4e0d7;
+  border-radius: 14px;
+  padding: 32px 20px;
+  text-align: center;
+  color: #6b6f7d;
+  font-size: 15px;
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    padding: 16px;
+  }
+  .userEmail {
+    display: none;
+  }
+  .heroTitle {
+    font-size: 30px;
+  }
 }
