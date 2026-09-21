@@ -31,6 +31,8 @@ interface ChatRequest {
    *  (lib/topic-tracking.ts) has tagged the same domain 2 turns running,
    *  best-effort/non-blocking, same tolerance as `rung` above. */
   avoidDomain?: string;
+  /** Concrete domain the next question must be about — picked client-side (lib/topic-domain.ts pickSwitchDomain) when avoidDomain is set. */
+  switchToDomain?: string;
 }
 
 // Speaking-rate presets. The conversation opens slow so low-level listeners
@@ -65,7 +67,7 @@ const NORMAL_RATE = "-3%";
  *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage, turnLogId, rung, usedQuestions, isStart, avoidDomain } =
+  const { language, history, userMessage, turnLogId, rung, usedQuestions, isStart, avoidDomain, switchToDomain } =
     (await req.json()) as ChatRequest;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
@@ -76,6 +78,7 @@ export async function POST(req: Request) {
   const openerDomain = isStart ? OPENER_DOMAINS[Math.floor(Math.random() * OPENER_DOMAINS.length)] : undefined;
   const promptOpts = {
     ...(isTopicDomain(avoidDomain) ? { avoidDomain } : {}),
+    ...(isTopicDomain(avoidDomain) && isTopicDomain(switchToDomain) ? { switchToDomain } : {}),
     ...(openerDomain ? { openerDomain } : {}),
   };
   // Narrow the bank to just this turn's target rung, and track which strings

@@ -19,6 +19,7 @@ import {
   liveConversationPronunciationProviderId,
 } from "@/lib/pronunciation-rollup";
 import { latestEvaluationResult, isEvalProviderPending, LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
+import { sessionDisplayStatus } from "@/lib/session-status";
 import { formatDateTime } from "@/lib/format-date";
 import styles from "@/components/admin.module.css";
 
@@ -125,6 +126,14 @@ export default async function AdminSessionDetailPage({
         Duration: {session.duration_seconds ? `${Math.round(session.duration_seconds / 60)} min` : "—"}
       </div>
 
+      {session.status === "in_progress" && (
+        <div className={styles.emptyState} style={{ textAlign: "left", marginBottom: 16 }}>
+          {sessionDisplayStatus(session) === "in_progress"
+            ? "This session is still in progress."
+            : `Not finished — the candidate left before the session ended (last activity ${formatDateTime(session.last_activity_at)}). Transcript and pronunciation scores up to that point are shown; there is no recording or evaluation.`}
+        </div>
+      )}
+
       {session.source === "speechace" && session.source_url && (
         <div className={styles.detailMeta}>
           <a href={session.source_url} target="_blank" rel="noreferrer">
@@ -147,7 +156,7 @@ export default async function AdminSessionDetailPage({
             pronunciationAvg={session.pronunciation_scores}
             sourceLabel={breakdown.cefrSourceLabel ?? undefined}
             pronunciationSourceLabel={breakdown.pronunciationSourceLabel ?? undefined}
-            showDetails={false}
+            showAllDetails
             theme="light"
           />
         </div>

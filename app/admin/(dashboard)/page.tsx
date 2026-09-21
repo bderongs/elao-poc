@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listSessions } from "@/lib/sessions-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { formatDateTime } from "@/lib/format-date";
+import { sessionDisplayStatus } from "@/lib/session-status";
 import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
@@ -9,12 +10,26 @@ export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
 
-function PageLink({ page, disabled, children }: { page: number; disabled: boolean; children: React.ReactNode }) {
+type StatusFilter = "all" | "completed" | "unfinished";
+const FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "completed", label: "Completed" },
+  { id: "unfinished", label: "Not finished" },
+];
+const hrefFor = (page: number, status: StatusFilter) => {
+  const q = new URLSearchParams();
+  if (page > 1) q.set("page", String(page));
+  if (status !== "all") q.set("status", status);
+  const qs = q.toString();
+  return qs ? `/admin?${qs}` : "/admin";
+};
+
+function PageLink({ page, status, disabled, children }: { page: number; status: StatusFilter; disabled: boolean; children: React.ReactNode }) {
   if (disabled) {
     return <span className={styles.pageLinkDisabled}>{children}</span>;
   }
   return (
-    <Link href={`/admin?page=${page}`} className={styles.pageLink}>
+    <Link href={hrefFor(page, status)} className={styles.pageLink}>
       {children}
     </Link>
   );
@@ -23,16 +38,17 @@ function PageLink({ page, disabled, children }: { page: number; disabled: boolea
 export default async function AdminSessionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; status?: string }>;
 }) {
-  const { page: pageParam } = await searchParams;
+  const { page: pageParam, status: statusParam } = await searchParams;
+  const status: StatusFilter = statusParam === "completed" || statusParam === "unfinished" ? statusParam : "all";
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
 
   let sessions: Awaited<ReturnType<typeof listSessions>>["sessions"] = [];
   let total = 0;
   let loadError: string | null = null;
   try {
-    const result = await listSessions({ page, pageSize: PAGE_SIZE });
+    const result = await listSessions({ page, pageSize: PAGE_SIZE, status: status === "all" ? undefined : status });
     sessions = result.sessions;
     total = result.total;
   } catch (e) {
@@ -50,6 +66,19 @@ export default async function AdminSessionsPage({
         </Link>
       </div>
 
+      <div style={{ display: "flex", gap: 12, margin: "0 0 12px", fontSize: 14 }}>
+        {FILTERS.map((f) => (
+          <Link
+            key={f.id}
+            href={hrefFor(1, f.id)}
+            className={styles.rowLink}
+            style={{ fontWeight: f.id === status ? 700 : 400, opacity: f.id === status ? 1 : 0.7 }}
+          >
+            {f.label}
+          </Link>
+        ))}
+      </div>
+
       {loadError && <div className={styles.errorBox}>Failed to load sessions: {loadError}</div>}
 
       {!loadError && sessions.length === 0 && <div className={styles.emptyState}>No sessions yet.</div>}
@@ -65,6 +94,7 @@ export default async function AdminSessionsPage({
                   <th>Language</th>
                   <th>Score</th>
                   <th>Duration</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -95,6 +125,20 @@ export default async function AdminSessionsPage({
                     <td data-label="Duration">
                       {s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : "—"}
                     </td>
+                    <td data-label="Status">
+                      {(() => {
+                        const st = sessionDisplayStatus(s);
+                        if (st === "completed") return <span style={{ color: adminColors.muted }}>completed</span>;
+                        return (
+                          <span
+                            className={styles.badge}
+                            style={{ background: st === "in_progress" ? "#60a5fa" : "#f59e0b", color: "#000" }}
+                          >
+                            {st === "in_progress" ? "in progress" : "not finished"}
+                          </span>
+                        );
+                      })()}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -106,8 +150,8 @@ export default async function AdminSessionsPage({
               Page {page} of {totalPages}
             </span>
             <div className={styles.pageLinks}>
-              <PageLink page={page - 1} disabled={page <= 1}>&larr; Prev</PageLink>
-              <PageLink page={page + 1} disabled={page >= totalPages}>Next &rarr;</PageLink>
+              <PageLink page={page - 1} status={status} disabled={page <= 1}>&larr; Prev</PageLink>
+              <PageLink page={page + 1} status={status} disabled={page >= totalPages}>Next &rarr;</PageLink>
             </div>
           </div>
         </>

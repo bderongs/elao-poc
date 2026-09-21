@@ -15,8 +15,8 @@ import type { PronunciationResult } from "@/lib/pronunciation/types";
 // list view (not just detail) so the session table can show a full score
 // breakdown on hover/click, not just the single global_score column.
 const SESSION_SUMMARY_COLUMNS =
-  "id, created_at, language, cefr_level, global_score, duration_seconds, source, evaluation_json, pronunciation_scores, speechace_scores, user_id";
-const SESSION_DETAIL_COLUMNS = `${SESSION_SUMMARY_COLUMNS}, audio_url, source_url, providers_json`;
+  "id, created_at, language, cefr_level, global_score, duration_seconds, source, evaluation_json, pronunciation_scores, speechace_scores, user_id, status, last_activity_at";
+const SESSION_DETAIL_COLUMNS = `${SESSION_SUMMARY_COLUMNS}, audio_url, source_url, providers_json, transcript`;
 
 // ─── list / detail (read) ──────────────────────────────────────────────────
 
@@ -31,7 +31,8 @@ export async function listSessions({
   page = 1,
   pageSize = 25,
   userId,
-}: { page?: number; pageSize?: number; userId?: string } = {}): Promise<ListSessionsResult> {
+  status,
+}: { page?: number; pageSize?: number; userId?: string; status?: "completed" | "unfinished" } = {}): Promise<ListSessionsResult> {
   const safePage = Math.max(1, page);
   const safePageSize = Math.min(100, Math.max(1, pageSize));
   const from = (safePage - 1) * safePageSize;
@@ -44,6 +45,8 @@ export async function listSessions({
     .order("created_at", { ascending: false })
     .range(from, to);
   if (userId) query = query.eq("user_id", userId);
+  if (status === "completed") query = query.eq("status", "completed");
+  if (status === "unfinished") query = query.eq("status", "in_progress");
   const { data, error, count } = await query;
 
   if (error) throw new Error(error.message);
@@ -131,9 +134,27 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
     turnEvaluations = (turnEvals ?? []) as TurnEvaluationRow[];
   }
 
+  // An unfinished session has no session_turns rows yet (those are written by
+  // the end-of-session save) — its transcript column, kept up to date after
+  // every answer, is all there is. Synthesised rows carry no id worth
+  // evaluating against, so the detail page hides the eval-lab controls for
+  // them (see app/admin/(dashboard)/[id]/page.tsx).
+  const sessionRow = session as SessionDetailRow & { transcript?: Array<{ role: string; content: string; pronunciation: unknown | null }> | null };
+  const turnRows: TurnRow[] =
+    (turns ?? []).length === 0 && sessionRow.status === "in_progress"
+      ? (sessionRow.transcript ?? []).map((t, i) => ({
+          id: `transcript-${i}`,
+          turn_index: i,
+          role: t.role as TurnRow["role"],
+          content: t.content,
+          audio_url: null,
+          pronunciation_json: (t.pronunciation ?? null) as TurnRow["pronunciation_json"],
+        }))
+      : ((turns ?? []) as TurnRow[]);
+
   return {
     session: session as SessionDetailRow,
-    turns: (turns ?? []) as TurnRow[],
+    turns: turnRows,
     evaluations: (evaluations ?? []) as EvaluationRow[],
     turnEvaluations,
   };
@@ -203,28 +224,52 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
     }
   }
 
-  const { data: sessionRow, error: insertError } = await supabase
-    .from("sessions")
-    .insert({
-      language,
-      duration_seconds: durationSeconds,
-      cefr_level: cefrLevel,
-      global_score: globalScore,
-      scores,
-      evaluation_json: evaluation,
-      transcript: turns.map(({ role, content, pronunciation }) => ({ role, content, pronunciation })),
-      audio_url: audioUrl,
-      pronunciation_scores: pronunciationScores,
-      // Snapshot of which provider/model each capability used — read fresh
-      // here rather than accepted from the client, since it must reflect
-      // what the server actually ran. Accurate because config is static per
-      // running server process (no per-session override exists today) — see
-      // lib/system-config.ts.
-      providers_json: getSystemConfig(),
-      user_id: userId ?? null,
-    })
-    .select("id")
-    .single();
+  const sessionFields = {
+    language,
+    duration_seconds: durationSeconds,
+    cefr_level: cefrLevel,
+    global_score: globalScore,
+    scores,
+    evaluation_json: evaluation,
+    transcript: turns.map(({ role, content, pronunciation }) => ({ role, content, pronunciation })),
+    audio_url: audioUrl,
+    pronunciation_scores: pronunciationScores,
+    // Snapshot of which provider/model each capability used — read fresh
+    // here rather than accepted from the client, since it must reflect
+    // what the server actually ran. Accurate because config is static per
+    // running server process (no per-session override exists today) — see
+    // lib/system-config.ts.
+    providers_json: getSystemConfig(),
+    status: "completed" as const,
+    last_activity_at: new Date().toISOString(),
+  };
+
+  // The live UI creates the row at the first answer (startLiveSession) and
+  // saves progress after each one; finalise THAT row when the client names it
+  // and it is still in progress and ours to touch. Anything else (no id, a
+  // stale/foreign id) falls back to a plain insert so a session is never lost.
+  const liveSessionId = (form.get("sessionId") as string | null) || null;
+  let sessionRow: { id: string } | null = null;
+  let insertError: { message: string } | null = null;
+  if (liveSessionId) {
+    let q = supabase.from("sessions").update(sessionFields).eq("id", liveSessionId).eq("status", "in_progress").eq("source", "conversation");
+    q = userId ? q.or(`user_id.is.null,user_id.eq.${userId}`) : q.is("user_id", null);
+    const { data } = await q.select("id").maybeSingle();
+    if (data) {
+      sessionRow = data as { id: string };
+      // Attach the account if the user signed in mid-session.
+      if (userId) await supabase.from("sessions").update({ user_id: userId }).eq("id", liveSessionId).is("user_id", null);
+    }
+  }
+  if (!sessionRow) {
+    const res = await supabase
+      .from("sessions")
+      .insert({ ...sessionFields, user_id: userId ?? null })
+      .select("id")
+      .single();
+    sessionRow = res.data as { id: string } | null;
+    insertError = res.error;
+  }
 
   if (insertError || !sessionRow) {
     throw new Error(insertError?.message ?? "session insert failed");
@@ -277,6 +322,44 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   }
 
   return { id: sessionId };
+}
+
+/**
+ * Live-session incremental save (supabase/migrations/0010_session_status.sql).
+ * startLiveSession creates the 'in_progress' row at the first answer;
+ * saveLiveProgress rewrites its transcript after every answer. Only text and
+ * pronunciation JSON travel here — audio still uploads once, at the end, via
+ * createSessionFromForm. Both are public (a guest has no account) and only
+ * ever touch 'in_progress' conversation rows the caller may own.
+ */
+export async function startLiveSession(language: string, userId: string | null): Promise<{ id: string }> {
+  const { data, error } = await getSupabaseServer()
+    .from("sessions")
+    .insert({ language, duration_seconds: 0, status: "in_progress", transcript: [], user_id: userId })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "live session insert failed");
+  return { id: data.id as string };
+}
+
+export async function saveLiveProgress(
+  id: string,
+  progress: { durationSeconds: number; turns: Array<{ role: string; content: string; pronunciation: unknown | null }> },
+  userId: string | null,
+): Promise<void> {
+  let q = getSupabaseServer()
+    .from("sessions")
+    .update({
+      transcript: progress.turns,
+      duration_seconds: progress.durationSeconds,
+      last_activity_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "in_progress")
+    .eq("source", "conversation");
+  q = userId ? q.or(`user_id.is.null,user_id.eq.${userId}`) : q.is("user_id", null);
+  const { error } = await q;
+  if (error) throw new Error(error.message);
 }
 
 /**

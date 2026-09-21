@@ -11,13 +11,14 @@ import { SessionRecorder } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import { logClientEvent } from "@/lib/client-log";
 import { isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
-import { isTopicDomain, type TopicDomain } from "@/lib/topic-domain";
+import { isTopicDomain, pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
 import { EvaluatingScreen } from "@/components/EvaluatingScreen";
 import { SessionResultsScreen } from "@/components/SessionResultsScreen";
 import { AuthNavLink } from "@/components/AuthNavLink";
 import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
+import { SESSION_DURATION_MINUTES, SESSION_DURATION_SECONDS } from "@/lib/session-config";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   UserWords,
@@ -64,7 +65,6 @@ const SKIP_TEXT: Record<Lang, string> = {
 };
 
 /** French word for small counts (0-3), used in the "N questions sur 3 terminées" caption. */
-const FR_COUNT_WORD = ["Aucune", "Une", "Deux", "Trois"];
 
 type Msg = {
   role: "user" | "assistant";
@@ -98,6 +98,48 @@ function getDebugFlagFromUrl(): boolean {
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+
+/**
+ * Pass-1 stand-in attached to a turn until its real score arrives (see the
+ * two-pass note above callPronunciationAPI) — score 0, no words. Must never
+ * be averaged in: a turn whose pass 2 is still in flight (or failed) would
+ * otherwise drag the session's pronunciation down by 1/N of its real score.
+ */
+function isPlaceholderPronunciation(p: PronunciationResult): boolean {
+  return p.pronunciationScore === 0 && (p.words?.length ?? 0) === 0;
+}
+
+/** Average pronunciation scores across all really-scored user turns. */
+function computePronunciationAvgFromHistory(history: Msg[]): PronunciationAvg | null {
+  const withPron = history.filter((m) => m.role === "user" && m.pronunciation);
+  const scored = withPron.filter((m) => !isPlaceholderPronunciation(m.pronunciation!));
+  if (!scored.length) return null;
+  const avg = (key: keyof PronunciationResult) => {
+    const vals = scored.map((m) => m.pronunciation![key] as number);
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  };
+  const pronunciation = avg("pronunciationScore");
+  // WPM over substantive turns (≥ 6 words; short answers return wpm=0).
+  // Word-WEIGHTED, not a plain mean: a 40-word turn should count far more
+  // than a 6-word one toward the speaking-rate figure that anchors fluency.
+  // (placeholders included: their wpm comes from the STT transcript, not pass 2, so it is real)
+  const wpmTurns = withPron.filter((m) => (m.pronunciation!.wpm ?? 0) > 0);
+  const wordsOf = (m: Msg) =>
+    m.pronunciation!.words?.length || m.content.trim().split(/\s+/).filter(Boolean).length;
+  const wpmWordTotal = wpmTurns.reduce((s, m) => s + wordsOf(m), 0);
+  const wpm = wpmWordTotal > 0
+    ? wpmTurns.reduce((s, m) => s + m.pronunciation!.wpm * wordsOf(m), 0) / wpmWordTotal
+    : 0;
+  const score = Math.round(pronunciation);
+  const shortTurns = withPron.filter((m) => (m.pronunciation!.wpm ?? 0) === 0).length;
+  return {
+    pronunciation,
+    wpm,
+    score,
+    count: scored.length,
+    shortTurns,
+  };
+}
 
 export default function Home() {
   const [language, setLanguage] = useState<Lang>("fr");
@@ -167,6 +209,9 @@ export default function Home() {
    *  already started talking over. */
   const chatAbortControllerRef = useRef<AbortController | null>(null);
   const sessionSavedRef = useRef(false);
+  /** Id of this session's 'in_progress' row (created at the first answer — see syncLiveProgress) and the in-flight creation, so concurrent syncs share one insert. */
+  const liveSessionIdRef = useRef<string | null>(null);
+  const liveSessionStartRef = useRef<Promise<string | null> | null>(null);
   /**
    * Difficulty rung to target the NEXT examiner question — set by ET's most
    * recently COMPLETED result (lib/level-assessment.ts), best-effort. A never
@@ -190,6 +235,8 @@ export default function Home() {
    * itself (see lib/topic-domain.ts's header comment for why).
    */
   const currentDomainRef = useRef<TopicDomain | null>(null);
+  /** Domains the examiner has already asked about this session — pickSwitchDomain prefers one not in here. */
+  const visitedDomainsRef = useRef<TopicDomain[]>([]);
   const domainStreakRef = useRef(0);
   /** Consecutive same-domain turns allowed before a switch is forced next turn. */
   const MAX_DOMAIN_STREAK = 2;
@@ -212,6 +259,12 @@ export default function Home() {
   const playbackDoneWaiterRef = useRef<(() => void) | null>(null);
   /** Guards against overlapping endSession() calls (double-click, or a manual click racing the 3-min auto-close). */
   const endSessionInFlightRef = useRef(false);
+  /** Pass-2 pronunciation calls still running — endSession waits for them (capped) so the final turn's real score, not its 0 placeholder, feeds the session average. */
+  const pronunciationInFlightRef = useRef<Set<Promise<void>>>(new Set());
+  const trackPronunciation = (p: Promise<void>) => {
+    pronunciationInFlightRef.current.add(p);
+    void p.finally(() => pronunciationInFlightRef.current.delete(p));
+  };
   /**
    * Mirrors the latest endSession() closure, same pattern as processBufferedRef
    * below — onFinal and the 3-min timeout are created once and never
@@ -261,34 +314,64 @@ export default function Home() {
   const currentTurnAudioChunksRef = useRef<Array<{ text: string; audio: string }>>([]);
 
   // Derived: average pronunciation scores across all scored user turns
-  const pronunciationAvg = useMemo<PronunciationAvg | null>(() => {
-    const scored = history.filter((m) => m.role === "user" && m.pronunciation);
-    if (!scored.length) return null;
-    const avg = (key: keyof PronunciationResult) => {
-      const vals = scored.map((m) => m.pronunciation![key] as number);
-      return vals.reduce((a, b) => a + b, 0) / vals.length;
-    };
-    const pronunciation = avg("pronunciationScore");
-    // WPM over substantive turns (≥ 6 words; short answers return wpm=0).
-    // Word-WEIGHTED, not a plain mean: a 40-word turn should count far more
-    // than a 6-word one toward the speaking-rate figure that anchors fluency.
-    const wpmTurns = scored.filter((m) => (m.pronunciation!.wpm ?? 0) > 0);
-    const wordsOf = (m: Msg) =>
-      m.pronunciation!.words?.length || m.content.trim().split(/\s+/).filter(Boolean).length;
-    const wpmWordTotal = wpmTurns.reduce((s, m) => s + wordsOf(m), 0);
-    const wpm = wpmWordTotal > 0
-      ? wpmTurns.reduce((s, m) => s + m.pronunciation!.wpm * wordsOf(m), 0) / wpmWordTotal
-      : 0;
-    const score = Math.round(pronunciation);
-    const shortTurns = scored.filter((m) => (m.pronunciation!.wpm ?? 0) === 0).length;
-    return {
-      pronunciation,
-      wpm,
-      score,
-      count: scored.length,
-      shortTurns,
-    };
-  }, [history]);
+  const pronunciationAvg = useMemo<PronunciationAvg | null>(() => computePronunciationAvgFromHistory(history), [history]);
+
+  // ── incremental save ── the session row is created at the first answer and
+  // its transcript rewritten after every change to `history` (debounced), so a
+  // tab closed mid-conversation still leaves a partial session in admin. Text
+  // and pronunciation JSON only; audio and the evaluation go up once, at the
+  // end (saveSession finalises this same row). Best-effort: never blocks or
+  // fails the conversation.
+  const syncLiveProgress = async () => {
+    if (sessionSavedRef.current || endSessionInFlightRef.current) return;
+    try {
+      if (!liveSessionIdRef.current) {
+        if (!liveSessionStartRef.current) {
+          liveSessionStartRef.current = fetch("/api/sessions/live", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ language }),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((j: { id?: string } | null) => {
+              liveSessionIdRef.current = j?.id ?? null;
+              if (!j?.id) liveSessionStartRef.current = null; // retry on the next change
+              return j?.id ?? null;
+            })
+            .catch(() => {
+              liveSessionStartRef.current = null;
+              return null;
+            });
+        }
+        await liveSessionStartRef.current;
+      }
+      const id = liveSessionIdRef.current;
+      if (!id || sessionSavedRef.current) return;
+      const turns = historyRef.current.map((m) => ({
+        role: m.role,
+        content: m.content,
+        pronunciation: m.role === "user" && m.pronunciation && !isPlaceholderPronunciation(m.pronunciation) ? m.pronunciation : null,
+      }));
+      await fetch("/api/sessions/live", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          durationSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0,
+          turns,
+        }),
+      });
+    } catch (e) {
+      console.warn("[live-save] progress sync failed:", e);
+    }
+  };
+  useEffect(() => {
+    if (!sessionStarted || phase !== "active") return;
+    if (!history.some((m) => m.role === "user")) return;
+    const t = setTimeout(() => void syncLiveProgress(), 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, phase, sessionStarted]);
 
   // ── timer ── freezes the instant phase leaves "active" (evaluation starting).
   useEffect(() => {
@@ -300,14 +383,14 @@ export default function Home() {
     return () => clearInterval(id);
   }, [sessionStarted, phase]);
 
-  // Close the conversation gracefully at 3 min, then end the session.
+  // Close the conversation gracefully at SESSION_DURATION_MINUTES, then end the session.
   // Don't interrupt mid-sentence: set a flag so onFinal triggers __END__
   // after the user finishes speaking. Safety timeout fires after 20 s in
   // case the user is already silent. endSession() itself stops STT
   // synchronously, so it must only run AFTER the closing turn completes —
   // never call it directly from here.
   useEffect(() => {
-    if (elapsed === 180 && phase === "active" && !pendingEndRef.current) {
+    if (elapsed === SESSION_DURATION_SECONDS && phase === "active" && !pendingEndRef.current) {
       pendingEndRef.current = true;
       endTimeoutRef.current = setTimeout(() => {
         if (pendingEndRef.current) {
@@ -357,18 +440,23 @@ export default function Home() {
   }, [preSessionStep]);
 
   // ── save session via the server API (no direct Supabase access from the browser) ──
-  const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult) => {
+  const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult, pronunciationScores: PronunciationAvg | null = pronunciationAvg) => {
     if (sessionSavedRef.current) return;
     sessionSavedRef.current = true;
 
+    // Let a still-in-flight row creation land so we finalise it instead of
+    // inserting a duplicate.
+    if (liveSessionStartRef.current) await liveSessionStartRef.current;
+
     const form = new FormData();
+    if (liveSessionIdRef.current) form.append("sessionId", liveSessionIdRef.current);
     form.append("language", language);
     form.append("durationSeconds", String(elapsed));
     if (result?.level) form.append("cefrLevel", result.level);
     if (result?.score_percent != null) form.append("globalScore", String(result.score_percent));
     form.append("scores", JSON.stringify(result?.dimensions ?? null));
     form.append("evaluation", JSON.stringify(result ?? null));
-    form.append("pronunciationScores", JSON.stringify(pronunciationAvg));
+    form.append("pronunciationScores", JSON.stringify(pronunciationScores));
 
     if (audioBlob && audioBlob.size > 0) {
       const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
@@ -646,6 +734,7 @@ export default function Home() {
       if (!isTopicDomain(domain)) return;
       domainStreakRef.current = domain === currentDomainRef.current ? domainStreakRef.current + 1 : 1;
       currentDomainRef.current = domain;
+      if (!visitedDomainsRef.current.includes(domain)) visitedDomainsRef.current.push(domain);
       logClientEvent("tt_result_received", { turnLogId, process: ttProcess, domain, streak: domainStreakRef.current });
     } catch (e) {
       logClientEvent("tt_failed", { turnLogId, process: ttProcess, error: String(e) });
@@ -778,6 +867,8 @@ export default function Home() {
   const startSession = async () => {
     setSessionStarted(true);
     sessionSavedRef.current = false;
+    liveSessionIdRef.current = null;
+    liveSessionStartRef.current = null;
     startedAtRef.current = Date.now();
 
     // Direct starting-level mode (doc/adaptive-levels-plan.md §4): a
@@ -846,6 +937,7 @@ export default function Home() {
     currentRungRef.current = conversationSettingsRef.current.startingRung;
     usedQuestionsRef.current = [];
     currentDomainRef.current = null;
+    visitedDomainsRef.current = [];
     domainStreakRef.current = 0;
     setElapsed(0);
     setChatError(null);
@@ -1046,7 +1138,7 @@ export default function Home() {
       // EO (needs the recording, not just text) fires here, non-blocking —
       // same endpoint/provider as before, now handed the real transcription
       // wpm instead of a live-SDK one.
-      void callPronunciationAPI(recording.blob, turnIndex, wpm, text, questionContext, turnLogId);
+      trackPronunciation(callPronunciationAPI(recording.blob, turnIndex, wpm, text, questionContext, turnLogId));
 
       if (shouldEnd) {
         // Winding down: record + assess this final answer, but do NOT let the
@@ -1184,6 +1276,8 @@ export default function Home() {
       logClientEvent("turn_chat_request_sent", { turnLogId: logId, process, rung });
       const abortController = new AbortController();
       chatAbortControllerRef.current = abortController;
+      // Streak capped → steer to a concrete unvisited domain, not just "away from X".
+      const avoidDomain = domainStreakRef.current >= MAX_DOMAIN_STREAK ? currentDomainRef.current : null;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1195,7 +1289,8 @@ export default function Home() {
           rung,
           usedQuestions: usedQuestionsRef.current,
           isStart,
-          avoidDomain: domainStreakRef.current >= MAX_DOMAIN_STREAK ? currentDomainRef.current ?? undefined : undefined,
+          avoidDomain: avoidDomain ?? undefined,
+          switchToDomain: avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomainsRef.current) : undefined,
         }),
         signal: abortController.signal,
       });
@@ -1340,7 +1435,9 @@ export default function Home() {
     await handleUserTurn(buffered.text, buffered.pronunciation, buffered.turnLogId);
     void buffered.recordingPromise.then((recording) => {
       if (!recording) return;
-      return callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext, buffered.turnLogId);
+      const p = callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext, buffered.turnLogId);
+      trackPronunciation(p);
+      return p;
     });
   };
 
@@ -1383,6 +1480,19 @@ export default function Home() {
       setAudioBlob(blob);
     }
 
+    // Let any in-flight pass-2 pronunciation calls land first (capped): the
+    // last answer is spoken right before the closing, so without this its
+    // score is still the 0 placeholder when the session average is taken.
+    if (pronunciationInFlightRef.current.size > 0) {
+      await Promise.race([
+        Promise.allSettled([...pronunciationInFlightRef.current]),
+        new Promise((r) => setTimeout(r, 10_000)),
+      ]);
+      // setHistory from those calls hasn't necessarily re-rendered yet.
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const finalPronunciationAvg = computePronunciationAvgFromHistory(historyRef.current);
+
     let result: CefrResult | null = null;
     try {
       const userTurns = historyRef.current
@@ -1392,7 +1502,7 @@ export default function Home() {
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, userTurns, pronunciationContext: pronunciationAvg }),
+        body: JSON.stringify({ language, userTurns, pronunciationContext: finalPronunciationAvg }),
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
       result = await res.json();
@@ -1404,7 +1514,7 @@ export default function Home() {
 
     // Persist regardless of whether evaluation succeeded — this is the only
     // place a session is ever saved, so it must always run.
-    await saveSession(blob ?? audioBlob, result ?? undefined);
+    await saveSession(blob ?? audioBlob, result ?? undefined, finalPronunciationAvg);
 
     setEvalDone(true); // EvaluatingScreen takes it from here (min-visible-duration, then phase -> "done")
   };
@@ -1497,12 +1607,10 @@ export default function Home() {
     </div>
   );
 
-  const remaining = Math.max(0, 180 - elapsed);
+  const remaining = Math.max(0, SESSION_DURATION_SECONDS - elapsed);
   const rmm = Math.floor(remaining / 60).toString().padStart(2, "0");
   const rss = (remaining % 60).toString().padStart(2, "0");
-  const progressPercent = Math.min(100, (elapsed / 180) * 100);
-  const questionCount = 3;
-  const questionsAnswered = Math.min(questionCount, history.filter((m) => m.role === "user").length);
+  const progressPercent = Math.min(100, (elapsed / SESSION_DURATION_SECONDS) * 100);
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
@@ -1595,7 +1703,7 @@ export default function Home() {
                 allons-nous parler&nbsp;?
               </h2>
               <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.55 }}>
-                Une conversation de trois minutes avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
+                Une conversation de {SESSION_DURATION_MINUTES} minutes avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
               </p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(160px, 236px))", gap: 14 }}>
@@ -1650,7 +1758,7 @@ export default function Home() {
             <div style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 38, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-                  Trois minutes, trois questions
+                  Votre niveau en {SESSION_DURATION_MINUTES} minutes
                 </h2>
                 <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.6, maxWidth: 460 }}>
                   Léa vous posera des questions simples sur votre quotidien. Répondez à voix haute, comme dans une
@@ -1854,8 +1962,7 @@ export default function Home() {
                   <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#3A4055" }}>Léa prépare la question suivante</span>
                 </div>
                 <span style={{ fontSize: 15, color: "#8A8F9C" }}>
-                  {FR_COUNT_WORD[questionsAnswered] ?? questionsAnswered} question{questionsAnswered !== 1 ? "s" : ""} sur{" "}
-                  {questionCount} terminée{questionsAnswered !== 1 ? "s" : ""}. Vous vous en sortez bien.
+                  Vous vous en sortez bien.
                 </span>
               </div>
             )}

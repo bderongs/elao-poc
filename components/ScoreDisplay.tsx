@@ -126,6 +126,7 @@ export function CefrPanel({
   sourceLabel,
   pronunciationSourceLabel,
   showDetails = true,
+  showAllDetails = false,
   labels,
   theme = "dark",
 }: {
@@ -133,8 +134,10 @@ export function CefrPanel({
   pronunciationAvg: PronunciationAvg | null;
   sourceLabel?: string;
   pronunciationSourceLabel?: string;
-  /** Strengths/to-improve/notable-errors/summary — off on the admin detail page, where lib/score-breakdown.ts's panel covers that ground per-category instead. */
+  /** Strengths/to-improve/notable-errors/summary — the admin detail page turns it on with showAllDetails (full lists) so the end-of-session feedback is visible in reports. */
   showDetails?: boolean;
+  /** Lift the candidate-screen caps (3 strengths / 2 areas / 2 errors) — the admin report wants the evaluator's full feedback. */
+  showAllDetails?: boolean;
   /** Overrides for the handful of hardcoded structural labels — defaults keep the admin view's English copy unchanged. */
   labels?: CefrPanelLabels;
   /** "light" matches the "Salle claire" design (doc/new_design) — used only
@@ -256,7 +259,7 @@ export function CefrPanel({
             <div style={{ marginBottom: light ? 12 : 6 }}>
               <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.strengths}</div>
               <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
-                {result.strengths.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
+                {result.strengths.slice(0, showAllDetails ? undefined : 3).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
           )}
@@ -266,7 +269,7 @@ export function CefrPanel({
             <div style={{ marginBottom: light ? 12 : 6 }}>
               <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.toImprove}</div>
               <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
-                {result.areas_for_improvement.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
+                {result.areas_for_improvement.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
           )}
@@ -276,7 +279,7 @@ export function CefrPanel({
             <div style={{ marginBottom: light ? 12 : 6 }}>
               <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.notableErrors}</div>
               <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#B3542E" : "#fca5a5" }}>
-                {result.notable_errors.slice(0, 2).map((s, i) => <li key={i}>{s}</li>)}
+                {result.notable_errors.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
           )}

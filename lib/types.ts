@@ -55,6 +55,9 @@ export interface SessionSummary {
   latest_eval_json?: CefrResult | null;
   /** Owning account, set by claimSession(); null until claimed (or for admin-created upload/speechace sessions). */
   user_id: string | null;
+  /** 'in_progress' rows are live sessions saved incrementally — see supabase/migrations/0010_session_status.sql. */
+  status: "in_progress" | "completed";
+  last_activity_at: string;
 }
 
 export interface SessionDetailRow extends SessionSummary {

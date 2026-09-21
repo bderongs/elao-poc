@@ -24,6 +24,8 @@ export async function middleware(req: NextRequest) {
   // Every other /api/sessions* route (list, detail, replay-evaluate) is
   // admin-only.
   if (pathname === "/api/sessions" && req.method === "POST") return response;
+  // Live-session incremental save (start + per-answer progress) — same public carve-out.
+  if (pathname === "/api/sessions/live" && (req.method === "POST" || req.method === "PATCH")) return response;
 
   if (user && (await isAdmin(user.id))) return response;
 
@@ -44,6 +46,7 @@ export const config = {
   matcher: [
     "/admin/:path*",
     "/api/sessions",
+    "/api/sessions/live",
     "/api/sessions/upload",
     "/api/sessions/speechace-import",
     "/api/sessions/:id",

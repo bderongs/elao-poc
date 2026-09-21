@@ -61,7 +61,7 @@ centred vertically and horizontally, `gap: 40px`, padding `0 80px 60px`.
 `display: grid; grid-template-columns: minmax(0,1fr) 420px; gap: 64px;
 padding: 20px 80px 72px; align-items: center`.
 **Left column** (`gap: 36px`)
-- H2 "Trois minutes, trois questions" — Outfit 400, 38px, line-height 1.2, `#141D33`.
+- H2 "Votre niveau en 3 minutes" — Outfit 400, 38px, line-height 1.2, `#141D33`.
 - Paragraph (max-width 460px, 17px, line-height 1.6, `#5A5F6E`): "Léa vous posera des
   questions simples sur votre quotidien. Répondez à voix haute, comme dans une vraie
   conversation."
@@ -131,7 +131,7 @@ sortez bien." (15px `#8A8F9C`) — progress is phrased in words, never as a scor
 - **Flow:** language → instructions/mic check → conversation → analysis. Forward only; no
   back navigation once the conversation starts.
 - **Turn cycle:** avatar speaks (state A) → user's turn (state B, mic open) → end of speech
-  detected by silence → state C → next question. Three questions, then screen 4.
+  detected by silence → state C → next question. Conversation lasts SESSION_DURATION_MINUTES (lib/session-config.ts), then screen 4.
 - **Waveform bars** (`@keyframes wave`): `scaleY(0.28)` → `scaleY(1)` → back,
   `transform-origin: bottom`, `ease-in-out`, infinite. Durations: 0.7s (user speaking, the
   fastest — it should feel responsive), 0.9s (avatar speaking), 1.0–1.1s (mic check), 1.5s
