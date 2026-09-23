@@ -810,3 +810,31 @@
   border: 1px solid var(--admin-border);
   border-radius: 10px;
 }
+
+/* Per-column filter row in the admin session table (SessionListFilters). */
+.filterRow th {
+  padding-top: 0;
+  vertical-align: top;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.filterStack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filterInput {
+  width: 100%;
+  min-width: 90px;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--admin-ink);
+  background: #fff;
+  border: 1px solid var(--admin-border);
+  border-radius: 6px;
+}

@@ -188,7 +188,7 @@ export default async function AdminSessionDetailPage({
       <div style={{ marginTop: 24 }}>
         <CollapsibleSection title="Configuration used">
           {session.providers_json ? (
-            <ProviderConfigTable config={session.providers_json} />
+            <ProviderConfigTable config={session.providers_json} language={session.language} />
           ) : (
             <div className={styles.emptyState}>
               Not recorded — this session was saved before per-session

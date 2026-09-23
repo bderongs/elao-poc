@@ -57,7 +57,9 @@ function costForCapability(c: CapabilityConfig): CostEstimate | null {
       return estimateCefrEvalCostUsd(c.providerId, c.modelLabel);
     case "TTS":
     case "EO":
-      return null; // no single number — varies by language, see perLanguage rows
+      // With a perLanguage breakdown there's no single number (see the
+      // per-language rows); once narrowed to one language, it's that provider's.
+      return c.perLanguage ? null : costForLanguageProvider(c.capability, c);
   }
 }
 
@@ -103,13 +105,26 @@ function CostCell({ estimate }: { estimate: CostEstimate | null }) {
   );
 }
 
+// Collapses each perLanguage breakdown to the one entry for `language`, so the
+// row reads as a plain single-provider row. Falls back to the full breakdown
+// when that language isn't in it (e.g. a snapshot from before it was added).
+function narrowToLanguage(config: CapabilityConfig[], language: string): CapabilityConfig[] {
+  return config.map((c) => {
+    const p = c.perLanguage?.[language as keyof NonNullable<CapabilityConfig["perLanguage"]>];
+    if (!p) return c;
+    return { capability: c.capability, capabilityLabel: c.capabilityLabel, ...p };
+  });
+}
+
 /**
  * Renders a CapabilityConfig[] (lib/system-config.ts) as a table — used both
  * by the admin "System configuration" page (what's live right now) and the
  * admin session-detail page (what a given session actually used), so the two
- * views never visually drift apart.
+ * views never visually drift apart. Pass `language` (session-detail page) to
+ * show only that language's provider for per-language capabilities.
  */
-export function ProviderConfigTable({ config }: { config: CapabilityConfig[] }) {
+export function ProviderConfigTable({ config: fullConfig, language }: { config: CapabilityConfig[]; language?: string | null }) {
+  const config = language ? narrowToLanguage(fullConfig, language) : fullConfig;
   const rowCosts = config.map((c) => (c.perLanguage ? blendedPerLanguageCost(c.capability, c.perLanguage) : costForCapability(c)));
   const totalUsd = rowCosts.reduce((sum, c) => sum + (c?.usdPerSession ?? 0), 0);
 

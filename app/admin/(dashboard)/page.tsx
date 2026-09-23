@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listSessions } from "@/lib/sessions-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
+import { SessionListFilters } from "@/components/SessionListFilters";
 import { formatDateTime } from "@/lib/format-date";
 import { sessionDisplayStatus } from "@/lib/session-status";
 import { adminColors } from "@/lib/admin-theme";
@@ -10,26 +11,29 @@ export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
 
-type StatusFilter = "all" | "completed" | "unfinished";
-const FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "completed", label: "Completed" },
-  { id: "unfinished", label: "Not finished" },
-];
-const hrefFor = (page: number, status: StatusFilter) => {
+const FILTER_KEYS = ["status", "source", "lang", "from", "to", "minMin", "maxMin"] as const;
+type FilterParams = Partial<Record<(typeof FILTER_KEYS)[number], string>>;
+
+const hrefFor = (page: number, filters: FilterParams) => {
   const q = new URLSearchParams();
   if (page > 1) q.set("page", String(page));
-  if (status !== "all") q.set("status", status);
+  for (const k of FILTER_KEYS) if (filters[k]) q.set(k, filters[k]!);
   const qs = q.toString();
   return qs ? `/admin?${qs}` : "/admin";
 };
 
-function PageLink({ page, status, disabled, children }: { page: number; status: StatusFilter; disabled: boolean; children: React.ReactNode }) {
+const isDate = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+const toMinutes = (v?: string) => {
+  const n = v ? Number(v) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+};
+
+function PageLink({ page, filters, disabled, children }: { page: number; filters: FilterParams; disabled: boolean; children: React.ReactNode }) {
   if (disabled) {
     return <span className={styles.pageLinkDisabled}>{children}</span>;
   }
   return (
-    <Link href={hrefFor(page, status)} className={styles.pageLink}>
+    <Link href={hrefFor(page, filters)} className={styles.pageLink}>
       {children}
     </Link>
   );
@@ -38,17 +42,30 @@ function PageLink({ page, status, disabled, children }: { page: number; status: 
 export default async function AdminSessionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; status?: string }>;
+  searchParams: Promise<FilterParams & { page?: string }>;
 }) {
-  const { page: pageParam, status: statusParam } = await searchParams;
-  const status: StatusFilter = statusParam === "completed" || statusParam === "unfinished" ? statusParam : "all";
+  const { page: pageParam, ...rawFilters } = await searchParams;
+  const filters: FilterParams = Object.fromEntries(
+    FILTER_KEYS.filter((k) => typeof rawFilters[k] === "string" && rawFilters[k]).map((k) => [k, rawFilters[k]])
+  );
+  const hasFilters = Object.keys(filters).length > 0;
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
 
   let sessions: Awaited<ReturnType<typeof listSessions>>["sessions"] = [];
   let total = 0;
   let loadError: string | null = null;
   try {
-    const result = await listSessions({ page, pageSize: PAGE_SIZE, status: status === "all" ? undefined : status });
+    const result = await listSessions({
+      page,
+      pageSize: PAGE_SIZE,
+      status: filters.status === "completed" || filters.status === "unfinished" ? filters.status : undefined,
+      source: filters.source,
+      language: filters.lang,
+      dateFrom: isDate(filters.from),
+      dateTo: isDate(filters.to),
+      minMinutes: toMinutes(filters.minMin),
+      maxMinutes: toMinutes(filters.maxMin),
+    });
     sessions = result.sessions;
     total = result.total;
   } catch (e) {
@@ -66,24 +83,17 @@ export default async function AdminSessionsPage({
         </Link>
       </div>
 
-      <div style={{ display: "flex", gap: 12, margin: "0 0 12px", fontSize: 14 }}>
-        {FILTERS.map((f) => (
-          <Link
-            key={f.id}
-            href={hrefFor(1, f.id)}
-            className={styles.rowLink}
-            style={{ fontWeight: f.id === status ? 700 : 400, opacity: f.id === status ? 1 : 0.7 }}
-          >
-            {f.label}
+      {hasFilters && (
+        <div style={{ margin: "0 0 12px", fontSize: 14 }}>
+          <Link href="/admin" className={styles.rowLink}>
+            ✕ Clear filters
           </Link>
-        ))}
-      </div>
+        </div>
+      )}
 
       {loadError && <div className={styles.errorBox}>Failed to load sessions: {loadError}</div>}
 
-      {!loadError && sessions.length === 0 && <div className={styles.emptyState}>No sessions yet.</div>}
-
-      {sessions.length > 0 && (
+      {!loadError && (
         <>
           <div className={styles.tableCard}>
             <table className={styles.table}>
@@ -96,6 +106,7 @@ export default async function AdminSessionsPage({
                   <th>Duration</th>
                   <th>Status</th>
                 </tr>
+                <SessionListFilters />
               </thead>
               <tbody>
                 {sessions.map((s) => (
@@ -143,6 +154,9 @@ export default async function AdminSessionsPage({
                 ))}
               </tbody>
             </table>
+            {sessions.length === 0 && (
+              <div className={styles.emptyState}>{hasFilters ? "No sessions match these filters." : "No sessions yet."}</div>
+            )}
           </div>
 
           <div className={styles.pagination}>
@@ -150,8 +164,8 @@ export default async function AdminSessionsPage({
               Page {page} of {totalPages}
             </span>
             <div className={styles.pageLinks}>
-              <PageLink page={page - 1} status={status} disabled={page <= 1}>&larr; Prev</PageLink>
-              <PageLink page={page + 1} status={status} disabled={page >= totalPages}>Next &rarr;</PageLink>
+              <PageLink page={page - 1} filters={filters} disabled={page <= 1}>&larr; Prev</PageLink>
+              <PageLink page={page + 1} filters={filters} disabled={page >= totalPages}>Next &rarr;</PageLink>
             </div>
           </div>
         </>

@@ -17,3 +17,6 @@ export function languageFlag(code: string | null): string {
   if (!code) return "🌐";
   return LANGUAGE_LABELS[code]?.flag ?? "🌐";
 }
+
+/** Every language code we have display metadata for, in display order. */
+export const LANGUAGE_CODES = Object.keys(LANGUAGE_LABELS);

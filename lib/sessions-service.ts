@@ -31,12 +31,31 @@ export interface ListSessionsResult {
   pageSize: number;
 }
 
+export interface ListSessionsFilters {
+  userId?: string;
+  status?: "completed" | "unfinished";
+  source?: string;
+  language?: string;
+  /** Inclusive, YYYY-MM-DD (UTC day boundaries). */
+  dateFrom?: string;
+  dateTo?: string;
+  /** Duration bounds in minutes. */
+  minMinutes?: number;
+  maxMinutes?: number;
+}
+
 export async function listSessions({
   page = 1,
   pageSize = 25,
   userId,
   status,
-}: { page?: number; pageSize?: number; userId?: string; status?: "completed" | "unfinished" } = {}): Promise<ListSessionsResult> {
+  source,
+  language,
+  dateFrom,
+  dateTo,
+  minMinutes,
+  maxMinutes,
+}: { page?: number; pageSize?: number } & ListSessionsFilters = {}): Promise<ListSessionsResult> {
   const safePage = Math.max(1, page);
   const safePageSize = Math.min(100, Math.max(1, pageSize));
   const from = (safePage - 1) * safePageSize;
@@ -51,6 +70,12 @@ export async function listSessions({
   if (userId) query = query.eq("user_id", userId);
   if (status === "completed") query = query.eq("status", "completed");
   if (status === "unfinished") query = query.eq("status", "in_progress");
+  if (source) query = query.eq("source", source);
+  if (language) query = query.eq("language", language);
+  if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00Z`);
+  if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59.999Z`);
+  if (minMinutes != null) query = query.gte("duration_seconds", minMinutes * 60);
+  if (maxMinutes != null) query = query.lte("duration_seconds", maxMinutes * 60);
   const { data, error, count } = await query;
 
   if (error) throw new Error(error.message);
