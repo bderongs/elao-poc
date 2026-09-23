@@ -32,13 +32,13 @@ import type { PronunciationResult } from "@/lib/pronunciation/types";
 
 // ─── Evidence collectors ──────────────────────────────────────────────────────
 
-interface DgEvidence {
+export interface DgEvidence {
   transcript: string;
   words: Array<{ word: string; confidence: number }>;
 }
 
 /** Independent verbatim hearing of the audio via Deepgram's prerecorded API. */
-async function deepgramVerbatim(
+export async function deepgramVerbatim(
   audio: ArrayBuffer,
   contentType: string,
   langCode: string,
@@ -83,31 +83,48 @@ async function deepgramVerbatim(
   }
 }
 
-interface AzWord {
+export interface AzWord {
   word: string;
   accuracyScore: number;
   errorType: string;
 }
 
-interface AzEvidence {
+export interface AzEvidence {
   text: string;
   words: AzWord[];
   durationSec: number;
 }
 
-/** Azure free-speech pronunciation assessment — acoustic per-word scores. */
-async function azureAcoustic(
+/**
+ * Azure pronunciation assessment — acoustic per-word scores. Free-speech by
+ * default; azure-intended.ts passes a reference text to run it scripted, with
+ * miscue detection on.
+ *
+ * The Comprehensive dimension is what makes Azure return an ErrorType per
+ * word (the default Basic dimension returns accuracy only). The REST response
+ * carries AccuracyScore / ErrorType directly on each word and phoneme — until
+ * 2026-09-23 they were read from a nested PronunciationAssessment object that
+ * only the Speech SDK's JSON has, so every word silently read as 100 / "None".
+ */
+export async function azureAcoustic(
   audio: ArrayBuffer,
   contentType: string,
   langCode: string,
   key: string,
   region: string,
+  referenceText = "",
 ): Promise<AzEvidence | null> {
   const langMap: Record<string, string> = {
     fr: "fr-FR", en: "en-US", "nl-BE": "nl-BE", es: "es-ES", it: "it-IT", de: "de-DE",
   };
   const pronConfigB64 = Buffer.from(
-    JSON.stringify({ ReferenceText: "", GradingSystem: "HundredMark", Granularity: "Phoneme", EnableMiscue: false })
+    JSON.stringify({
+      ReferenceText: referenceText,
+      GradingSystem: "HundredMark",
+      Granularity: "Phoneme",
+      Dimension: "Comprehensive",
+      EnableMiscue: referenceText !== "",
+    })
   ).toString("base64");
 
   try {
@@ -137,12 +154,12 @@ async function azureAcoustic(
     const best = data.NBest[0];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const words: AzWord[] = (best.Words ?? []).map((w: any) => {
-      const acc = Math.round(w.PronunciationAssessment?.AccuracyScore ?? 100);
-      const errType = w.PronunciationAssessment?.ErrorType ?? "None";
+      const acc = Math.round(w.AccuracyScore ?? 100);
+      const errType = w.ErrorType ?? "None";
       const accuracy = wordAccuracy(
         acc,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (w.Phonemes ?? []).map((p: any) => p.PronunciationAssessment?.AccuracyScore ?? 100),
+        (w.Phonemes ?? []).map((p: any) => p.AccuracyScore ?? 100),
         errType
       );
       return { word: w.Word ?? "", accuracyScore: accuracy, errorType: errType };
@@ -259,7 +276,7 @@ const VERDICT_MAP: Record<string, { confidence: number; accuracyScore: number; e
   bad:  { confidence: 0.2,  accuracyScore: 16, errorType: "Mispronunciation" },
 };
 
-const LANG_LABELS: Record<string, string> = {
+export const LANG_LABELS: Record<string, string> = {
   fr: "French", "nl-BE": "Dutch (Belgian)", es: "Spanish", it: "Italian", de: "German", en: "English",
 };
 

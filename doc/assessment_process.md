@@ -257,3 +257,23 @@ session's headline stays protected (see `FullEvaluationPanel`'s warning
 banner); promoting a re-run over it is a separate, explicit action
 (`PromoteHeadlineButton`). So this is safe to run on production sessions
 purely to compare, without touching what's actually stored.
+
+### Experimental EO mode: `azure-intended` (2026-09-23)
+
+A third pronunciation provider in the gear, comparison-only
+(`lib/pronunciation/providers/azure-intended.ts`). It attacks the circularity
+of grading audio against a recognizer's own hearing of it: Mistral first
+reconstructs the sentence the speaker *intended* (undoing sound-alike
+substitutions only, never grammar), then Azure grades the audio in scripted
+mode against that sentence. Listed in
+`COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS` (`lib/pronunciation-rollup.ts`),
+so it never feeds an upload/speechace session's rollup or transcript. Raw
+Azure scale, uncalibrated — early runs rate native French speech 81-88.
+
+Found while building it: until 2026-09-23 `azure-ensemble` read Azure's
+per-word scores from a nested `PronunciationAssessment` object the REST
+response doesn't have, so the judge always saw acoustic 100 / no error flags
+and scored only from Voxtral-vs-Deepgram disagreement. Fixed (flat fields +
+`Dimension: "Comprehensive"` for ErrorType). The judge prompt was tuned while
+that signal was dead: on 4 native French turns its score dropped from 90-96
+to 72-87 once real acoustic scores arrived — recalibrate before relying on it.

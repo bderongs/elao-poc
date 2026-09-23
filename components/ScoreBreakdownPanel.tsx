@@ -6,7 +6,7 @@ import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 const PRONUNCIATION_CAVEAT =
-  "Azure-ensemble and Voxtral are each calibrated independently against Speechace — their raw scores aren't on a shared scale.";
+  "Azure-ensemble and Voxtral are each calibrated independently against Speechace — their raw scores aren't on a shared scale. Azure-intended (experimental) is raw Azure accuracy, not calibrated at all.";
 
 function currentScoreOf(category: ScoreCategory): number | null {
   return category.rows.find((r) => r.id === category.currentId)?.score ?? null;

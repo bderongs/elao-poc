@@ -1,15 +1,18 @@
 import type { PronunciationProvider } from "./types";
 import { azureEnsembleProvider } from "./providers/azure-ensemble";
 import { voxtralProvider } from "./providers/voxtral";
+import { azureIntendedProvider } from "./providers/azure-intended";
 
 // Order here drives display order in the admin gear (listProviders()) —
-// azure-ensemble first, voxtral second. Which one is actually live is
+// azure-ensemble first, voxtral second, then the experimental azure-intended
+// (admin comparison only, never live). Which one is actually live is
 // per-language (LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG in
 // lib/pronunciation-rollup.ts); whichever isn't live for a given language
 // remains available as an on-demand comparison run from the admin gear.
 const PROVIDERS: Record<string, PronunciationProvider> = {
   "azure-ensemble": azureEnsembleProvider,
   voxtral: voxtralProvider,
+  "azure-intended": azureIntendedProvider,
 };
 
 export function getProvider(id: string): PronunciationProvider {

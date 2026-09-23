@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
-import { computePronunciationAvg, liveConversationPronunciationProviderId } from "@/lib/pronunciation-rollup";
+import {
+  computePronunciationAvg,
+  liveConversationPronunciationProviderId,
+  COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS,
+} from "@/lib/pronunciation-rollup";
 import { getSystemConfig } from "@/lib/system-config";
 import { isCefrRung } from "@/lib/cefr-rung";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
@@ -752,15 +756,33 @@ export async function appendTurn(sessionId: string, form: FormData): Promise<Upl
 /** Turn lookup for the pronunciation-lab replay route — a turn's audio plus its parent session's language/source. */
 export async function getTurnForAssessment(
   turnId: string,
-): Promise<{ id: string; audioUrl: string | null; content: string; language: string; source: string } | null> {
+): Promise<{
+  id: string;
+  audioUrl: string | null;
+  content: string;
+  language: string;
+  source: string;
+  /** The examiner turn right before this one, when there is one — the question being answered. */
+  question: string;
+} | null> {
   const supabase = getSupabaseServer();
 
   const { data: turn, error: turnError } = await supabase
     .from("session_turns")
-    .select("id, content, audio_url, session_id")
+    .select("id, content, audio_url, session_id, turn_index")
     .eq("id", turnId)
     .single();
   if (turnError || !turn) return null;
+
+  const { data: prevAssistant } = await supabase
+    .from("session_turns")
+    .select("content")
+    .eq("session_id", turn.session_id as string)
+    .eq("role", "assistant")
+    .lt("turn_index", turn.turn_index as number)
+    .order("turn_index", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
@@ -775,6 +797,7 @@ export async function getTurnForAssessment(
     content: (turn.content as string | null) ?? "",
     language: (session.language as string | null) ?? "en",
     source: (session.source as string | null) ?? "conversation",
+    question: (prevAssistant?.content as string | null) ?? "",
   };
 }
 
@@ -814,15 +837,17 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
   const turnIds = turns.map((t) => t.id as string);
   const { data: allEvals, error: evalsError } = await supabase
     .from("session_turn_evaluations")
-    .select("turn_id, result_json, created_at")
+    .select("turn_id, provider_id, result_json, created_at")
     .in("turn_id", turnIds)
     .order("created_at", { ascending: false });
   if (evalsError) throw new Error(evalsError.message);
 
   // Query is newest-first, so the first row seen per turn_id is that turn's
-  // latest run, regardless of which provider produced it.
+  // latest run, regardless of which provider produced it — except
+  // comparison-only providers, which never feed the rollup.
   const latestByTurn = new Map<string, PronunciationResult | null>();
   for (const row of allEvals ?? []) {
+    if (COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS.includes(row.provider_id as string)) continue;
     const turnId = row.turn_id as string;
     if (!latestByTurn.has(turnId)) latestByTurn.set(turnId, row.result_json as PronunciationResult | null);
   }

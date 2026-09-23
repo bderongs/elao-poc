@@ -40,6 +40,13 @@ export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG: Record<ConvLang, 
 const DEFAULT_PRONUNCIATION_PROVIDER_ID = "azure-ensemble";
 
 /**
+ * Experimental providers that can be run from the admin gear for comparison
+ * but must never feed an upload/speechace session's rollup — their text is a
+ * reconstruction, not a transcript, and their scale is uncalibrated.
+ */
+export const COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS: readonly string[] = ["azure-intended"];
+
+/**
  * Resolves the live pronunciation provider id for a session/turn's language.
  * Accepts a loose string (form-data language codes, nullable session.language
  * columns on older rows) and falls back to the non-en/fr default for
@@ -181,6 +188,7 @@ export interface PronunciationAvgAttribution {
 export function pronunciationAvgAttribution(turnEvaluations: TurnEvaluationRow[]): PronunciationAvgAttribution | null {
   const latestByTurn = new Map<string, TurnEvaluationRow>();
   for (const row of turnEvaluations) {
+    if (COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS.includes(row.provider_id)) continue;
     if (!latestByTurn.has(row.turn_id)) latestByTurn.set(row.turn_id, row);
   }
   const contributing = Array.from(latestByTurn.values()).filter((r) => !r.error && r.result_json);

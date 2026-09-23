@@ -82,6 +82,8 @@ export async function assessTurn(turnId: string, providerIds: string[]): Promise
           contentType,
           langCode: turn.language,
           referenceText,
+          // The examiner's question, as the live path sends it (app/api/pronunciation).
+          context: turn.question || undefined,
           clientWpm,
         });
         const durationMs = Date.now() - startedAt;
