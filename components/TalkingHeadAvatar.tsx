@@ -636,11 +636,6 @@ export function TalkingHeadAvatar({
 
   return (
     <div style={{ width: "100%", height: "100%", background: "#ffffff", position: "relative" }}>
-      <img
-        src="/images/elao-logo.svg"
-        alt="ELAO"
-        style={{ position: "absolute", top: 16, left: 16, width: 90, height: "auto" }}
-      />
       {status === "loading" && (
         <div
           style={{

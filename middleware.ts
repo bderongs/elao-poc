@@ -58,6 +58,7 @@ export const config = {
     "/api/sessions/:id/turns/:turnId/stt-lab",
     "/api/sessions/:id/assess-all",
     "/api/users/:path*",
+    "/api/simulations",
     // The bare GET /api/conversation-settings is deliberately NOT listed here
     // — it's public, called by the live conversation page at session start.
     // Only the per-language PATCH/DELETE sub-route is admin-gated.

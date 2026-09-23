@@ -30,7 +30,8 @@ const NAV_ITEMS: NavItem[] = [
         !p.startsWith("/admin/scoring") &&
         !p.startsWith("/admin/users") &&
         !p.startsWith("/admin/settings") &&
-        !p.startsWith("/admin/system-config")),
+        !p.startsWith("/admin/system-config") &&
+        !p.startsWith("/admin/simulator")),
   },
   {
     href: "/admin/upload",
@@ -64,6 +65,17 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
     isActive: (p) => p.startsWith("/admin/scoring"),
+  },
+  {
+    href: "/admin/simulator",
+    label: "Conversation simulator",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path d="M8 9h8M8 13h5" />
+      </svg>
+    ),
+    isActive: (p) => p.startsWith("/admin/simulator"),
   },
   {
     href: "/admin/users",

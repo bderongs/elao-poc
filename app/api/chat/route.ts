@@ -1,10 +1,10 @@
-import { getSystemPrompt, buildQuestionBank, type ConvLang } from "@/lib/conversation-prompts";
+import type { ConvLang } from "@/lib/conversation-prompts";
+import { buildExaminerPrompt } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralStreamText } from "@/lib/mistral";
 import { logServerEvent } from "@/lib/server-log";
-import { isCefrRung, type CefrRung } from "@/lib/cefr-rung";
+import type { CefrRung } from "@/lib/cefr-rung";
 import { chatProcessLabel } from "@/lib/turn-labels";
 import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
-import { OPENER_DOMAINS, isTopicDomain } from "@/lib/topic-domain";
 
 export const runtime = "nodejs";
 
@@ -71,21 +71,9 @@ export async function POST(req: Request) {
     (await req.json()) as ChatRequest;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
-  const targetRung: CefrRung = isCefrRung(rung) ? rung : "A2";
-  // Picked fresh per session rather than left to the model's own "vary it"
-  // judgment — live sessions showed the model defaulting to "where are you
-  // from" as the opener nearly every time regardless of that instruction.
-  const openerDomain = isStart ? OPENER_DOMAINS[Math.floor(Math.random() * OPENER_DOMAINS.length)] : undefined;
-  const promptOpts = {
-    ...(isTopicDomain(avoidDomain) ? { avoidDomain } : {}),
-    ...(isTopicDomain(avoidDomain) && isTopicDomain(switchToDomain) ? { switchToDomain } : {}),
-    ...(openerDomain ? { openerDomain } : {}),
-  };
-  // Narrow the bank to just this turn's target rung, and track which strings
-  // have already been offered this session — Track I-03. Called once, here,
-  // so the updatedUsedQuestions echoed back in "done" matches exactly what
-  // the LLM was shown (calling buildQuestionBank twice would desync them).
-  const { bankText, updatedUsedQuestions } = buildQuestionBank(targetRung, usedQuestions ?? []);
+  const { system, targetRung, updatedUsedQuestions } = buildExaminerPrompt({
+    language, rung, usedQuestions, isStart, avoidDomain, switchToDomain,
+  });
   const requestReceivedAt = Date.now();
   logServerEvent("chat_request_received", { turnLogId: logId, process, targetRung });
   const encoder = new TextEncoder();
@@ -153,7 +141,7 @@ export async function POST(req: Request) {
       try {
         const llmStream = mistralStreamText({
           model: mistralChatModel(),
-          system: getSystemPrompt(language, targetRung, bankText, promptOpts),
+          system,
           messages: [
             ...history.map(({ role, content }) => ({ role, content })),
             { role: "user", content: userMessage },

@@ -808,10 +808,10 @@ export default function Home() {
       micAudioCtxRef.current = ctx;
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 1024;
       source.connect(analyser);
       micAnalyserRef.current = analyser;
-      const data = new Uint8Array(analyser.frequencyBinCount);
+      const data = new Uint8Array(analyser.fftSize);
       micLevelIntervalRef.current = setInterval(() => {
         analyser.getByteTimeDomainData(data);
         let sumSquares = 0;
@@ -820,7 +820,10 @@ export default function Home() {
           sumSquares += v * v;
         }
         const rms = Math.sqrt(sumSquares / data.length);
-        setMicLevel(Math.min(1, rms * 4)); // empirical gain — normal speech should read well above the floor
+        // Log (dB) scale, like a real VU meter: -55dB (room noise) → 0, -15dB (loud) → 1.
+        // Linear RMS crushes normal speech (~0.02–0.1) into the bottom of the bar.
+        const db = 20 * Math.log10(Math.max(rms, 1e-5));
+        setMicLevel(Math.min(1, Math.max(0, (db + 55) / 40)));
       }, 80);
     } catch (e) {
       console.warn("Mic level meter unavailable:", e);

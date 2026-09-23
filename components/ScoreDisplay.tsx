@@ -173,7 +173,7 @@ export function CefrPanel({
       style={
         light
           ? { padding: 24, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }
-          : { padding: 12, background: "linear-gradient(135deg, #1e3a8a 0%, #4f46e5 100%)", borderRadius: 8 }
+          : { padding: 12, background: "#141D33", borderRadius: 10 }
       }
     >
       {/* Header row */}

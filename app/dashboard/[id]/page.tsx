@@ -63,7 +63,7 @@ export default async function DashboardSessionDetailPage({
 
       {cefrResult ? (
         <div className={adminStyles.scoreCardWrap}>
-          <CefrPanel result={cefrResult} pronunciationAvg={session.pronunciation_scores} labels={FR_LABELS} />
+          <CefrPanel result={cefrResult} pronunciationAvg={session.pronunciation_scores} labels={FR_LABELS} theme="light" />
         </div>
       ) : (
         <div className={adminStyles.emptyState}>Aucune évaluation enregistrée pour cette session.</div>

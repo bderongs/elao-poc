@@ -28,70 +28,85 @@ export default async function ResultsSavedPage({
       style={{
         minHeight: "100vh",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#0f172a",
-        color: "#e5e7eb",
-        fontFamily: "system-ui, sans-serif",
+        flexDirection: "column",
+        background: "#F7F5F0",
+        color: "#141D33",
+        fontFamily: "'DM Sans',system-ui,sans-serif",
       }}
     >
-      <div
-        style={{
-          background: "#1e293b",
-          padding: 32,
-          borderRadius: 8,
-          width: 360,
-          textAlign: "center",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
+      <div style={{ padding: "22px 36px" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
+            <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
+            <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
+            <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
+          </div>
+          <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, letterSpacing: "0.02em", lineHeight: 1 }}>
+            ELAO
+          </span>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px 60px" }}>
         <div
           style={{
-            width: 48,
-            height: 48,
-            borderRadius: "50%",
-            background: "rgba(74, 222, 128, 0.15)",
-            color: "#4ade80",
-            fontSize: 24,
+            width: "100%",
+            maxWidth: 400,
+            background: "#FFFFFF",
+            border: "1px solid #E4E0D7",
+            borderRadius: 14,
+            padding: 32,
+            textAlign: "center",
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            justifyContent: "center",
-            margin: "0 auto",
+            gap: 14,
           }}
         >
-          ✓
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: "50%",
+              background: "#FDF0D0",
+              border: "1px solid #F0DDA8",
+              color: "#8A6410",
+              fontSize: 22,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ✓
+          </div>
+          <h1 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 28, fontWeight: 400, letterSpacing: "-0.02em" }}>
+            Votre compte est prêt
+          </h1>
+          <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
+            Votre résultat a été sauvegardé. Vous pourrez le retrouver la prochaine fois que vous vous connecterez.
+          </p>
+          <Link
+            href="/dashboard"
+            style={{
+              marginTop: 8,
+              padding: "14px 32px",
+              borderRadius: 10,
+              background: "#141D33",
+              color: "#fff",
+              fontFamily: "'Outfit',sans-serif",
+              fontWeight: 500,
+              fontSize: 17,
+              textDecoration: "none",
+            }}
+          >
+            Voir mes sessions
+          </Link>
+          <Link
+            href="/"
+            style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, textDecoration: "none" }}
+          >
+            Repasser un test
+          </Link>
         </div>
-        <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Ton compte est prêt</h1>
-        <p style={{ fontSize: 13, color: "#94a3b8", margin: 0, lineHeight: 1.5 }}>
-          Ton résultat a été sauvegardé. Tu pourras le retrouver la prochaine fois que tu te connectes.
-        </p>
-        <Link
-          href="/dashboard"
-          style={{
-            marginTop: 8,
-            padding: "8px 10px",
-            borderRadius: 6,
-            background: "#4f46e5",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: 14,
-            textDecoration: "none",
-          }}
-        >
-          Voir mes sessions
-        </Link>
-        <Link
-          href="/"
-          style={{
-            fontSize: 12,
-            color: "#94a3b8",
-            textDecoration: "underline",
-          }}
-        >
-          Repasser un test
-        </Link>
       </div>
     </div>
   );
