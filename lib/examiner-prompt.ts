@@ -15,18 +15,24 @@ export function buildExaminerPrompt(params: {
   isStart?: boolean;
   avoidDomain?: string;
   switchToDomain?: string;
+  /** The speaker didn't understand the last question (button or detected phrase, see lib/comprehension.ts) — rephrase it more simply instead of moving on. */
+  clarify?: boolean;
 }): { system: string; targetRung: CefrRung; updatedUsedQuestions: string[] } {
-  const { language, rung, usedQuestions, isStart, avoidDomain, switchToDomain } = params;
+  const { language, rung, usedQuestions, isStart, avoidDomain, switchToDomain, clarify } = params;
   const targetRung: CefrRung = isCefrRung(rung) ? rung : "A2";
   // Picked fresh per session rather than left to the model's own "vary it"
   // judgment — live sessions showed the model defaulting to "where are you
   // from" as the opener nearly every time regardless of that instruction.
   const openerDomain = isStart ? OPENER_DOMAINS[Math.floor(Math.random() * OPENER_DOMAINS.length)] : undefined;
-  const promptOpts = {
-    ...(isTopicDomain(avoidDomain) ? { avoidDomain } : {}),
-    ...(isTopicDomain(avoidDomain) && isTopicDomain(switchToDomain) ? { switchToDomain } : {}),
-    ...(openerDomain ? { openerDomain } : {}),
-  };
+  // A clarify turn re-asks the current question, so a topic switch request
+  // would contradict it — it wins over avoidDomain/switchToDomain.
+  const promptOpts = clarify
+    ? { clarify: true }
+    : {
+        ...(isTopicDomain(avoidDomain) ? { avoidDomain } : {}),
+        ...(isTopicDomain(avoidDomain) && isTopicDomain(switchToDomain) ? { switchToDomain } : {}),
+        ...(openerDomain ? { openerDomain } : {}),
+      };
   // Narrow the bank to just this turn's target rung, and track which strings
   // have already been offered this session — Track I-03. Called once, here,
   // so the updatedUsedQuestions echoed back matches exactly what the LLM was
@@ -35,6 +41,7 @@ export function buildExaminerPrompt(params: {
   return {
     system: getSystemPrompt(language, targetRung, bankText, promptOpts),
     targetRung,
-    updatedUsedQuestions,
+    // A rephrase doesn't consume new bank questions — don't burn this slice.
+    updatedUsedQuestions: clarify ? usedQuestions ?? [] : updatedUsedQuestions,
   };
 }

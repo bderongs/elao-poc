@@ -188,3 +188,112 @@ Baptiste ran a French session, reached C2 in the debug panel for 3 answers, but 
 ## Files touched
 
 `lib/session-config.ts` (new) · `lib/session-status.ts` (new) · `app/api/sessions/live/route.ts` (new) · `supabase/migrations/0010_session_status.sql` (new) · `lib/conversation-prompts.ts` · `lib/topic-domain.ts` · `app/api/chat/route.ts` · `app/page.tsx` · `lib/sessions-service.ts` · `lib/types.ts` · `middleware.ts` · `app/admin/(dashboard)/page.tsx` · `app/admin/(dashboard)/[id]/page.tsx` · `components/ScoreDisplay.tsx` · `doc/new_design/README.md`
+
+---
+---
+
+# Beta-tester round — dev plan (2026-09-28)
+
+Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24/25) plus the client's own opinions. New tracks **X–AB**. Items marked **⚠ finding** come from the code or the data, not from the feedback itself.
+
+## Summary
+
+| Track | Feedback | Status |
+|-------|----------|--------|
+| X | Finished sessions shown as "not finished" (and results missing) | ✅ fixed — root cause found (upload size limit), live check on Vercel pending |
+| Y | Léa doesn't notice the end of an answer, freezes, cuts testers off, stays stuck on a question | 🟡 partly done (freeze + "Je ne comprends pas"); silence timing still to do |
+| Z | Transcription wrong in DE/NL/FR, place names not recognised | ⬜ to do |
+| AA | Questions too hard / DELF-DALF-like, no warm-up, for/against arguments | ⬜ to do — question bank agreed |
+| AB | Levels compressed around B2 (72/100), C1/C2 hard to reach, "2-step" scoring felt harsher | ⬜ to investigate once sessions are saved again |
+
+**Order:** X → Z → AA → Y (rest) → AB.
+
+---
+
+## Track X — Sessions saved as "not finished" ✅
+
+**Feedback:** "There's still an issue with conversations shown as not finished when they are finished — maybe a cookie or browser issue."
+
+**⚠ finding — cause (DB check 2026-09-28):** migration `0010_session_status` is applied. The pattern is length-based: every full-length (~3.5 min) conversation stayed `in_progress` with no evaluation, including the whole beta series of 2026-09-24 18:39–19:01 (EN, ES, IT, NL ×2, DE); the two that saved that evening were short (96 s, 128 s). The final `POST /api/sessions` carried all audio as multipart: full-session recording (~3.3 MB) + one WAV per answer (~3.8 MB) ≈ **7 MB, above Vercel's 4.5 MB request limit**. The save was rejected before reaching the route, the error only went to the browser console, and the user still saw their result on screen. Consequence: **the three "B2 72/100" results from the feedback were never stored** and can't be inspected (see AB).
+
+**Done**
+- [x] **X-01** New public route `POST /api/sessions/audio-urls` (`createSessionAudioUploadUrls` in `lib/sessions-service.ts`): mints single-use signed Storage upload URLs in a fresh `<lang>/<date>/<uuid>/` folder (`session.<ext>`, `turn-<i>.<ext>`; extensions allow-listed).
+- [x] **X-02** `saveSession` (`app/page.tsx`) uploads the audio straight from the browser (`uploadToSignedUrl`, in parallel) and sends only paths to `POST /api/sessions`; the server accepts only paths matching the minted shape and the turn's own index. A failed upload loses that recording, never the session.
+- [x] **X-03** Failures now leave a trace: `session_save_failed` / `session_audio_upload_failed` client log events.
+- [x] **X-04** Tested locally end to end: 6.5 MB session file + turn file uploaded and linked; forged path and bad extension rejected; upload URL is single-use. Test row and files deleted.
+
+**To do**
+- [ ] **X-05** Deploy, run one full-length session on Vercel, confirm it ends `completed` with audio.
+- [ ] **X-06** (optional) Check Vercel logs for 413s on `POST /api/sessions` to confirm the diagnosis retroactively.
+- [ ] **X-07** (optional) Show the user a message if the save fails, instead of silence.
+
+---
+
+## Track Y — Turn-taking: freezes, cut-offs, stuck questions 🟡
+
+**Feedback:** NL/DE: "Léa didn't seem to understand when I stopped talking, it froze several times" (NL test restarted 3×). ES test 1: "I said *no comprendo*, she didn't rephrase, I was stuck on question 2." ES test 2: "she didn't give me time to answer, the next question sometimes came as if I had answered; I answered 'what's your brother's name' but she stayed stuck on it."
+
+**Done (uncommitted)**
+- [x] **Y-01** Deaf-session bug: an empty or failed transcription returned while still holding the turn lock, so every later answer was buffered and never processed. `abandonTurn` releases it and shows "Je n'ai pas bien entendu — pouvez-vous répéter ?".
+- [x] **Y-02** "Je ne comprends pas" button + detection of non-comprehension phrases in all 6 languages (`lib/comprehension.ts`) → Léa re-asks the same question more simply; a second failure switches to an easy concrete topic.
+
+**To do**
+- [ ] **Y-03** End-of-turn silence is 1.2 s for short answers (`SILENCE_MS_SHORT`, `lib/turn-vad.ts`) — too short for beginners searching for words. Lengthen it at A1/A2 rungs.
+- [ ] **Y-04** "Next question came as if I had answered": check the 2026-09-24 ES session (`cc410a09…`) logs for phantom turns (Léa's own voice or noise picked up as an answer).
+- [ ] **Y-05** "Stuck on the brother's name": confirm in the same logs that it was a bad or empty transcript (should be covered by Y-01 + Z-01).
+
+---
+
+## Track Z — Transcription quality ⬜
+
+**Feedback:** DE/NL/FR transcripts "completely off" although the audio is clear; NL: "Ik heb bezocht Luik" → "Ik heb bezocht leugen", "De leukste stad van België" → "The Luxe Stats in Belgium". Client: Voxtral transcribes best but must be told the language, it gets lost at low levels; suggests "Voxtral transcription validated by Azure for pronunciation".
+
+**⚠ finding:** the live path is Mistral's realtime Voxtral (`lib/realtime-stt.ts`), which opens the socket with only `?model=…` — **no language is sent**. The batch fallback does send it (`lib/stt/providers/voxtral.ts`). The Gradium switch is TTS (Léa's voice) and doesn't affect this. The client's suggested architecture is already the current one (Voxtral transcript, Azure + Deepgram pronunciation evidence judged by Mistral).
+
+**To do**
+- [ ] **Z-01** Pass the language to the realtime connection if the API accepts it; otherwise use the batch path (which sends it), at least for nl-BE/de and low rungs.
+- [ ] **Z-02** Check whether Voxtral accepts a context / expected-words hint (place names like Luik, Leuven).
+- [ ] **Z-03** Final evaluator still counts likely recognition errors as speaker errors (Track V finding 6) — the NL tester's "errors I didn't make". Enforce the "dismiss recognition errors" rule.
+- [ ] **Z-04** Tell the client their suggested Voxtral + Azure setup is already in place; the gap is the language hint.
+
+---
+
+## Track AA — Questions too hard ⬜
+
+**Feedback:** "I understand every word but have no idea how to answer — like DELF/DALF questions, no longer a language test." FR example: "If you had to justify this contradiction to a doctor, what would your arguments be?" Client proposals: start with 1–2 easy icebreakers even at C1/C2; keep C1/C2 questions accessible via a question pool; avoid asking to argue for or against an idea.
+
+**Decision (Baptiste, 2026-09-28):** build a curated question bank — this reverses the Track V decision "no hand-written C2 bank".
+
+**To do**
+- [ ] **AA-01** Warm-up: first 1–2 questions are easy everyday questions whatever the starting rung (they still count for pacing/evaluation as normal answers — to confirm).
+- [ ] **AA-02** Prompt rules: no for/against argumentation, no role-play hypotheticals ("justify to a doctor…", "convince a friend…"); C1/C2 difficulty comes from depth on personal experience and opinion, not from exam-style tasks.
+- [ ] **AA-03** Rewrite the C1/C2 entries of the existing question bank (the one sliced per rung in `lib/examiner-prompt.ts`) around personal experience; draft in FR, then translate for the 5 other languages; have the client review.
+- [ ] **AA-04** Make the model pick from the bank (or closely adapt a bank question) at C1/C2 instead of free-writing; follow-ups stay free.
+- [ ] **AA-05** Re-run the conversation simulator (`/admin/simulator`) at C1/C2 to check the new questions.
+
+---
+
+## Track AB — Level results ⬜ (kept in plan)
+
+**Feedback:** EN C2 → B2 (72), ES C1 → B2 (72), IT B1 → B2 (72), NL A2 → A1+, DE A2 → A1, DE A1 → A2; another tester EN B1 → B2 ("maybe overrated"), NL A2 → A2. Client: "without a starting level it's harder to reach C1/C2"; "not sure the new 2-step way is right — the previous model seemed better, the new one is harsher".
+
+**⚠ finding:** the three identical B2/72 results were lost by the Track X bug, so they can't be inspected. Three identical scores for C2/C1/B1 speakers suggest a default/fallback value or an LLM anchoring on 72 — check first once new sessions are saved.
+
+**To do**
+- [ ] **AB-01** After X ships: collect new tester sessions and inspect stored evaluations (axes, raw LLM score, bonus, fallback path) — especially any repeated 72.
+- [ ] **AB-02** Ask the client what "2 temps" means (live difficulty ladder + final evaluation? the new pronunciation system?) and which earlier behaviour they preferred.
+- [ ] **AB-03** Offline replay script (already planned in Track V): run stored sessions through old vs new scoring, list which change level.
+- [ ] **AB-04** Faster promotion when no starting level is given (Track V "level-promotion detection": jump ≥ 2 rungs on a clearly stronger answer, guarded by evidence).
+- [ ] **AB-05** Low levels (NL/DE A2 → A1): re-check after Z-01 — bad transcripts at low levels probably pulled scores down.
+
+---
+
+## Questions for the client
+1. What does "la nouvelle manière de fonctionner (en 2 temps)" refer to? (AB-02)
+2. Should warm-up answers count in the evaluation? (AA-01)
+3. Review of the C1/C2 question bank once drafted. (AA-03)
+4. After the X fix is deployed: can the testers redo one full session each so we have stored results to analyse? (AB-01)
+
+## Files touched (this round)
+
+`app/api/sessions/audio-urls/route.ts` (new) · `lib/comprehension.ts` (new) · `lib/tts/providers/gradium.ts` (new) · `lib/sessions-service.ts` · `app/page.tsx` · `middleware.ts` · `lib/supabase-browser.ts` · `app/api/chat/route.ts` · `lib/conversation-prompts.ts` · `lib/examiner-prompt.ts` · `lib/tts/registry.ts` · `lib/turn-labels.ts` · `.env.example`

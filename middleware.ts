@@ -24,6 +24,8 @@ export async function middleware(req: NextRequest) {
   // Every other /api/sessions* route (list, detail, replay-evaluate) is
   // admin-only.
   if (pathname === "/api/sessions" && req.method === "POST") return response;
+  // Signed upload URLs for that save's audio (browser uploads straight to Storage).
+  if (pathname === "/api/sessions/audio-urls" && req.method === "POST") return response;
   // Live-session incremental save (start + per-answer progress) — same public carve-out.
   if (pathname === "/api/sessions/live" && (req.method === "POST" || req.method === "PATCH")) return response;
 
@@ -47,6 +49,7 @@ export const config = {
     "/admin/:path*",
     "/api/sessions",
     "/api/sessions/live",
+    "/api/sessions/audio-urls",
     "/api/sessions/upload",
     "/api/sessions/speechace-import",
     "/api/sessions/:id",

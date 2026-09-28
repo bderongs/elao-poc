@@ -13,6 +13,7 @@ import { logClientEvent } from "@/lib/client-log";
 import { isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
 import { isTopicDomain, pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
+import { isNonComprehension } from "@/lib/comprehension";
 import { EvaluatingScreen } from "@/components/EvaluatingScreen";
 import { SessionResultsScreen } from "@/components/SessionResultsScreen";
 import { AuthNavLink } from "@/components/AuthNavLink";
@@ -62,6 +63,16 @@ const SKIP_TEXT: Record<Lang, string> = {
   es: "Prefiero saltarme esta pregunta.",
   it: "Preferisco saltare questa domanda.",
   de: "Ich überspringe diese Frage lieber.",
+};
+
+/** Sent to the examiner (never added to the transcript) when the user hits "Je ne comprends pas" — paired with `clarify: true`, which is what actually drives the simpler rephrase. */
+const CLARIFY_TEXT: Record<Lang, string> = {
+  fr: "Je n'ai pas compris la question.",
+  en: "I didn't understand the question.",
+  "nl-BE": "Ik heb de vraag niet begrepen.",
+  es: "No he entendido la pregunta.",
+  it: "Non ho capito la domanda.",
+  de: "Ich habe die Frage nicht verstanden.",
 };
 
 /** French word for small counts (0-3), used in the "N questions sur 3 terminées" caption. */
@@ -179,6 +190,8 @@ export default function Home() {
   const [isThinking, setIsThinking] = useState(false);
   /** Set when /api/chat fails outright (after retries) so the user isn't left staring at silence. */
   const [chatError, setChatError] = useState<string | null>(null);
+  /** Shown under the "À vous" pill when an answer was heard but transcribed to nothing — cleared as soon as the user speaks again or a turn starts. */
+  const [sttNotice, setSttNotice] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const audioBlobUrlRef = useRef<string | null>(null);
   /** `?debug=1` — fixed for the life of the page load, read once on mount. */
@@ -458,19 +471,13 @@ export default function Home() {
     form.append("evaluation", JSON.stringify(result ?? null));
     form.append("pronunciationScores", JSON.stringify(pronunciationScores));
 
-    if (audioBlob && audioBlob.size > 0) {
-      const ext = audioBlob.type.includes("ogg") ? "ogg" : "webm";
-      form.append("sessionAudio", audioBlob, `session.${ext}`);
-    }
-
     // Per-turn audio only exists as blob: object URLs (set once pass-2
     // pronunciation assessment finishes) — re-fetch each one to recover the
     // underlying Blob for upload, since blob: URLs don't survive past this tab.
     const turns = historyRef.current;
-    const turnsMeta: Array<{ role: string; content: string; pronunciation: unknown | null; hasAudio: boolean }> = [];
+    const turnBlobs: Array<{ index: number; ext: string; blob: Blob }> = [];
     for (let i = 0; i < turns.length; i++) {
       const m = turns[i];
-      let hasAudio = false;
       if (m.role === "user" && m.audioUrl?.startsWith("blob:")) {
         try {
           const blob = await (await fetch(m.audioUrl)).blob();
@@ -482,26 +489,70 @@ export default function Home() {
             // a clean, expected rejection instead of a confusing generic one,
             // and so the file in storage isn't mislabeled for future debugging.
             const ext = blob.type.includes("wav") ? "wav" : blob.type.includes("mp4") ? "m4a" : "webm";
-            form.append(`turnAudio_${i}`, blob, `turn-${i}.${ext}`);
-            hasAudio = true;
+            turnBlobs.push({ index: i, ext, blob });
           }
         } catch (e) {
           console.warn(`[save] could not read turn ${i} audio blob:`, e);
         }
       }
-      turnsMeta.push({
-        role: m.role,
-        content: m.content,
-        pronunciation: m.role === "user" ? m.pronunciation ?? null : null,
-        hasAudio,
-      });
     }
-    form.append("turns", JSON.stringify(turnsMeta));
+
+    // Audio goes straight from the browser to Storage (signed upload URLs),
+    // never through POST /api/sessions: a full-length session's ~7 MB of
+    // audio is over Vercel's 4.5 MB request limit, which silently failed
+    // every full-length save (see createSessionAudioUploadUrls). Best-effort:
+    // a failed upload loses that recording, never the session.
+    const sessionAudio = audioBlob && audioBlob.size > 0 ? audioBlob : null;
+    const sessionExt = sessionAudio ? (sessionAudio.type.includes("ogg") ? "ogg" : "webm") : null;
+    let sessionAudioPath: string | null = null;
+    const turnAudioPaths: Record<number, string> = {};
+    if (sessionAudio || turnBlobs.length) {
+      try {
+        const urlsRes = await fetch("/api/sessions/audio-urls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language, sessionExt, turns: turnBlobs.map(({ index, ext }) => ({ index, ext })) }),
+        });
+        if (!urlsRes.ok) throw new Error(`audio-urls HTTP ${urlsRes.status}`);
+        const targets = (await urlsRes.json()) as {
+          session: { path: string; token: string } | null;
+          turns: Record<number, { path: string; token: string }>;
+        };
+        const bucket = getSupabaseBrowser().storage.from("recordings");
+        const upload = async (target: { path: string; token: string }, blob: Blob): Promise<boolean> => {
+          const { error } = await bucket.uploadToSignedUrl(target.path, target.token, blob, { contentType: blob.type || undefined });
+          if (error) console.warn(`[save] audio upload failed (${target.path}):`, error.message);
+          return !error;
+        };
+        await Promise.all([
+          sessionAudio && targets.session
+            ? upload(targets.session, sessionAudio).then((ok) => { if (ok) sessionAudioPath = targets.session!.path; })
+            : null,
+          ...turnBlobs.map(({ index, blob }) => {
+            const target = targets.turns[index];
+            return target ? upload(target, blob).then((ok) => { if (ok) turnAudioPaths[index] = target.path; }) : null;
+          }),
+        ]);
+      } catch (e) {
+        console.warn("[save] audio upload skipped:", e);
+        logClientEvent("session_audio_upload_failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    if (sessionAudioPath) form.append("sessionAudioPath", sessionAudioPath);
+    form.append("turns", JSON.stringify(turns.map((m, i) => ({
+      role: m.role,
+      content: m.content,
+      pronunciation: m.role === "user" ? m.pronunciation ?? null : null,
+      audioPath: turnAudioPaths[i] ?? null,
+    }))));
 
     try {
       const res = await fetch("/api/sessions", { method: "POST", body: form });
       if (!res.ok) {
-        console.error("Session save error:", await res.text());
+        const detail = await res.text();
+        console.error("Session save error:", detail);
+        logClientEvent("session_save_failed", { status: res.status, detail: detail.slice(0, 300) });
         return;
       }
       const { id } = (await res.json()) as { id: string };
@@ -761,6 +812,14 @@ export default function Home() {
     void handleUserTurn(SKIP_TEXT[language] ?? SKIP_TEXT.fr);
   };
 
+  /** "Je ne comprends pas" — asks Léa to re-ask the current question more
+   *  simply. Not an answer: nothing is added to the transcript or evaluated,
+   *  and no confirm dialog (unlike "Passer", nothing is given up). */
+  const handleNotUnderstood = () => {
+    if (turnState !== "userSpeaking" || isProcessingRef.current) return;
+    void handleUserTurn(CLARIFY_TEXT[language] ?? CLARIFY_TEXT.fr, undefined, "clarify", { clarifyRequest: true });
+  };
+
   /** Cancels any in-progress caption word-reveal timers (see scheduleWordReveal). */
   function clearPendingReveals() {
     revealTimeoutsRef.current.forEach((id) => clearTimeout(id));
@@ -944,6 +1003,7 @@ export default function Home() {
     domainStreakRef.current = 0;
     setElapsed(0);
     setChatError(null);
+    setSttNotice(null);
     setIsThinking(false);
     setTurnState("thinking");
     setRepeatUsed(false);
@@ -1026,6 +1086,22 @@ export default function Home() {
       // turns would race instead of the second one correctly buffering.
       if (!willBuffer) isProcessingRef.current = true;
 
+      // Every early exit below MUST go through this. Returning with the claim
+      // above still held left isProcessingRef stuck true: every later answer
+      // was buffered and nothing ever flushed the buffer (only a finished
+      // avatar reply does), so the session went deaf until the 3-min timeout
+      // — seen live on a beginner's mumbled, transcribed-to-nothing answer.
+      const abandonTurn = (reason: string, notifyUser: boolean) => {
+        logClientEvent("turn_stt_empty", { turnLogId, buffered: willBuffer, reason });
+        if (willBuffer) return; // never claimed the turn — nothing to release
+        isProcessingRef.current = false;
+        setPartialUser("");
+        if (notifyUser) setSttNotice("Je n'ai pas bien entendu — pouvez-vous répéter ?");
+        // An answer spoken while this one was transcribing got buffered
+        // behind our claim — process it now instead of dropping it.
+        processBufferedRef.current();
+      };
+
       // The examiner's question this turn answers — captured now, synchronously,
       // before any await, so ET (fired below) judges the same question this
       // turn's eventual reply answers regardless of what else happens on
@@ -1052,7 +1128,11 @@ export default function Home() {
       startTurnRecording();
 
       const recording = await recordingPromise;
-      if (!recording) return; // false-alarm VAD trigger — nothing was captured
+      if (!recording) {
+        // False-alarm VAD trigger — nothing was captured, so no notice.
+        abandonTurn("no-recording", false);
+        return;
+      }
 
       // Blocking: unlike ET/EO below, A/history/ET all need this text — see
       // doc/assessment_process.md's "non-blocking, best-effort" section for
@@ -1090,10 +1170,14 @@ export default function Home() {
           wpm = data.wpm;
         } catch (e) {
           console.error("Transcribe failed:", e);
+          abandonTurn(`transcribe-failed: ${e instanceof Error ? e.message : String(e)}`, true);
           return;
         }
       }
-      if (!text.trim()) return; // no speech recognized
+      if (!text.trim()) {
+        abandonTurn(`empty-transcript (${sttPath}${fallbackReason ? `, ${fallbackReason}` : ""})`, true);
+        return;
+      }
 
       logClientEvent("turn_stt_final", {
         turnLogId, buffered: willBuffer, sttPath, sttLatencyMs: Date.now() - sttStartMs, fallbackReason,
@@ -1183,6 +1267,7 @@ export default function Home() {
       if (!micStreamRef.current) throw new Error("mic stream unavailable");
       vadRef.current = new TurnVad(micStreamRef.current, {
         onSpeechStart: () => {
+          setSttNotice(null);
           if (!isSpeakingRef.current) setPartialUser("…"); // listening indicator — no live captions without a streaming ASR
           setIsUserTalking(true);
         },
@@ -1229,7 +1314,12 @@ export default function Home() {
     await handleUserTurn("__START__");
   };
 
-  const handleUserTurn = async (userText: string, pronunciation?: PronunciationResult, turnLogId?: string) => {
+  const handleUserTurn = async (
+    userText: string,
+    pronunciation?: PronunciationResult,
+    turnLogId?: string,
+    opts?: { clarifyRequest?: boolean },
+  ) => {
     isProcessingRef.current = true;
     streamDoneRef.current = false;
     setIsThinking(true);
@@ -1237,8 +1327,14 @@ export default function Home() {
     setRepeatUsed(false);
     currentTurnAudioChunksRef.current = [];
     setChatError(null);
+    setSttNotice(null);
     const isStart = userText === "__START__";
     const isEnd   = userText === "__END__";
+    // Button click ("Je ne comprends pas"): not an answer, so it never enters
+    // history. Spoken "no entiendo"-style answers ARE real answers (kept and
+    // evaluated) but get the same simpler re-ask instead of a new question.
+    const clarifyButton = opts?.clarifyRequest === true;
+    const clarify = clarifyButton || (!isStart && !isEnd && isNonComprehension(userText));
     // H-01 latency instrumentation id — falls back to a synthetic one for the
     // opening/closing turns, which don't come from onFinal.
     const logId = turnLogId ?? (isStart ? "start" : isEnd ? "end" : "unknown");
@@ -1257,14 +1353,17 @@ export default function Home() {
       // rate-limit bursts) — lib/mistral-queue.ts caps concurrent Mistral
       // requests server-side, so the two calls now queue safely there instead
       // of blocking the examiner's next reply on the previous answer's score.
-      const newHistory: Msg[] = (isStart || isEnd)
+      const newHistory: Msg[] = (isStart || isEnd || clarifyButton)
         ? historyRef.current
         : [...historyRef.current, { role: "user", content: userText, pronunciation }];
 
-      if (!isStart && !isEnd) setHistory(newHistory);
+      if (!isStart && !isEnd && !clarifyButton) setHistory(newHistory);
+      if (clarify) logClientEvent("clarify_requested", { turnLogId: logId, source: clarifyButton ? "button" : "detected" });
       setStreamingAssistant("");
       clearPendingReveals();
 
+      // (a clarifyButton turn sends userText — CLARIFY_TEXT — to the model
+      // without it ever entering history, same as the start/end messages)
       const userMessage = isStart
         ? language === "fr"
           ? "Bonjour, démarrons la conversation."
@@ -1280,7 +1379,8 @@ export default function Home() {
       const abortController = new AbortController();
       chatAbortControllerRef.current = abortController;
       // Streak capped → steer to a concrete unvisited domain, not just "away from X".
-      const avoidDomain = domainStreakRef.current >= MAX_DOMAIN_STREAK ? currentDomainRef.current : null;
+      // (never on a clarify turn — that re-asks the current question, it can't also switch topic)
+      const avoidDomain = !clarify && domainStreakRef.current >= MAX_DOMAIN_STREAK ? currentDomainRef.current : null;
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1294,6 +1394,7 @@ export default function Home() {
           isStart,
           avoidDomain: avoidDomain ?? undefined,
           switchToDomain: avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomainsRef.current) : undefined,
+          clarify: clarify || undefined,
         }),
         signal: abortController.signal,
       });
@@ -1362,13 +1463,25 @@ export default function Home() {
             // rejects it outright — never let one in, regardless of what the
             // server sends.
             if (fullText.trim()) {
-              setHistory((h) => [...h, { role: "assistant", content: fullText }]);
+              setHistory((h) => {
+                // A button re-ask has no user turn between it and the original
+                // question — fold it into that assistant turn rather than
+                // appending a second assistant message in a row (keeps the
+                // roles alternating for Mistral; the transcript shows both).
+                const last = h[h.length - 1];
+                if (clarifyButton && last?.role === "assistant") {
+                  return [...h.slice(0, -1), { ...last, content: `${last.content}\n\n${fullText}` }];
+                }
+                return [...h, { role: "assistant", content: fullText }];
+              });
               // TT (non-blocking) — the closing remark never asks a question,
               // so there's nothing to classify there. recentExchange gives the
               // classifier the prior Q&A so it can resolve references like
               // "the lifestyle you just described" that the bare question
               // text can't be classified from on its own.
-              if (!isEnd) {
+              // Skipped for a clarify re-ask too: it's the same question
+              // again, and counting it would inflate the same-domain streak.
+              if (!isEnd && !clarify) {
                 const recentExchange = newHistory
                   .slice(-2)
                   .map((m) => `${m.role}: ${m.content}`)
@@ -1926,6 +2039,7 @@ export default function Home() {
                   <LevelBars count={8} barWidth={4} height={26} color="#8A6410" level={Math.max(micLevel, 0.1)} gapPx={4} />
                   <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>À vous — on vous écoute</span>
                 </div>
+                {sttNotice && <span style={{ fontSize: 15, color: "#B3542E" }}>{sttNotice}</span>}
                 <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
                   <span
                     onClick={handleRepeatQuestion}
@@ -1939,6 +2053,13 @@ export default function Home() {
                     }}
                   >
                     Répéter la question
+                  </span>
+                  <span
+                    onClick={handleNotUnderstood}
+                    className="elao-text-action"
+                    style={{ fontSize: 15, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+                  >
+                    Je ne comprends pas
                   </span>
                   <span
                     onClick={handleSkipQuestion}

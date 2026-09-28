@@ -33,6 +33,9 @@ interface ChatRequest {
   avoidDomain?: string;
   /** Concrete domain the next question must be about — picked client-side (lib/topic-domain.ts pickSwitchDomain) when avoidDomain is set. */
   switchToDomain?: string;
+  /** The speaker didn't understand the last question — "Je ne comprends pas"
+   *  button or a detected phrase (lib/comprehension.ts). Rephrase it simpler. */
+  clarify?: boolean;
 }
 
 // Speaking-rate presets. The conversation opens slow so low-level listeners
@@ -67,15 +70,15 @@ const NORMAL_RATE = "-3%";
  *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage, turnLogId, rung, usedQuestions, isStart, avoidDomain, switchToDomain } =
+  const { language, history, userMessage, turnLogId, rung, usedQuestions, isStart, avoidDomain, switchToDomain, clarify } =
     (await req.json()) as ChatRequest;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
   const { system, targetRung, updatedUsedQuestions } = buildExaminerPrompt({
-    language, rung, usedQuestions, isStart, avoidDomain, switchToDomain,
+    language, rung, usedQuestions, isStart, avoidDomain, switchToDomain, clarify,
   });
   const requestReceivedAt = Date.now();
-  logServerEvent("chat_request_received", { turnLogId: logId, process, targetRung });
+  logServerEvent("chat_request_received", { turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true } : {}) });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

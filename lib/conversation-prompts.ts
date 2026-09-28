@@ -247,6 +247,8 @@ export interface PromptOpts {
   /** Concrete domain the next question must be about (picked client-side, see pickSwitchDomain). */
   switchToDomain?: TopicDomain;
   openerDomain?: TopicDomain;
+  /** The speaker didn't understand the last question — rephrase it more simply (see lib/comprehension.ts). */
+  clarify?: boolean;
 }
 
 function buildCommonRules(
@@ -259,7 +261,7 @@ function buildCommonRules(
   const bridges = BRIDGE_PHRASES[language];
   const followups = FOLLOWUP_PROMPTS[language];
   const closing = CLOSING_EXAMPLES[language];
-  const { avoidDomain, openerDomain, switchToDomain } = opts;
+  const { avoidDomain, openerDomain, switchToDomain, clarify } = opts;
   // Foundation (A1/A2) and Mastery (C2) get small, additive deltas on top of
   // the shared rules below instead of separate prompts — see
   // doc/adaptive-levels-plan.md §3.2. B1-C1 (the tuned, working range) reads
@@ -282,6 +284,7 @@ Strict rules:
 - No bullet points, no markdown — this is voice.
 - NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "I understand", "I understood", "Understood", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead.
 - Do NOT be encouraging or complimentary about the learner's language ability. Stay neutral and professional.
+- COMPREHENSION: if the speaker says they did not understand, cannot answer in ${languageName}, find the question too hard, or asks you to repeat — in any language — do NOT acknowledge it with a pivot and move to a new question. Ask the SAME question again in simpler words — shorter, the most common everyday words, or as an easy choice ("X or Y?"), with no pivot word before it.
 
 DIFFICULTY LADDER — you run a live, branching oral exam that converges on the speaker's true level, exactly like a human examiner. There is NO fixed question schedule; a separate process judges each answer and tells you which rung to target next.
 
@@ -313,6 +316,10 @@ ${
           ? ` New subject: ${DOMAIN_LABEL[switchToDomain]}. Idea to rephrase in ${languageName} and adapt freely: "${SWITCH_SEEDS[switchToDomain][rung === "C1" || rung === "C2" ? "abstract" : "everyday"][Math.floor(Math.random() * 2)]}".`
           : ""
       } Ask a fresh standalone question about the new subject — NOT a follow-up on their last answer, and NOT another angle on ${DOMAIN_LABEL[avoidDomain]} (another city, another neighbourhood, or their reasons for living there are still the same subject). Open with a short neutral pivot from the list above (never a recap of their answer) and, only if the shift would feel abrupt, one bridge phrase from the list above. Everything you say stays in ${languageName}.`
+    : ""
+}${
+  clarify
+    ? `\n[INTERNAL DIRECTION — never say, quote or translate this note aloud; it is not part of the conversation] The speaker did not understand your last question. Do NOT move on and do NOT change topic: ask the SAME question again, made much simpler — at most 8 words, the most common everyday words, present tense, no idioms. When it helps, turn it into an easy choice ("X or Y?") or a yes/no question: right now being understood matters more than the "avoid yes/no questions" rule above. No pivot word, no bridge, no comment on their difficulty, no apology — just the simpler question, in ${languageName}. If your last question was ALREADY a simplified re-ask and they still did not understand, drop that subject and ask a different, very easy question about something concrete and familiar (food, family, the weather) instead.`
     : ""
 }${
   openerDomain

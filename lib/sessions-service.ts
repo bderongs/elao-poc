@@ -195,8 +195,70 @@ interface TurnMeta {
   role: "user" | "assistant";
   content: string;
   pronunciation: unknown | null;
-  hasAudio: boolean;
+  /** Storage path the browser already uploaded this turn's audio to (see createSessionAudioUploadUrls). */
+  audioPath?: string | null;
 }
+
+// ─── live session audio: direct browser → Storage uploads ──────────────────
+//
+// The live session's audio (whole-session recording + one WAV per answer)
+// used to travel inside the POST /api/sessions form. A full-length session
+// is ~7 MB of audio, over Vercel's 4.5 MB request-body limit, so the save
+// was rejected before reaching the route: the row stayed 'in_progress' with
+// no evaluation (every full-length beta session on 2026-09-24). The browser
+// now uploads each file straight to Storage with a signed upload URL minted
+// here, and POST /api/sessions only receives the resulting storage paths.
+
+const AUDIO_EXTS = ["wav", "webm", "ogg", "m4a"] as const;
+type AudioExt = (typeof AUDIO_EXTS)[number];
+const MAX_TURN_UPLOADS = 100;
+
+export interface AudioUploadTarget {
+  path: string;
+  token: string;
+}
+
+/**
+ * Mints signed upload URLs in a fresh, unguessable folder
+ * (`<language>/<date>/<uuid>/`): `session.<ext>` for the whole-session
+ * recording, `turn-<i>.<ext>` for each answer. Public (a guest has no
+ * account), but a URL only lets its holder write that one path, once.
+ */
+export async function createSessionAudioUploadUrls(params: {
+  language: string;
+  sessionExt?: string | null;
+  turns: Array<{ index: number; ext: string }>;
+}): Promise<{ session: AudioUploadTarget | null; turns: Record<number, AudioUploadTarget> }> {
+  const bucket = getSupabaseServer().storage.from("recordings");
+  const language = /^[a-zA-Z-]{2,8}$/.test(params.language) ? params.language : "en";
+  const folder = `${language}/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}`;
+  const isExt = (e: unknown): e is AudioExt => AUDIO_EXTS.includes(e as AudioExt);
+
+  const sign = async (path: string): Promise<AudioUploadTarget | null> => {
+    const { data, error } = await bucket.createSignedUploadUrl(path);
+    if (error || !data) {
+      console.error("[sessions] signed upload url failed:", path, error?.message);
+      return null;
+    }
+    return { path: data.path, token: data.token };
+  };
+
+  const [session, ...turnTargets] = await Promise.all([
+    isExt(params.sessionExt) ? sign(`${folder}/session.${params.sessionExt}`) : Promise.resolve(null),
+    ...params.turns
+      .slice(0, MAX_TURN_UPLOADS)
+      .map((t) => (Number.isInteger(t.index) && t.index >= 0 && isExt(t.ext) ? sign(`${folder}/turn-${t.index}.${t.ext}`) : Promise.resolve(null))),
+  ]);
+  const turns: Record<number, AudioUploadTarget> = {};
+  params.turns.slice(0, MAX_TURN_UPLOADS).forEach((t, i) => {
+    if (turnTargets[i]) turns[t.index] = turnTargets[i]!;
+  });
+  return { session, turns };
+}
+
+/** Only paths shaped like the ones createSessionAudioUploadUrls mints are accepted back — the save route is public. */
+const SESSION_AUDIO_PATH = /^[a-zA-Z-]{2,8}\/\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}\/session\.(wav|webm|ogg|m4a)$/;
+const TURN_AUDIO_PATH = /^[a-zA-Z-]{2,8}\/\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}\/turn-(\d+)\.(wav|webm|ogg|m4a)$/;
 
 function parseJsonField<T>(form: FormData, key: string, fallback: T): T {
   const raw = form.get(key) as string | null;
@@ -209,8 +271,9 @@ function parseJsonField<T>(form: FormData, key: string, fallback: T): T {
 }
 
 /**
- * Persists a completed session: uploads the whole-session recording and each
- * turn's recording to Storage, then writes `sessions` + `session_turns`.
+ * Persists a completed session: writes `sessions` + `session_turns`, linking
+ * the whole-session and per-turn recordings the browser has already uploaded
+ * (see createSessionAudioUploadUrls — the form carries only their paths).
  * Called from POST /api/sessions (the public write path — the live
  * conversation UI posts here at the end of a session; `userId` is resolved
  * server-side by the route from the request's own auth cookie, never trusted
@@ -235,23 +298,10 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   const pronunciationScores = parseJsonField(form, "pronunciationScores", null);
   const turns = parseJsonField<TurnMeta[]>(form, "turns", []);
 
-  const datePrefix = new Date().toISOString().slice(0, 10);
-
-  // ── whole-session recording (listen-back) ──
-  const sessionAudio = form.get("sessionAudio") as Blob | null;
-  let audioUrl: string | null = null;
-  if (sessionAudio && sessionAudio.size > 0) {
-    const ext = sessionAudio.type.includes("ogg") ? "ogg" : "webm";
-    const path = `${language}/${datePrefix}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage
-      .from("recordings")
-      .upload(path, sessionAudio, { contentType: sessionAudio.type });
-    if (error) {
-      console.error("[sessions] session audio upload failed:", error.message);
-    } else {
-      audioUrl = supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;
-    }
-  }
+  // ── whole-session recording (listen-back) — already uploaded by the browser ──
+  const publicUrl = (path: string) => supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;
+  const sessionAudioPath = (form.get("sessionAudioPath") as string | null) ?? "";
+  const audioUrl = SESSION_AUDIO_PATH.test(sessionAudioPath) ? publicUrl(sessionAudioPath) : null;
 
   const sessionFields = {
     language,
@@ -320,21 +370,9 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
 
   for (let i = 0; i < turns.length; i++) {
     const meta = turns[i];
-    let turnAudioUrl: string | null = null;
-    if (meta.hasAudio) {
-      const file = form.get(`turnAudio_${i}`) as Blob | null;
-      if (file && file.size > 0) {
-        const path = `${language}/${datePrefix}/${sessionId}/turn-${i}.wav`;
-        const { error } = await supabase.storage
-          .from("recordings")
-          .upload(path, file, { contentType: file.type || "audio/wav" });
-        if (error) {
-          console.warn(`[sessions] turn ${i} audio upload failed:`, error.message);
-        } else {
-          turnAudioUrl = supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;
-        }
-      }
-    }
+    // Already uploaded by the browser; the path must also name THIS turn's index.
+    const match = meta.audioPath ? TURN_AUDIO_PATH.exec(meta.audioPath) : null;
+    const turnAudioUrl = match && Number(match[1]) === i ? publicUrl(meta.audioPath!) : null;
     turnRows.push({
       session_id: sessionId,
       turn_index: i,

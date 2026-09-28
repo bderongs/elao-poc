@@ -17,6 +17,7 @@
 export function chatProcessLabel(turnLogId: string): string {
   if (turnLogId === "start") return "A1";
   if (turnLogId === "end") return "A_end";
+  if (turnLogId === "clarify") return "A_clarify"; // "Je ne comprends pas" button — a rephrase, not a reply to an answer
   const m = turnLogId.match(/^turn-(\d+)$/);
   return m ? `A${Number(m[1]) + 1}` : "A?";
 }
