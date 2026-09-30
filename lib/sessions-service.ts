@@ -9,6 +9,7 @@ import { getSystemConfig } from "@/lib/system-config";
 import { isCefrRung } from "@/lib/cefr-rung";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
+import type { LadderRecord } from "@/lib/session-length";
 
 // Single source of truth for reading/writing sessions — used by both the
 // /api/sessions* route handlers and the admin pages (which call these
@@ -181,8 +182,12 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
         }))
       : ((turns ?? []) as TurnRow[]);
 
+  // Read on its own and best-effort, like saveLadder: an environment without
+  // migration 0011 must still show the session.
+  const { data: ladderRow } = await supabase.from("sessions").select("ladder_json").eq("id", id).maybeSingle();
+
   return {
-    session: session as SessionDetailRow,
+    session: { ...(session as SessionDetailRow), ladder_json: (ladderRow?.ladder_json ?? null) as LadderRecord | null },
     turns: turnRows,
     evaluations: (evaluations ?? []) as EvaluationRow[],
     turnEvaluations,
@@ -297,6 +302,7 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   const evaluation = parseJsonField(form, "evaluation", null);
   const pronunciationScores = parseJsonField(form, "pronunciationScores", null);
   const turns = parseJsonField<TurnMeta[]>(form, "turns", []);
+  const ladder = sanitizeLadder(parseJsonField<unknown>(form, "ladder", null));
 
   // ── whole-session recording (listen-back) — already uploaded by the browser ──
   const publicUrl = (path: string) => supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;
@@ -355,6 +361,7 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   }
 
   const sessionId = sessionRow.id as string;
+  if (ladder) await saveLadder(sessionId, ladder);
 
   if (userId) await upsertProfilePreference(userId, language, cefrLevel);
 
@@ -399,6 +406,28 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
  * createSessionFromForm. Both are public (a guest has no account) and only
  * ever touch 'in_progress' conversation rows the caller may own.
  */
+/**
+ * sessions.ladder_json comes from public endpoints (the live save and the
+ * final save) — accept only a plain object of bounded size with a steps
+ * array; it's diagnostic data, so anything else is just dropped.
+ */
+function sanitizeLadder(raw: unknown): LadderRecord | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (!Array.isArray((raw as { steps?: unknown }).steps)) return null;
+  if (JSON.stringify(raw).length > 20_000) return null;
+  return raw as LadderRecord;
+}
+
+/**
+ * Written separately from the session's own fields, best-effort: the ladder
+ * is diagnostic, and a missing column (migration 0011 not yet run on an
+ * environment) must never fail — and so lose — the session save itself.
+ */
+async function saveLadder(sessionId: string, ladder: LadderRecord): Promise<void> {
+  const { error } = await getSupabaseServer().from("sessions").update({ ladder_json: ladder }).eq("id", sessionId);
+  if (error) console.warn("[sessions] ladder_json not saved:", error.message);
+}
+
 export async function startLiveSession(language: string, userId: string | null): Promise<{ id: string }> {
   const { data, error } = await getSupabaseServer()
     .from("sessions")
@@ -411,7 +440,7 @@ export async function startLiveSession(language: string, userId: string | null):
 
 export async function saveLiveProgress(
   id: string,
-  progress: { durationSeconds: number; turns: Array<{ role: string; content: string; pronunciation: unknown | null }> },
+  progress: { durationSeconds: number; turns: Array<{ role: string; content: string; pronunciation: unknown | null }>; ladder?: unknown },
   userId: string | null,
 ): Promise<void> {
   let q = getSupabaseServer()
@@ -425,8 +454,10 @@ export async function saveLiveProgress(
     .eq("status", "in_progress")
     .eq("source", "conversation");
   q = userId ? q.or(`user_id.is.null,user_id.eq.${userId}`) : q.is("user_id", null);
-  const { error } = await q;
+  const { data, error } = await q.select("id").maybeSingle();
   if (error) throw new Error(error.message);
+  const ladder = sanitizeLadder(progress.ladder ?? null);
+  if (data && ladder) await saveLadder(id, ladder);
 }
 
 /**

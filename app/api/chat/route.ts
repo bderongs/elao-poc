@@ -1,5 +1,5 @@
 import type { ConvLang } from "@/lib/conversation-prompts";
-import { buildExaminerPrompt } from "@/lib/examiner-prompt";
+import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralStreamText } from "@/lib/mistral";
 import { logServerEvent } from "@/lib/server-log";
 import type { CefrRung } from "@/lib/cefr-rung";
@@ -20,12 +20,13 @@ interface ChatRequest {
    *  set by ET's most recently COMPLETED result (lib/level-assessment.ts),
    *  best-effort/non-blocking. This call no longer decides its own pacing. */
   rung?: CefrRung;
-  /** Bank question strings already offered this session (any rung), from
+  /** Bank question ids already offered this session (any rung), from
    *  app/page.tsx's usedQuestionsRef — Track I-03 within-session repeat-avoidance. */
   usedQuestions?: string[];
-  /** True for the opening turn ("__START__") — triggers a random openerDomain
-   *  pick below (see lib/topic-domain.ts) instead of letting the model default
-   *  to "where are you from" every session. */
+  /** C1/C2 bank question + follow-up state, from app/page.tsx's bankStateRef (see lib/examiner-prompt.ts). */
+  bankState?: BankState;
+  /** True for the opening turn ("__START__") — the opener comes from the
+   *  warm-up bank (lib/question-bank/warmup.ts). */
   isStart?: boolean;
   /** Life domain to steer AWAY from this turn — set by app/page.tsx once TT
    *  (lib/topic-tracking.ts) has tagged the same domain 2 turns running,
@@ -58,7 +59,7 @@ const NORMAL_RATE = "-3%";
  *                              actual playback instead of the raw token
  *                              stream, which typically finishes well before
  *                              any audio is ready.
- *              event: done  → { fullText, usedQuestions }
+ *              event: done  → { fullText, usedQuestions, bankState }
  *              event: error → { stage, message }
  *
  * Latency strategy:
@@ -70,15 +71,18 @@ const NORMAL_RATE = "-3%";
  *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage, turnLogId, rung, usedQuestions, isStart, avoidDomain, switchToDomain, clarify } =
+  const { language, history, userMessage, turnLogId, rung, usedQuestions, bankState, isStart, avoidDomain, switchToDomain, clarify } =
     (await req.json()) as ChatRequest;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
-  const { system, targetRung, updatedUsedQuestions } = buildExaminerPrompt({
-    language, rung, usedQuestions, isStart, avoidDomain, switchToDomain, clarify,
+  const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
+    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify,
   });
   const requestReceivedAt = Date.now();
-  logServerEvent("chat_request_received", { turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true } : {}) });
+  logServerEvent("chat_request_received", {
+    turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true } : {}),
+    ...(updatedBankState.currentId ? { bankQuestionId: updatedBankState.currentId, bankFollowUp: updatedBankState.followUpDone === true } : {}),
+  });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -209,7 +213,7 @@ export async function POST(req: Request) {
       // either content or tool_calls, but not none", permanently breaking the
       // rest of the session over one transient failure.
       if (fullText.trim()) {
-        send("done", JSON.stringify({ fullText, usedQuestions: updatedUsedQuestions }));
+        send("done", JSON.stringify({ fullText, usedQuestions: updatedUsedQuestions, bankState: updatedBankState }));
       }
       logServerEvent("chat_stream_done", { turnLogId: logId, process, durationMs: Date.now() - requestReceivedAt });
       controller.close();

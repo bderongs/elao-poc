@@ -10,6 +10,7 @@ import { ScoreBreakdownPanel } from "@/components/ScoreBreakdownPanel";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { ProviderConfigTable } from "@/components/ProviderConfigTable";
+import { LadderPanel } from "@/components/LadderPanel";
 import { listProviders } from "@/lib/llm/registry";
 import { listProviders as listPronunciationProviders } from "@/lib/pronunciation/registry";
 import { buildScoreBreakdown } from "@/lib/score-breakdown";
@@ -198,6 +199,14 @@ export default async function AdminSessionDetailPage({
           )}
         </CollapsibleSection>
       </div>
+
+      {session.ladder_json && (
+        <div style={{ marginTop: 24 }}>
+          <CollapsibleSection title="Difficulty ladder & session length">
+            <LadderPanel ladder={session.ladder_json} durationSeconds={session.duration_seconds} finalLevel={session.cefr_level} />
+          </CollapsibleSection>
+        </div>
+      )}
 
       <div style={{ marginTop: 24 }}>
         <CollapsibleSection title="Transcript">

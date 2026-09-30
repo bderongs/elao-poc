@@ -14,7 +14,7 @@ Items marked **⚠ finding** contain something the client's remark doesn't say b
 | Q | Show the end-of-session feedback in admin session reports | ✅ done |
 | R | Filter background noise / coughs | ⏸ analysed, **parked by decision** — nothing built |
 | S | More natural acknowledgements / transitions (no English "topic switch required now") | ✅ done (+ topic-switch enforcement, see W) — native review of the lists open |
-| T | All sessions visible in admin | ✅ done — sessions now saved incrementally, unfinished ones shown. **Prod migration still to run** |
+| T | All sessions visible in admin | ✅ done — sessions now saved incrementally, unfinished ones shown (migration applied — single Supabase project) |
 | U | "Votre niveau en 3 minutes" instead of "Trois questions" | ✅ done |
 | V | Let a native reach C2 | 🔎 analysed with real data; proposal written, **not built** |
 | W | Bugs found in the 2026-09-21 native test session | ✅ pronunciation-average bug fixed; ✅ topic-switch enforcement rebuilt |
@@ -87,14 +87,14 @@ The topic-switch *enforcement* (why the rule didn't actually change topics) is i
 
 ---
 
-## Track T — Every session available in admin ✅ (prod migration pending)
+## Track T — Every session available in admin ✅
 
 **Ask:** "Make all sessions available in admin."
 
 **Cause (⚠ finding):** the admin list had no filter — the missing sessions were **never saved**. A session was written exactly once, at the very end, in one request carrying the transcript, scores and all audio. A closed tab, crash, network drop or failed final save left no trace.
 
 **Done** (design agreed with Baptiste: text + pronunciation only for unfinished sessions; row created at the first answer)
-- [x] **Migration `supabase/migrations/0010_session_status.sql`**: `sessions.status` (`in_progress` | `completed`, default `completed` so all existing / upload / Speechace rows stay completed) and `last_activity_at`. **Applied to the dev project (ELAO POC). Not applied to production — must be run there.**
+- [x] **Migration `supabase/migrations/0010_session_status.sql`**: `sessions.status` (`in_progress` | `completed`, default `completed` so all existing / upload / Speechace rows stay completed) and `last_activity_at`. **Applied.** There is only one Supabase project (`ootlydfnbghchqolxbru`), shared by dev and production — no separate production run needed.
 - [x] **Incremental save**: new public endpoint `POST/PATCH /api/sessions/live` (`middleware.ts` carve-out). The client (`syncLiveProgress` in `app/page.tsx`) creates the row at the first answer and rewrites the transcript + pronunciation JSON ~1.5 s after each change. The end-of-session save (`POST /api/sessions`) now **finalises that same row** (audio, evaluation, scores, `status = completed`) and falls back to a plain insert if the live row is missing — a session is never lost. The live endpoints only ever touch `in_progress` conversation rows the caller may own.
 - [x] **Admin**: Status column (in progress / not finished / completed) and an All / Completed / Not finished filter on the list; the detail page shows a banner and the transcript (from the `transcript` column) for unfinished sessions and hides the eval-lab controls (no recording / evaluation). "Not finished" = `in_progress` with no activity for 10 min, computed at read time (`lib/session-status.ts`, no cron).
 - [x] Tested end-to-end on the dev DB via the API (start → progress → finalise: same row updated, no duplicate, turns saved once); test row deleted.
@@ -102,7 +102,6 @@ The topic-switch *enforcement* (why the rule didn't actually change topics) is i
 **Limits / open**
 - Unfinished sessions have **no audio and no evaluation**. Uploading each turn's audio as it happens was considered and deferred (extra upload per answer).
 - Someone who opens the page and leaves before the first answer creates no row (by design).
-- [ ] Run migration 0010 on **production**.
 - [ ] Live browser test: start a session, answer once or twice, close the tab, check `/admin` (should show "in progress", then "not finished" after 10 min).
 - [ ] Old T-01 (ask the client for a concrete missing session) is no longer needed to *fix* this, but useful to confirm it was the cause.
 - Optional later: search/filter by user/language/date, page-size selector, total-vs-visible count (old T-03/T-04).
@@ -179,7 +178,7 @@ Baptiste ran a French session, reached C2 in the debug panel for 3 answers, but 
 ## What still needs doing
 
 1. **Commit** the working tree (nothing is committed yet).
-2. **Run migration `0010_session_status.sql` on production.**
+2. ~~Run migration 0010 on production~~ — not needed: single Supabase project for dev and prod, already applied.
 3. Live checks: unfinished-session flow (Track T), spoken "Léa" in each language (P-05), native review of pivot/bridge lists (Track S).
 4. **Track V** when ready: more native sessions + a non-native control → offline replay script → C2 floor rule, evaluator tightening, promotion-detection change.
 5. **Track R** stays parked until a concrete cough/noise case shows up.
@@ -202,11 +201,12 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 |-------|----------|--------|
 | X | Finished sessions shown as "not finished" (and results missing) | ✅ fixed — root cause found (upload size limit), live check on Vercel pending |
 | Y | Léa doesn't notice the end of an answer, freezes, cuts testers off, stays stuck on a question | 🟡 partly done (freeze + "Je ne comprends pas"); silence timing still to do |
-| Z | Transcription wrong in DE/NL/FR, place names not recognised | ⬜ to do |
-| AA | Questions too hard / DELF-DALF-like, no warm-up, for/against arguments | ⬜ to do — question bank agreed |
+| Z | Transcription wrong in DE/NL/FR, place names not recognised | 🟡 VAD audio fix done; Gradium tried and dropped on accuracy; now Mistral realtime for all languages (batch one switch away) — live check at low levels to do |
+| AA | Questions too hard / DELF-DALF-like, no warm-up, for/against arguments | 🟡 question bank built (6 languages); simulator + live check and client review to do |
 | AB | Levels compressed around B2 (72/100), C1/C2 hard to reach, "2-step" scoring felt harsher | ⬜ to investigate once sessions are saved again |
+| AC | *(Baptiste's idea)* Adaptive session length: stop early when the level is clear, run longer when it isn't | 🟡 built in **shadow mode** (records only); calibrate, then switch on |
 
-**Order:** X → Z → AA → Y (rest) → AB.
+**Order:** X → Z → AA → Y (rest) → AB. AB-06/AB-07 (scoring penalised by recognition errors) can go before AA — small, contained, and they directly explain "levels compressed around B2".
 
 ---
 
@@ -244,32 +244,63 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 ---
 
-## Track Z — Transcription quality ⬜
+## Track Z — Transcription quality 🟡
 
 **Feedback:** DE/NL/FR transcripts "completely off" although the audio is clear; NL: "Ik heb bezocht Luik" → "Ik heb bezocht leugen", "De leukste stad van België" → "The Luxe Stats in Belgium". Client: Voxtral transcribes best but must be told the language, it gets lost at low levels; suggests "Voxtral transcription validated by Azure for pronunciation".
 
-**⚠ finding:** the live path is Mistral's realtime Voxtral (`lib/realtime-stt.ts`), which opens the socket with only `?model=…` — **no language is sent**. The batch fallback does send it (`lib/stt/providers/voxtral.ts`). The Gradium switch is TTS (Léa's voice) and doesn't affect this. The client's suggested architecture is already the current one (Voxtral transcript, Azure + Deepgram pronunciation evidence judged by Mistral).
+**⚠ finding:** the live path is Mistral's realtime Voxtral (`lib/realtime-stt.ts`), which opens the socket with only `?model=…` — **no language is sent** (the endpoint has no language parameter, confirmed in its docs). The batch fallback does send it (`lib/stt/providers/voxtral.ts`). The client's suggested architecture is already the current one (Voxtral transcript, Azure + Deepgram pronunciation evidence judged by Mistral).
+
+**⚠ finding 2:** the VAD (`lib/turn-vad.ts`) only forwarded **above-threshold** frames to streaming STT — quiet parts of speech (soft consonants, word endings, short in-word pauses) and the onset before the threshold were never sent, so the recogniser got a chopped signal. Likely a cause of bad transcripts in every language, including FR.
+
+**Current state (2026-09-30): Mistral realtime (no language hint) for all 6 languages, with the VAD fix.** Any failed/timed-out streaming turn still falls back to language-tagged Voxtral batch. Switches in `lib/realtime-stt-config.ts`:
+- `REALTIME_STT_ENABLED = false` → every language on Voxtral batch (language-tagged, ~1 s more wait per answer);
+- `REALTIME_STT_PROVIDER_BY_LANG[lang] = null` → that language only on batch; `"gradium"` → Gradium streaming (en/fr/de/es/pt only).
+
+**History (all 2026-09-30)**
+1. Moved en/fr/de/es to **Gradium streaming** (language set), nl-BE/it to Voxtral batch.
+2. **Reverted off Gradium** after Baptiste's first real EN session on it (`e96e95b8…`, B2+ 78): ~9 meaning-changing errors. Re-running the 6 stored turn WAVs: Voxtral batch ~3, Deepgram nova-3 ~3. Examples: "long diagonals" → "long juggernauts" ×2, "different" → "front", "streak" → "strike", "I live in Paris" → "I am even embarrassed". Two of the worst were answer-initial words → possibly onset clipping in our pipeline rather than Gradium's model. Caveats: one speaker, streaming vs batch isn't like-for-like, and Voxtral batch smooths over restarts/repetitions (hides some fluency evidence). The scoring impact is in Track AB.
+3. **Default set to Mistral realtime everywhere** (Baptiste's call: speed over the language hint), batch kept one switch away.
+
+**Done**
+- [x] **Z-01** `lib/realtime-stt-gradium.ts` (new): Gradium streaming client, same per-turn contract as the Mistral one (`StreamingStt` interface in `lib/realtime-stt.ts`); EU endpoint, token per turn from new `app/api/gradium-token`. Kept wired, not used by default.
+- [x] **Z-01b** Per-language provider map `REALTIME_STT_PROVIDER_BY_LANG` (`gradium` | `mistral` | `null` = batch). `turn_stt_final` logs carry `sttProvider`.
+- [x] **Z-01c** VAD: forwards every frame from speech start to finalize (quiet in-speech frames included) plus ~340 ms of pre-roll.
+- [x] **Z-01d** Gradium tested against the live APIs with synthetic speech (DE/FR/ES exact, ~0.4 s latency; without lead-in audio the first word is dropped → pre-roll). NL/IT batch: exact except "Luik" → "Luit".
+- [x] **Z-07a** Admin provider snapshot (`lib/system-config.ts`) shows STT per language, driven by the same map.
 
 **To do**
-- [ ] **Z-01** Pass the language to the realtime connection if the API accepts it; otherwise use the batch path (which sends it), at least for nl-BE/de and low rungs.
-- [ ] **Z-02** Check whether Voxtral accepts a context / expected-words hint (place names like Luik, Leuven).
-- [ ] **Z-03** Final evaluator still counts likely recognition errors as speaker errors (Track V finding 6) — the NL tester's "errors I didn't make". Enforce the "dismiss recognition errors" rule.
-- [ ] **Z-04** Tell the client their suggested Voxtral + Azure setup is already in place; the gap is the language hint.
+- [ ] **Z-05** Live check with Mistral realtime + VAD fix, one session per language, real mic, **including a low-level speaker in FR/DE/NL** — the missing language was the beta complaint. If transcripts come out in the wrong language, set that language to `null` (batch).
+- [ ] **Z-09** Measure instead of guessing: an offline script that runs stored turn WAVs through Mistral realtime, Voxtral batch (and Gradium, see Z-08) and prints them side by side — reuse for every provider decision.
+- [ ] **Z-08** Before re-enabling Gradium: stream the stored turn WAVs through `lib/realtime-stt-gradium.ts` with and without extra lead-in audio (onset-clipping hypothesis); repeat on one FR session and one low-level learner.
+- [ ] **Z-02** Place names / domain words: Mistral realtime has no biasing; Voxtral batch — check for a prompt/context option ("Luik" → "Luit"); Gradium has `keywords` (up to 500 words) if it comes back.
+- [ ] **Z-03** Final evaluator still counts likely recognition errors as speaker errors (Track V finding 6, NL tester's "errors I didn't make", "strike" in `e96e95b8…`). Enforce the "dismiss recognition errors" rule.
+- [ ] **Z-07b** Update the STT row in `doc/assessment_process.md` (still says batch Voxtral only).
+- [ ] **Z-04** Tell the client: their suggested Voxtral + Azure setup was already in place; the gaps were the missing language and the chopped audio. Gradium (with language) was tried and dropped on accuracy; now Voxtral realtime + VAD fix, language-tagged batch available per language if needed.
 
 ---
 
-## Track AA — Questions too hard ⬜
+## Track AA — Questions too hard 🟡
 
 **Feedback:** "I understand every word but have no idea how to answer — like DELF/DALF questions, no longer a language test." FR example: "If you had to justify this contradiction to a doctor, what would your arguments be?" Client proposals: start with 1–2 easy icebreakers even at C1/C2; keep C1/C2 questions accessible via a question pool; avoid asking to argue for or against an idea.
 
 **Decision (Baptiste, 2026-09-28):** build a curated question bank — this reverses the Track V decision "no hand-written C2 bank".
 
+**⚠ finding:** C1/C2 had **no bank at all**: the model wrote every question itself, and the only examples it had were debate prompts ("strongest argument against your view", "argue the opposite of what you just said"), plus abstract society-debate seeds for topic switches. A1–B2 banks existed but in English only, translated by the model on the fly, and the model was told to make up about half its questions.
+
+**Design (Baptiste, 2026-09-30):** code picks the question at C1/C2 only; A1–B2 keep "the model picks from a slice"; every entry written in all 6 languages; bank kept in code with a read-only admin page for review.
+
+**Done (uncommitted)**
+- [x] **AA-01** Warm-up: the opening question comes from a warm-up bank (10 easy everyday questions), whatever the starting rung. It counts as a normal answer (client question 2 still open). Only the first question is a warm-up; a second one wasn't added.
+- [x] **AA-02** New examiner rule: never ask to argue for/against, argue the opposite, play a role or convince/justify to an imagined person. C1/C2 ladder descriptions rewritten around personal experience and reflection. The C1/C2 debate examples and the abstract switch seeds are deleted.
+- [x] **AA-03** Bank in `lib/question-bank/` (115 entries: warm-up 10, A1 15, A2 17, B1 17, B2 24, C1 16, C2 16), each in fr/en/nl-BE/es/it/de. A1–B2 ported from the old English lists and tagged by topic ("What is your name?" / "How old are you?" dropped as one-word answers). C1/C2 are new: 2 per topic, each with a simpler version and 2 follow-ups. FR + EN drafted first, the other 4 languages translated in the same pass → **needs native review**.
+- [x] **AA-04** C1/C2 flow in `lib/examiner-prompt.ts`: bank question (unused, preferring a topic not covered yet or the forced-switch target) → ONE of its pre-written follow-ups → next bank question. A forced topic switch skips the follow-up. "Je ne comprends pas" at C1/C2 uses the pre-written simpler version. State (`bankState`) is round-tripped with the client like `usedQuestions`, which now holds bank ids. At A1/A2 the examiner is told to ask bank questions as written and only add simple follow-ups.
+- [x] Admin page `/admin/question-bank` (per language, by level and topic, showing simpler versions and follow-ups) for the client's review.
+- [x] Offline check of the prompt builder (no LLM): data complete in all languages, C1 alternation, topic switch, clarify, closing turn, A1 slice in German.
+
 **To do**
-- [ ] **AA-01** Warm-up: first 1–2 questions are easy everyday questions whatever the starting rung (they still count for pacing/evaluation as normal answers — to confirm).
-- [ ] **AA-02** Prompt rules: no for/against argumentation, no role-play hypotheticals ("justify to a doctor…", "convince a friend…"); C1/C2 difficulty comes from depth on personal experience and opinion, not from exam-style tasks.
-- [ ] **AA-03** Rewrite the C1/C2 entries of the existing question bank (the one sliced per rung in `lib/examiner-prompt.ts`) around personal experience; draft in FR, then translate for the 5 other languages; have the client review.
-- [ ] **AA-04** Make the model pick from the bank (or closely adapt a bank question) at C1/C2 instead of free-writing; follow-ups stay free.
-- [ ] **AA-05** Re-run the conversation simulator (`/admin/simulator`) at C1/C2 to check the new questions.
+- [ ] **AA-05** Run the conversation simulator (`/admin/simulator`) at C1 and C2 (FR, EN) and at A1 (NL, DE): check the examiner actually asks the picked question, the follow-up fits, and no for/against or role-play question appears.
+- [ ] **AA-06** Live FR session starting at C1: warm-up first, then bank questions; check `bankQuestionId` in the `chat_request_received` logs.
+- [ ] **AA-07** Native review of the nl-BE/es/it/de wording, then the client reviews the FR/EN content on `/admin/question-bank`.
 
 ---
 
@@ -284,16 +315,51 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [ ] **AB-02** Ask the client what "2 temps" means (live difficulty ladder + final evaluation? the new pronunciation system?) and which earlier behaviour they preferred.
 - [ ] **AB-03** Offline replay script (already planned in Track V): run stored sessions through old vs new scoring, list which change level.
 - [ ] **AB-04** Faster promotion when no starting level is given (Track V "level-promotion detection": jump ≥ 2 rungs on a clearly stronger answer, guarded by evidence).
-- [ ] **AB-05** Low levels (NL/DE A2 → A1): re-check after Z-01 — bad transcripts at low levels probably pulled scores down.
+- [ ] **AB-05** Low levels (NL/DE A2 → A1): re-check after Z-05 — bad transcripts at low levels probably pulled scores down.
+
+**⚠ finding (Baptiste's EN session `e96e95b8…`, 2026-09-30, B2+ 78 — should likely be C1):** axes fluency 9 / vocab-grammar 8 / communication 8, pronunciation 83.6 → only 1 axis ≥ 9, so no +5 % bonus (78 × 1.05 = 82 = C1). Causes, all on the system side:
+- [ ] **AB-06** **Pronunciation is penalised for recognition errors**: every correctly heard word scored 96, the misheard ones 16–42 (the assessment is run against the wrong reference text). Without them the average is ~90+ → bonus → C1. Ignore or down-weight words the recogniser was unsure of, or assess against a better transcript.
+- [ ] **AB-07** **Judge ignores its own rubric**: 161 WPM (table says ≥ 145 → fluency 10) got 9; its summary ("near-native fluency… no significant weaknesses") matches the prompt's "→ C1, not B2" anchor yet it chose B2+. Enforce the WPM → fluency mapping in code rather than trusting the LLM; consider deriving the level from the axes instead of the LLM's `score_percent` (see Track V finding 5).
+- [ ] **AB-08** **Last answer had no pronunciation data**: the longest answer (100 words) came back from the fallback EO path with `words: []`, score 0 — correctly excluded from the average (count 5 of 6), but the best evidence was lost. Check why EO fell back on that turn.
+- [ ] **AB-09** **Questions gave little room at the top**: "Which game?", "Longest streak?" produced a 5-word answer; no opinion/hypothetical question in 3 minutes → little C1 evidence. Feed into Track AA (warm-up then at least one open, personal-opinion question).
+
+---
+
+## Track AC — Adaptive session length 🟡 (shadow mode)
+
+**Idea (Baptiste, 2026-09-30):** instead of a fixed length, keep asking while the level is uncertain and stop once it has settled — **min 3 min, max 7 min**. Addresses AB-09 (not enough room to show C1/C2), Track V (natives can't reach C2) and needlessly long sessions for clear-cut beginners.
+
+**Decisions:** certainty signal = the **difficulty ladder** ET already drives (no new LLM call); bounds 3–7 min; **shadow mode first** — sessions keep their fixed length, the rule only records where it would have stopped.
+
+**Risks:** (1) ET is generous (took Baptiste B1 → C2 in 3 answers), so the rule inherits its bias → evidence gates + calibration; (2) variable length breaks the countdown and the client-approved "Votre niveau en 3 minutes" copy (Track U) → client sign-off before going live; (3) shorter sessions give the final evaluator less evidence → the 3-min floor.
+
+**Stop rule** (`lib/session-length.ts`, pure, thresholds as constants at the top): settled when the last ET results show **bracketed** (last 4 within two adjacent rungs, ≥ 2 up/down reversals → estimate = highest rung answered "well"), **plateau** (3 × "adequate" at one rung), **ceiling** (2 × "well" at C2) or **floor** (2 × not-"well" at A1). Gates: ≥ 5 judged answers; estimate ≥ B2 needs one answer ≥ 25 words at or above it.
+
+**Done (2026-09-30, uncommitted)**
+- [x] **AC-01** `lib/session-length.ts`: `evaluateStop`, `shouldCloseSession`, `LadderRecord`; checked on hand-made ladders (bracketed, plateau, ceiling, floor, too few answers, C2 without a long answer, still climbing) and the time bounds.
+- [x] **AC-02** `lib/session-config.ts`: `SESSION_LENGTH_MODE` (`"fixed"` | `"shadow"` | `"adaptive"`, now `"shadow"`), `SESSION_MIN_SECONDS` = 180, `SESSION_MAX_SECONDS` = 420. `?minutes=N` URL override (1–15) for fixed/shadow length, so testers can run 7-min calibration sessions.
+- [x] **AC-03** `app/page.tsx`: every ET result appended to the ladder (rung, verdict, next rung, words, time) — **the rung per turn is now stored**, a gap noted in Track V. The close effect uses `shouldCloseSession` (same graceful `__END__` path); `session_length_decision` client log event when an adaptive session would have closed. Adaptive mode counts down to the max.
+- [x] **AC-04** Storage: migration `0011_session_ladder.sql` (`sessions.ladder_json`), sent by the live save and the final save. Written by a separate best-effort update (`saveLadder`) and read separately in `getSessionDetail`, so an environment **without 0011 still saves and shows sessions** (ladder just missing, warning logged).
+- [x] **AC-05** Admin detail: "Difficulty ladder & session length" section (`components/LadderPanel.tsx`) — per-answer rung/verdict and "would stop at m:ss · level (reason)" vs actual length and final level.
+- [x] **AC-06** Prompts: in adaptive mode the intro says "a few minutes" (6 languages); fixed/shadow text unchanged.
+
+**To do**
+- [x] **AC-07** `0011_session_ladder.sql` applied to `ootlydfnbghchqolxbru` (single project for dev and prod) on 2026-09-30, by hand in the SQL editor.
+- [ ] **AC-08** Collect ~15–20 shadow sessions, including several `?minutes=7` runs at different levels.
+  - **#1 (Baptiste, EN, 2026-09-30, `0d381874…`, 7:16, 8 answers, Mistral realtime):** final C1 82 → **C1+ 86** with bonus (axes 9/9/8, pron 90 — vs 84 on Gradium this morning, supports AB-06). Rule: **would stop at 4:42, "ceiling", estimate C2**. Final evaluator re-run on the first 5 answers only (×2) = **identical C1+ 86** → nothing lost by stopping early. Notes: ET said "well" to all 8 answers (C2 by 1:53), so the ladder estimate (C2) ≠ final level (C1+) — use it for the stop decision only, never as a score; strong speakers will mostly stop on "ceiling"; the binding constraint was the 5-answer gate (ceiling reached at 3:49 on answer 4), not the 3-min floor — long answers make 5 answers ≈ 5 min.
+- [ ] **AC-09** Replay script: re-run `evaluateStop` over stored `ladder_json` for threshold tweaks; for 7-min sessions, run the final evaluator on the transcript cut at `wouldStopAt` vs the full one. Target: same level (± one "+") in most sessions, no systematic downgrade at the top. Report % that would stop at 3:00 and the median stop time.
+- [ ] **AC-10** Go live: `SESSION_LENGTH_MODE = "adaptive"`, proper timer UI (elapsed + "up to 7 min" instead of a countdown), landing copy ("Votre niveau en quelques minutes"?) after client agreement; update `lib/session-cost.ts` `AVG_SESSION` with the real median.
+- Known quirk in shadow `?minutes=7` runs: Léa still announces "about 3 minutes".
 
 ---
 
 ## Questions for the client
 1. What does "la nouvelle manière de fonctionner (en 2 temps)" refer to? (AB-02)
 2. Should warm-up answers count in the evaluation? (AA-01)
-3. Review of the C1/C2 question bank once drafted. (AA-03)
+3. Review of the question bank on `/admin/question-bank` (all levels, 6 languages). (AA-07)
 4. After the X fix is deployed: can the testers redo one full session each so we have stored results to analyse? (AB-01)
+5. Variable session length (3–7 min depending on how quickly the level is clear) — OK, and what should the landing say instead of "Votre niveau en 3 minutes"? (AC-10)
 
 ## Files touched (this round)
 
-`app/api/sessions/audio-urls/route.ts` (new) · `lib/comprehension.ts` (new) · `lib/tts/providers/gradium.ts` (new) · `lib/sessions-service.ts` · `app/page.tsx` · `middleware.ts` · `lib/supabase-browser.ts` · `app/api/chat/route.ts` · `lib/conversation-prompts.ts` · `lib/examiner-prompt.ts` · `lib/tts/registry.ts` · `lib/turn-labels.ts` · `.env.example`
+`lib/question-bank/*` (new) · `app/admin/(dashboard)/question-bank/page.tsx` (new) · `components/AdminSidebar.tsx` · `lib/topic-domain.ts` · `lib/conversation-sim.ts` · `lib/session-length.ts` (new) · `components/LadderPanel.tsx` (new) · `supabase/migrations/0011_session_ladder.sql` (new) · `lib/session-config.ts` · `app/admin/(dashboard)/[id]/page.tsx` · `app/api/sessions/live/route.ts` · `lib/types.ts` · `app/api/sessions/audio-urls/route.ts` (new) · `app/api/gradium-token/route.ts` (new) · `lib/realtime-stt-gradium.ts` (new) · `lib/realtime-stt-config.ts` · `lib/realtime-stt.ts` · `lib/turn-vad.ts` · `lib/comprehension.ts` (new) · `lib/tts/providers/gradium.ts` (new) · `lib/sessions-service.ts` · `app/page.tsx` · `middleware.ts` · `lib/supabase-browser.ts` · `app/api/chat/route.ts` · `lib/conversation-prompts.ts` · `lib/examiner-prompt.ts` · `lib/tts/registry.ts` · `lib/turn-labels.ts` · `.env.example`

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getSupabaseAuthServer } from "@/lib/supabase-auth-server";
 import { claimSession } from "@/lib/sessions-service";
+import { CandidateTopBar } from "@/components/CandidateTopBar";
+import styles from "@/components/candidate.module.css";
 
 /**
  * Landing spot for the post-test sign-up magic link (see
@@ -26,7 +28,7 @@ export default async function ResultsSavedPage({
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         display: "flex",
         flexDirection: "column",
         background: "#F7F5F0",
@@ -34,27 +36,17 @@ export default async function ResultsSavedPage({
         fontFamily: "'DM Sans',system-ui,sans-serif",
       }}
     >
-      <div style={{ padding: "22px 36px" }}>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
-            <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
-            <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
-            <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
-          </div>
-          <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, letterSpacing: "0.02em", lineHeight: 1 }}>
-            ELAO
-          </span>
-        </div>
-      </div>
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px 60px" }}>
+      <CandidateTopBar />
+      <div className={styles.centerScreen}>
         <div
           style={{
             width: "100%",
             maxWidth: 400,
+            boxSizing: "border-box",
             background: "#FFFFFF",
             border: "1px solid #E4E0D7",
             borderRadius: 14,
-            padding: 32,
+            padding: "clamp(22px, 6vw, 32px)",
             textAlign: "center",
             display: "flex",
             flexDirection: "column",
@@ -86,7 +78,9 @@ export default async function ResultsSavedPage({
           </p>
           <Link
             href="/dashboard"
+            className={styles.fullWidthMobile}
             style={{
+              boxSizing: "border-box",
               marginTop: 8,
               padding: "14px 32px",
               borderRadius: 10,

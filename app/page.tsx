@@ -3,23 +3,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { TurnVad } from "@/lib/turn-vad";
-import { RealtimeStt } from "@/lib/realtime-stt";
-import { REALTIME_STT_ENABLED } from "@/lib/realtime-stt-config";
+import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
+import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
+import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
-import { SessionRecorder } from "@/lib/session-recorder";
+import { SessionRecorder, pickRecorderMimeType } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import { logClientEvent } from "@/lib/client-log";
 import { isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
 import { isTopicDomain, pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
+import type { BankState } from "@/lib/examiner-prompt";
 import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
 import { isNonComprehension } from "@/lib/comprehension";
 import { EvaluatingScreen } from "@/components/EvaluatingScreen";
 import { SessionResultsScreen } from "@/components/SessionResultsScreen";
 import { AuthNavLink } from "@/components/AuthNavLink";
+import { CandidateTopBar as TopBar } from "@/components/CandidateTopBar";
+import styles from "@/components/candidate.module.css";
 import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
-import { SESSION_DURATION_MINUTES, SESSION_DURATION_SECONDS } from "@/lib/session-config";
+import { SESSION_DURATION_MINUTES, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
+import { evaluateStop, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   UserWords,
@@ -108,6 +113,15 @@ function getDebugFlagFromUrl(): boolean {
   return new URLSearchParams(window.location.search).get("debug") === "1";
 }
 
+/** `?minutes=7` overrides the fixed/shadow session length (1–15 min) — lets
+ *  internal testers run long shadow sessions to calibrate the adaptive stop
+ *  rule (lib/session-length.ts). Same read-once pattern as `?level=`. */
+function getMinutesOverrideFromUrl(): number | null {
+  if (typeof window === "undefined") return null;
+  const n = Number(new URLSearchParams(window.location.search).get("minutes"));
+  return Number.isInteger(n) && n >= 1 && n <= 15 ? n : null;
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 /**
@@ -192,10 +206,14 @@ export default function Home() {
   const [chatError, setChatError] = useState<string | null>(null);
   /** Shown under the "À vous" pill when an answer was heard but transcribed to nothing — cleared as soon as the user speaks again or a turn starts. */
   const [sttNotice, setSttNotice] = useState<string | null>(null);
+  /** Set when the mic track died mid-session (phone locked / app switched on iOS) — the session can't continue, only end. */
+  const [micInterrupted, setMicInterrupted] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const audioBlobUrlRef = useRef<string | null>(null);
   /** `?debug=1` — fixed for the life of the page load, read once on mount. */
   const [debugMode] = useState<boolean>(() => getDebugFlagFromUrl());
+  /** Length of a fixed/shadow session — SESSION_DURATION_SECONDS unless `?minutes=` overrides it. */
+  const [fixedSessionSeconds] = useState<number>(() => (getMinutesOverrideFromUrl() ?? SESSION_DURATION_MINUTES) * 60);
   /** ET verdict/rung history for the DebugPanel — only ever appended to when
    *  debugMode is true, so this costs nothing for normal sessions. */
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
@@ -234,11 +252,13 @@ export default function Home() {
    * "A1" — see startSession/handleUserTurn and the `?level=` override below.
    */
   const currentRungRef = useRef<CefrRung>("A2");
-  /** Bank question strings already offered this session (any rung) — Track
+  /** Bank question ids (lib/question-bank) already offered this session (any rung) — Track
    *  I-03 within-session repeat-avoidance. Round-tripped with /api/chat the
    *  same way currentRungRef's rung is, but fully independent of it: this
    *  only ever talks to /api/chat, never /api/assess-transcript. */
   const usedQuestionsRef = useRef<string[]>([]);
+  /** C1/C2 bank question + follow-up state (lib/examiner-prompt.ts) — round-tripped with /api/chat like usedQuestionsRef. */
+  const bankStateRef = useRef<BankState>({});
   /**
    * TT (lib/topic-tracking.ts) tracking state — the domain of the examiner's
    * most recently asked question, and how many turns in a row have landed on
@@ -267,6 +287,18 @@ export default function Home() {
   });
   /** Set at 4 min — causes the next onFinal to trigger __END__ after the user's sentence. */
   const pendingEndRef = useRef(false);
+  /** Set once the length rule has asked for the close — the timer keeps ticking until the closing turn ends, so it must not fire twice. */
+  const closeRequestedRef = useRef(false);
+  /**
+   * Adaptive session length (lib/session-length.ts): one step per ET result,
+   * always recorded (stored as sessions.ladder_json). `ladderDecisionRef` is
+   * the stop rule's latest verdict on those steps; `wouldStopAtRef` the first
+   * second at which an adaptive session would have closed — recorded in every
+   * mode, it's what "shadow" mode exists to collect.
+   */
+  const ladderStepsRef = useRef<LadderStep[]>([]);
+  const ladderDecisionRef = useRef<StopDecision>({ converged: false, estimatedLevel: null, reason: "not_converged" });
+  const wouldStopAtRef = useRef<{ at: number; estimatedLevel: LadderRecord["estimatedLevel"]; reason: LadderRecord["reason"] } | null>(null);
   const endTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Resolver for waitForPlaybackToFinish() — set while waiting for the current TTS to finish. */
   const playbackDoneWaiterRef = useRef<(() => void) | null>(null);
@@ -310,16 +342,18 @@ export default function Home() {
    * internal stream).
    */
   const micStreamRef = useRef<MediaStream | null>(null);
-  /** Streaming STT (lib/realtime-stt.ts) — null when disabled, not yet
-   *  connected, or after a failure; onSpeechEnd falls back to the batch
-   *  /api/transcribe path whenever this can't produce a transcript. */
-  const realtimeSttRef = useRef<RealtimeStt | null>(null);
+  /** Streaming STT (Gradium or Mistral, per REALTIME_STT_PROVIDER_BY_LANG) —
+   *  null when disabled or not used for this language; onSpeechEnd falls back
+   *  to the batch /api/transcribe path whenever this can't produce a transcript. */
+  const realtimeSttRef = useRef<StreamingStt | null>(null);
   /** Dedicated analyser + AudioContext for the real mic-level meter (mic-check
    *  card and the live "userSpeaking" bars) — separate from the player's
    *  TTS-only analyser, and alive from the instructions step through the
    *  whole session. */
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const micAudioCtxRef = useRef<AudioContext | null>(null);
+  /** Screen wake lock held for the active session so the phone doesn't sleep mid-answer. */
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const micLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** Audio chunks (base64 + sentence text) played for the CURRENT assistant
    *  turn — cached so "Répéter la question" can replay them without a second
@@ -335,6 +369,16 @@ export default function Home() {
   // and pronunciation JSON only; audio and the evaluation go up once, at the
   // end (saveSession finalises this same row). Best-effort: never blocks or
   // fails the conversation.
+  const buildLadderRecord = (): LadderRecord => ({
+    mode: SESSION_LENGTH_MODE,
+    minSeconds: SESSION_MIN_SECONDS,
+    maxSeconds: SESSION_MAX_SECONDS,
+    steps: ladderStepsRef.current,
+    wouldStopAt: wouldStopAtRef.current?.at ?? null,
+    estimatedLevel: wouldStopAtRef.current?.estimatedLevel ?? ladderDecisionRef.current.estimatedLevel,
+    reason: wouldStopAtRef.current?.reason ?? ladderDecisionRef.current.reason,
+  });
+
   const syncLiveProgress = async () => {
     if (sessionSavedRef.current || endSessionInFlightRef.current) return;
     try {
@@ -372,6 +416,7 @@ export default function Home() {
           id,
           durationSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0,
           turns,
+          ladder: buildLadderRecord(),
         }),
       });
     } catch (e) {
@@ -396,14 +441,31 @@ export default function Home() {
     return () => clearInterval(id);
   }, [sessionStarted, phase]);
 
-  // Close the conversation gracefully at SESSION_DURATION_MINUTES, then end the session.
+  // Close the conversation gracefully when the length rule says so (fixed /
+  // shadow: at fixedSessionSeconds; adaptive: once the level has settled past
+  // SESSION_MIN_SECONDS, or at SESSION_MAX_SECONDS), then end the session.
   // Don't interrupt mid-sentence: set a flag so onFinal triggers __END__
   // after the user finishes speaking. Safety timeout fires after 20 s in
   // case the user is already silent. endSession() itself stops STT
   // synchronously, so it must only run AFTER the closing turn completes —
   // never call it directly from here.
   useEffect(() => {
-    if (elapsed === SESSION_DURATION_SECONDS && phase === "active" && !pendingEndRef.current) {
+    if (phase !== "active" || !sessionStarted) return;
+    const lengthParams = {
+      elapsedSeconds: elapsed,
+      converged: ladderDecisionRef.current.converged,
+      fixedSeconds: fixedSessionSeconds,
+      minSeconds: SESSION_MIN_SECONDS,
+      maxSeconds: SESSION_MAX_SECONDS,
+    };
+    // Where an adaptive session WOULD have closed — recorded in every mode.
+    if (!wouldStopAtRef.current && shouldCloseSession({ ...lengthParams, mode: "adaptive" })) {
+      const d = ladderDecisionRef.current;
+      wouldStopAtRef.current = { at: elapsed, estimatedLevel: d.estimatedLevel, reason: d.converged ? d.reason : "max_reached" };
+      logClientEvent("session_length_decision", { mode: SESSION_LENGTH_MODE, wouldStopAt: elapsed, ...wouldStopAtRef.current, steps: ladderStepsRef.current.length });
+    }
+    if (!closeRequestedRef.current && !pendingEndRef.current && shouldCloseSession({ ...lengthParams, mode: SESSION_LENGTH_MODE })) {
+      closeRequestedRef.current = true;
       pendingEndRef.current = true;
       endTimeoutRef.current = setTimeout(() => {
         if (pendingEndRef.current) {
@@ -452,6 +514,55 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preSessionStep]);
 
+  // ── mobile: resume suspended AudioContexts on any tap while the mic is in use ──
+  const audioInUse = preSessionStep === "instructions" || (sessionStarted && phase === "active");
+  useEffect(() => {
+    if (!audioInUse) return;
+    const onTap = () => resumeAudioContexts();
+    window.addEventListener("pointerdown", onTap, { passive: true });
+    window.addEventListener("touchend", onTap, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", onTap);
+      window.removeEventListener("touchend", onTap);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioInUse]);
+
+  // ── mobile: backgrounding during the session. iOS ends the mic track when
+  // the phone locks or the user switches apps, which would otherwise leave
+  // the session silently waiting for an answer that can never arrive. ──
+  const sessionActive = sessionStarted && phase === "active";
+  useEffect(() => {
+    if (!sessionActive) return;
+    setMicInterrupted(false);
+    const markInterrupted = (reason: string) => {
+      setMicInterrupted((already) => {
+        if (!already) logClientEvent("session_mic_lost", { reason });
+        return true;
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        logClientEvent("session_backgrounded", {});
+        return;
+      }
+      requestWakeLock(); // released automatically while hidden
+      resumeAudioContexts();
+      if (micStreamRef.current?.getAudioTracks().some((t) => t.readyState === "ended")) markInterrupted("visibility");
+    };
+    // track.stop() (our own endSession) doesn't fire "ended" — only the
+    // browser/OS cutting the mic does.
+    const tracks = micStreamRef.current?.getAudioTracks() ?? [];
+    const onEnded = () => markInterrupted("track_ended");
+    tracks.forEach((t) => t.addEventListener("ended", onEnded));
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      tracks.forEach((t) => t.removeEventListener("ended", onEnded));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionActive]);
+
   // ── save session via the server API (no direct Supabase access from the browser) ──
   const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult, pronunciationScores: PronunciationAvg | null = pronunciationAvg) => {
     if (sessionSavedRef.current) return;
@@ -470,6 +581,7 @@ export default function Home() {
     form.append("scores", JSON.stringify(result?.dimensions ?? null));
     form.append("evaluation", JSON.stringify(result ?? null));
     form.append("pronunciationScores", JSON.stringify(pronunciationScores));
+    form.append("ladder", JSON.stringify(buildLadderRecord()));
 
     // Per-turn audio only exists as blob: object URLs (set once pass-2
     // pronunciation assessment finishes) — re-fetch each one to recover the
@@ -503,7 +615,9 @@ export default function Home() {
     // every full-length save (see createSessionAudioUploadUrls). Best-effort:
     // a failed upload loses that recording, never the session.
     const sessionAudio = audioBlob && audioBlob.size > 0 ? audioBlob : null;
-    const sessionExt = sessionAudio ? (sessionAudio.type.includes("ogg") ? "ogg" : "webm") : null;
+    const sessionExt = sessionAudio
+      ? sessionAudio.type.includes("mp4") ? "m4a" : sessionAudio.type.includes("ogg") ? "ogg" : "webm"
+      : null;
     let sessionAudioPath: string | null = null;
     const turnAudioPaths: Record<number, string> = {};
     if (sessionAudio || turnBlobs.length) {
@@ -576,12 +690,7 @@ export default function Home() {
     if (turnRecorderRef.current) return; // already recording
     const stream = micStreamRef.current;
     if (!stream) { console.warn("startTurnRecording: mic stream not available"); return; }
-    // Pick the best supported mimeType across browsers
-    const mimeType =
-      MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" :
-      MediaRecorder.isTypeSupported("audio/webm")             ? "audio/webm" :
-      MediaRecorder.isTypeSupported("audio/mp4")              ? "audio/mp4" :
-      "";
+    const mimeType = pickRecorderMimeType();
     if (!mimeType) { console.warn("startTurnRecording: no supported mimeType"); return; }
     try {
       // 256 kbps opus: extra spectral headroom before the 16 kHz downsample in
@@ -744,6 +853,17 @@ export default function Home() {
         verdict,
       });
       if (isCefrRung(nextRung)) {
+        ladderStepsRef.current = [
+          ...ladderStepsRef.current,
+          {
+            atSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0,
+            rung: currentRungRef.current,
+            verdict,
+            nextRung,
+            words: countWords(userAnswer),
+          },
+        ];
+        ladderDecisionRef.current = evaluateStop(ladderStepsRef.current);
         if (debugMode) {
           setDebugEvents((prev) => [
             ...prev,
@@ -865,6 +985,10 @@ export default function Home() {
     try {
       const ctx = new AudioContext();
       micAudioCtxRef.current = ctx;
+      // Created on the instructions screen's mount, not in a tap — iOS keeps
+      // it "suspended" (dead meter) until resumed; resumeAudioContexts()
+      // retries on the next tap if this one is refused.
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 1024;
@@ -889,6 +1013,37 @@ export default function Home() {
     }
   }
 
+  /** Un-suspends every AudioContext the session uses. Called from tap
+   *  handlers — iOS only lets a context start inside a user gesture. */
+  function resumeAudioContexts() {
+    const mic = micAudioCtxRef.current;
+    if (mic?.state === "suspended") void mic.resume().catch(() => {});
+    const player = playerRef.current?.getAudioContext();
+    if (player?.state === "suspended") void player.resume().catch(() => {});
+    vadRef.current?.resume();
+  }
+
+  /** Keeps the screen on during the session (a sleeping phone kills the mic).
+   *  Best-effort: unsupported browsers or a refused request just skip it. */
+  function requestWakeLock() {
+    if (!("wakeLock" in navigator) || wakeLockRef.current) return;
+    navigator.wakeLock
+      .request("screen")
+      .then((sentinel) => {
+        wakeLockRef.current = sentinel;
+        // The browser drops the lock itself whenever the page is hidden.
+        sentinel.addEventListener("release", () => {
+          if (wakeLockRef.current === sentinel) wakeLockRef.current = null;
+        });
+      })
+      .catch(() => {});
+  }
+
+  function releaseWakeLock() {
+    void wakeLockRef.current?.release().catch(() => {});
+    wakeLockRef.current = null;
+  }
+
   function stopMicLevelLoop() {
     if (micLevelIntervalRef.current) clearInterval(micLevelIntervalRef.current);
     micLevelIntervalRef.current = null;
@@ -908,6 +1063,11 @@ export default function Home() {
       // constraints note this function's callers used to carry inline:
       // noiseSuppression/autoGainControl OFF preserve phoneme detail,
       // echoCancellation stays ON to keep the avatar's own voice out.
+      // Safari 16.4+ Audio Session API: declare that we both capture and play
+      // back, so iOS keeps Léa's voice on the loudspeaker path while the mic
+      // is open. Absent elsewhere — skipped.
+      const audioSession = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+      if (audioSession) audioSession.type = "play-and-record";
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: false, channelCount: 1, sampleRate: 48000 },
         video: false,
@@ -927,11 +1087,18 @@ export default function Home() {
 
   // ── session ──
   const startSession = async () => {
+    // Both need the tap's user activation, so they run before any await.
+    resumeAudioContexts();
+    requestWakeLock();
     setSessionStarted(true);
     sessionSavedRef.current = false;
     liveSessionIdRef.current = null;
     liveSessionStartRef.current = null;
     startedAtRef.current = Date.now();
+    closeRequestedRef.current = false;
+    ladderStepsRef.current = [];
+    ladderDecisionRef.current = { converged: false, estimatedLevel: null, reason: "not_converged" };
+    wouldStopAtRef.current = null;
 
     // Direct starting-level mode (doc/adaptive-levels-plan.md §4): a
     // `?level=` URL param, when present and valid, wins over a signed-in
@@ -998,6 +1165,7 @@ export default function Home() {
     clearPendingReveals();
     currentRungRef.current = conversationSettingsRef.current.startingRung;
     usedQuestionsRef.current = [];
+    bankStateRef.current = {};
     currentDomainRef.current = null;
     visitedDomainsRef.current = [];
     domainStreakRef.current = 0;
@@ -1142,14 +1310,14 @@ export default function Home() {
       let sttPath: "realtime" | "batch-fallback" = "batch-fallback";
       let fallbackReason: string | undefined = realtimeTranscriptPromise
         ? undefined
-        : "realtime STT not available this turn";
+        : REALTIME_STT_PROVIDER_BY_LANG[language] ? "realtime STT not available this turn" : `no realtime STT for ${language}`;
 
       if (realtimeTranscriptPromise) {
         try {
           text = await realtimeTranscriptPromise;
-          // No word-level timing exists in this protocol (confirmed against
-          // Mistral's realtime API directly) — spokenMs (lib/turn-vad.ts,
-          // excludes the trailing silence wait) is the only source for WPM.
+          // WPM from spokenMs (lib/turn-vad.ts, excludes the trailing silence
+          // wait) — Mistral's realtime protocol has no word timing, and
+          // Gradium's is kept out of it so both paths measure the same way.
           wpm = spokenMs > 0 ? text.split(/\s+/).filter(Boolean).length / (spokenMs / 60000) : 0;
           sttPath = "realtime";
         } catch (e) {
@@ -1180,7 +1348,8 @@ export default function Home() {
       }
 
       logClientEvent("turn_stt_final", {
-        turnLogId, buffered: willBuffer, sttPath, sttLatencyMs: Date.now() - sttStartMs, fallbackReason,
+        turnLogId, buffered: willBuffer, sttPath, sttProvider: sttPath === "realtime" ? REALTIME_STT_PROVIDER_BY_LANG[language] : "voxtral-batch",
+        sttLatencyMs: Date.now() - sttStartMs, fallbackReason,
       });
 
       // No more pass-1 SDK score (Azure used to supply one instantly) — EO's
@@ -1288,16 +1457,21 @@ export default function Home() {
       vadRef.current.setExtendedPauseTolerance(currentRungRef.current === "C2");
       startTurnRecording(); // begin recording the first user turn
 
-      // RealtimeStt mints its own token per turn internally (app/api/realtime-token) —
-      // construction is synchronous, only the network round trip inside
-      // startTurn() is async, so this never blocks session start. Needs
-      // vadRef.current for its actual AudioContext sample rate (not
-      // necessarily 48000, see TurnVad.getSampleRate()).
-      if (REALTIME_STT_ENABLED) {
-        realtimeSttRef.current = new RealtimeStt(
-          vadRef.current.getSampleRate(),
-          (event, data) => logClientEvent(`realtime_stt_${event}`, data ?? {})
-        );
+      // The streaming client mints its own token per turn internally
+      // (app/api/gradium-token or app/api/realtime-token) — construction is
+      // synchronous, only the network round trip inside startTurn() is async,
+      // so this never blocks session start. Needs vadRef.current for its
+      // actual AudioContext sample rate (not necessarily 48000, see
+      // TurnVad.getSampleRate()). No provider for this language (see
+      // REALTIME_STT_PROVIDER_BY_LANG) → every turn takes the language-tagged
+      // batch path.
+      const sttProvider = REALTIME_STT_ENABLED ? REALTIME_STT_PROVIDER_BY_LANG[language] : null;
+      if (sttProvider) {
+        const sampleRate = vadRef.current.getSampleRate();
+        const onLifecycle = (event: string, data?: Record<string, unknown>) => logClientEvent(`realtime_stt_${event}`, data ?? {});
+        realtimeSttRef.current = sttProvider === "gradium"
+          ? new GradiumRealtimeStt(sampleRate, language, onLifecycle)
+          : new RealtimeStt(sampleRate, onLifecycle);
         realtimeSttRef.current.startTurn();
       }
 
@@ -1391,6 +1565,7 @@ export default function Home() {
           turnLogId: logId,
           rung,
           usedQuestions: usedQuestionsRef.current,
+          bankState: bankStateRef.current,
           isStart,
           avoidDomain: avoidDomain ?? undefined,
           switchToDomain: avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomainsRef.current) : undefined,
@@ -1457,7 +1632,7 @@ export default function Home() {
             // turn, so the audio player's amp===0 callback can now safely
             // treat a drained queue as "the avatar is actually done talking".
             streamDoneRef.current = true;
-            const { fullText, usedQuestions } = JSON.parse(data);
+            const { fullText, usedQuestions, bankState } = JSON.parse(data);
             // Defense in depth: an empty-content assistant message stuck in
             // history gets sent back to Mistral on every future turn, which
             // rejects it outright — never let one in, regardless of what the
@@ -1490,6 +1665,7 @@ export default function Home() {
               }
             }
             if (usedQuestions) usedQuestionsRef.current = usedQuestions;
+            if (bankState) bankStateRef.current = bankState;
             // NOT clearing streamingAssistant here — the SSE stream ending
             // just means all audio bytes have been sent, not that playback
             // (and the word-by-word reveal riding on it) has finished. It's
@@ -1572,6 +1748,7 @@ export default function Home() {
     }
 
     setPhase("evaluating"); // flip the UI before any awaits
+    releaseWakeLock();
 
     await stopTurnRecording();
     vadRef.current?.stop();
@@ -1723,13 +1900,16 @@ export default function Home() {
     </div>
   );
 
-  const remaining = Math.max(0, SESSION_DURATION_SECONDS - elapsed);
+  // Adaptive mode has no known end — count down to the cap (a proper
+  // "elapsed + up to N min" display is due before adaptive goes live).
+  const sessionCapSeconds = SESSION_LENGTH_MODE === "adaptive" ? SESSION_MAX_SECONDS : fixedSessionSeconds;
+  const remaining = Math.max(0, sessionCapSeconds - elapsed);
   const rmm = Math.floor(remaining / 60).toString().padStart(2, "0");
   const rss = (remaining % 60).toString().padStart(2, "0");
-  const progressPercent = Math.min(100, (elapsed / SESSION_DURATION_SECONDS) * 100);
+  const progressPercent = Math.min(100, (elapsed / sessionCapSeconds) * 100);
 
   return (
-    <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
+    <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
       <style>{`
         @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
         @keyframes elaoBreathe { 0%,100% { transform:scale(1); opacity:0.5; } 50% { transform:scale(1.06); opacity:0.9; } }
@@ -1758,20 +1938,20 @@ export default function Home() {
       {!sessionStarted && preSessionStep === "welcome" && (
         <>
           <TopBar right={<AuthNavLink light />} />
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px 60px" }}>
+          <div className={styles.centerScreen}>
             <div style={{ width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
-              <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 32, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
+              <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
                 Bienvenue
               </h2>
               <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
                 Créez un compte pour retrouver votre progression, ou continuez sans compte.
               </p>
-              <div style={{ width: "100%", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22, textAlign: "left" }}>
+              <div style={{ width: "100%", boxSizing: "border-box", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22, textAlign: "left" }}>
                 <WelcomeAuthForm light />
               </div>
               <span
                 onClick={() => setPreSessionStep("language")}
-                className="elao-text-action"
+                className={`elao-text-action ${styles.tapTarget}`}
                 style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
               >
                 Continuer sans compte
@@ -1785,19 +1965,19 @@ export default function Home() {
       {!sessionStarted && preSessionStep === "confirm-preference" && storedPreference && (
         <>
           <TopBar right={<AuthNavLink light />} />
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px 60px" }}>
+          <div className={styles.centerScreen}>
             <div style={{ width: "100%", maxWidth: 440, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
-              <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 32, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.25 }}>
+              <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.25 }}>
                 Continuer en {LANGUAGES.find((l) => l.code === storedPreference.language)?.label}, niveau{" "}
                 {storedPreference.rung}&nbsp;?
               </h2>
               <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>On reprend là où vous vous étiez arrêté(e).</p>
-              <button className="elao-btn-primary" onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
+              <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
                 Continuer
               </button>
               <span
                 onClick={() => setPreSessionStep("language")}
-                className="elao-text-action"
+                className={`elao-text-action ${styles.tapTarget}`}
                 style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
               >
                 Changer de langue
@@ -1811,27 +1991,26 @@ export default function Home() {
       {!sessionStarted && preSessionStep === "language" && (
         <>
           <TopBar right={<AuthNavLink light />} />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 40, padding: "0 24px 60px" }}>
+          <div className={styles.langScreen}>
             <div style={{ textAlign: "center", maxWidth: 620, display: "flex", flexDirection: "column", gap: 14 }}>
-              <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 42, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
+              <h2 className={styles.titleXL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
                 Bonjour. Dans quelle langue
-                <br />
+                <br className={styles.hideMobile} />{" "}
                 allons-nous parler&nbsp;?
               </h2>
-              <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.55 }}>
+              <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.55 }}>
                 Une conversation de {SESSION_DURATION_MINUTES} minutes avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
               </p>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(160px, 236px))", gap: 14 }}>
+            <div className={styles.langGrid}>
               {LANGUAGES.map((l) => {
                 const selected = language === l.code;
                 return (
                   <div
                     key={l.code}
-                    className="elao-lang-card"
+                    className={`elao-lang-card ${styles.langCard}`}
                     onClick={() => setLanguage(l.code)}
                     style={{
-                      padding: "20px 22px",
                       borderRadius: 12,
                       background: "#FFFFFF",
                       border: selected ? "2px solid #141D33" : "1px solid #DDD9D0",
@@ -1850,8 +2029,8 @@ export default function Home() {
                 );
               })}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-              <button className="elao-btn-primary" onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
+            <div className={styles.langCta}>
+              <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
                 Continuer en {LANG_NAME_FR[language]}
               </button>
               <span style={{ fontSize: 13, color: "#8A8F9C" }}>Vous pourrez vérifier votre micro à l&apos;étape suivante.</span>
@@ -1870,13 +2049,13 @@ export default function Home() {
               </span>
             }
           />
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "minmax(0,1fr) 420px", gap: 64, padding: "20px 24px 72px", alignItems: "center" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 36 }}>
+          <div className={styles.instructionsGrid}>
+            <div className={styles.instructionsIntro} style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 38, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+                <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
                   Votre niveau en {SESSION_DURATION_MINUTES} minutes
                 </h2>
-                <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.6, maxWidth: 460 }}>
+                <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.6, maxWidth: 460 }}>
                   Léa vous posera des questions simples sur votre quotidien. Répondez à voix haute, comme dans une
                   vraie conversation.
                 </p>
@@ -1912,19 +2091,8 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-                <button
-                  className="elao-btn-primary"
-                  onClick={startSession}
-                  disabled={micStatus === "pending"}
-                  style={primaryBtn("16px 36px")}
-                >
-                  Je suis prêt
-                </button>
-                <span style={{ fontSize: 14, color: "#8A8F9C" }}>Aucune note n&apos;est affichée pendant l&apos;épreuve.</span>
-              </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: 28, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }}>
+            <div className={styles.instructionsMic} style={{ display: "flex", flexDirection: "column", gap: 18, padding: 28, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }}>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em" }}>
                 VOTRE MICRO
               </span>
@@ -1947,6 +2115,17 @@ export default function Home() {
                 </span>
               </div>
             </div>
+            <div className={styles.instructionsCta} style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+              <button
+                className={`elao-btn-primary ${styles.fullWidthMobile}`}
+                onClick={startSession}
+                disabled={micStatus === "pending"}
+                style={primaryBtn("16px 36px")}
+              >
+                Je suis prêt
+              </button>
+              <span style={{ fontSize: 14, color: "#8A8F9C" }}>Aucune note n&apos;est affichée pendant l&apos;épreuve.</span>
+            </div>
           </div>
         </>
       )}
@@ -1960,16 +2139,16 @@ export default function Home() {
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 132, height: 4, background: "#E4E0D7", borderRadius: 2, overflow: "hidden" }}>
+                  <div className={styles.progressTrack} style={{ height: 4, background: "#E4E0D7", borderRadius: 2, overflow: "hidden" }}>
                     <div style={{ width: `${progressPercent}%`, height: "100%", background: "#141D33" }} />
                   </div>
                   <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 14, color: "#5A5F6E" }}>
-                    {rmm}:{rss} restantes
+                    {rmm}:{rss}<span className={styles.hideMobile}> restantes</span>
                   </span>
                 </div>
                 <span
                   onClick={endSession}
-                  className="elao-text-action"
+                  className={`elao-text-action ${styles.tapTarget}`}
                   style={{ fontSize: 13, color: "#8A8F9C", cursor: "pointer" }}
                 >
                   Terminer
@@ -1977,19 +2156,8 @@ export default function Home() {
               </div>
             }
           />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 34, paddingBottom: 44, position: "relative" }}>
-            <div
-              style={{
-                position: "relative",
-                width: 520,
-                height: 420,
-                maxWidth: "90vw",
-                borderRadius: "200px 200px 24px 24px",
-                border: "1px solid #E0DBD1",
-                overflow: "hidden",
-                background: "#141D33",
-              }}
-            >
+          <div className={styles.stage}>
+            <div className={styles.avatarFrame} style={{ border: "1px solid #E0DBD1", background: "#141D33" }}>
               <TalkingHeadAvatar
                 analyser={avatarAnalyser}
                 audioContext={playerRef.current?.getAudioContext() ?? null}
@@ -1998,10 +2166,10 @@ export default function Home() {
               />
               {turnState === "userSpeaking" && (
                 <div
+                  className={styles.avatarRing}
                   style={{
                     position: "absolute",
                     inset: 0,
-                    borderRadius: "200px 200px 24px 24px",
                     boxShadow: "0 0 0 8px rgba(245,185,33,0.35)",
                     animation: "elaoBreathe 2.6s ease-in-out infinite",
                     pointerEvents: "none",
@@ -2025,25 +2193,25 @@ export default function Home() {
 
             {turnState === "avatarSpeaking" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 22px", borderRadius: 100, background: "#141D33" }}>
+                <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 22px", borderRadius: 100, background: "#141D33" }}>
                   <WaveBars count={5} width={3} height={20} color="#F5B921" duration={0.9} />
                   <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#FFFFFF" }}>Léa vous parle</span>
                 </div>
-                <span style={{ fontSize: 15, color: "#8A8F9C" }}>Écoutez — vous répondrez juste après.</span>
+                <span style={{ fontSize: 15, color: "#8A8F9C", textAlign: "center" }}>Écoutez — vous répondrez juste après.</span>
               </div>
             )}
 
             {turnState === "userSpeaking" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 26px", borderRadius: 100, background: "#FDF0D0", border: "1px solid #F0DDA8" }}>
+                <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 26px", borderRadius: 100, background: "#FDF0D0", border: "1px solid #F0DDA8" }}>
                   <LevelBars count={8} barWidth={4} height={26} color="#8A6410" level={Math.max(micLevel, 0.1)} gapPx={4} />
                   <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>À vous — on vous écoute</span>
                 </div>
-                {sttNotice && <span style={{ fontSize: 15, color: "#B3542E" }}>{sttNotice}</span>}
-                <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+                {sttNotice && <span style={{ fontSize: 15, color: "#B3542E", textAlign: "center" }}>{sttNotice}</span>}
+                <div className={styles.turnActions}>
                   <span
                     onClick={handleRepeatQuestion}
-                    className={`elao-text-action${repeatUsed ? " disabled" : ""}`}
+                    className={`elao-text-action ${styles.tapTarget}${repeatUsed ? " disabled" : ""}`}
                     style={{
                       fontSize: 15,
                       color: repeatUsed ? "#C9C4B8" : "#6B6F7D",
@@ -2056,14 +2224,14 @@ export default function Home() {
                   </span>
                   <span
                     onClick={handleNotUnderstood}
-                    className="elao-text-action"
+                    className={`elao-text-action ${styles.tapTarget}`}
                     style={{ fontSize: 15, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
                   >
                     Je ne comprends pas
                   </span>
                   <span
                     onClick={handleSkipQuestion}
-                    className="elao-text-action"
+                    className={`elao-text-action ${styles.tapTarget}`}
                     style={{ fontSize: 15, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
                   >
                     Passer
@@ -2074,7 +2242,7 @@ export default function Home() {
 
             {turnState === "thinking" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 24px", borderRadius: 100, background: "#EDEAE2", border: "1px solid #E0DBD1" }}>
+                <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 24px", borderRadius: 100, background: "#EDEAE2", border: "1px solid #E0DBD1" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {[0, 0.2, 0.4].map((d) => (
                       <div
@@ -2091,8 +2259,22 @@ export default function Home() {
               </div>
             )}
 
+            {micInterrupted && (
+              <div
+                className={styles.pill}
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "16px 22px", borderRadius: 14, background: "#FFFFFF", border: "1px solid #F0DDA8" }}
+              >
+                <span style={{ fontSize: 15, color: "#141D33", lineHeight: 1.5 }}>
+                  La session a été interrompue : le micro s&apos;est coupé pendant que l&apos;écran était verrouillé ou l&apos;application en arrière-plan.
+                </span>
+                <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={endSession} style={primaryBtn("12px 24px")}>
+                  Terminer et voir mon résultat
+                </button>
+              </div>
+            )}
+
             {chatError && (
-              <div style={{ position: "absolute", bottom: 12, fontSize: 14, color: "#B3542E" }}>{chatError}</div>
+              <div className={styles.chatError} style={{ fontSize: 14, color: "#B3542E" }}>{chatError}</div>
             )}
           </div>
         </>
@@ -2114,31 +2296,6 @@ export default function Home() {
         />
       )}
     </main>
-  );
-}
-
-/** Top bar shared by every pre-session/conversation screen (doc/new_design): ELAO logo left, contextual content right. */
-function TopBar({ right }: { right?: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 36px", flexShrink: 0 }}>
-      <Logo />
-      {right}
-    </div>
-  );
-}
-
-function Logo() {
-  return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
-        <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
-        <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
-        <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
-      </div>
-      <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, color: "#141D33", letterSpacing: "0.02em", lineHeight: 1 }}>
-        ELAO
-      </span>
-    </div>
   );
 }
 

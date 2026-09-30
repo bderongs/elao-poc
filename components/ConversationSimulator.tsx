@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { CEFR_LADDER, type CefrRung } from "@/lib/cefr-rung";
 import { DOMAIN_LABEL, type TopicDomain } from "@/lib/topic-domain";
-import type { SimEvent, SimPersona, SimConfig } from "@/lib/conversation-sim";
+import type { SimEvent, SimPersona, SimConfig, Understanding } from "@/lib/conversation-sim";
 import type { CefrResult } from "@/lib/types";
 import type { CompositeCefrScore } from "@/lib/cefr-score";
 import { CefrPanel } from "@/components/ScoreDisplay";
@@ -58,7 +58,14 @@ type Entry =
       switchToDomain?: TopicDomain;
       topic?: { domain: TopicDomain | null; streak: number };
     }
-  | { kind: "learner"; turn: number; text: string; et?: { verdict: string; previousRung: CefrRung; nextRung: CefrRung } };
+  | {
+      kind: "learner";
+      turn: number;
+      text: string;
+      heard?: string;
+      understanding?: Understanding;
+      et?: { verdict: string; previousRung: CefrRung; nextRung: CefrRung };
+    };
 
 interface RunState {
   config?: SimConfig;
@@ -94,7 +101,7 @@ export function ConversationSimulator() {
       case "examiner":
         return { ...state, entries: [...state.entries, { kind: "examiner", ...e }] };
       case "learner":
-        return { ...state, entries: [...state.entries, { kind: "learner", turn: e.turn, text: e.text }] };
+        return { ...state, entries: [...state.entries, { kind: "learner", turn: e.turn, text: e.text, heard: e.heard, understanding: e.understanding }] };
       case "topic":
         return {
           ...state,
@@ -264,6 +271,11 @@ export function ConversationSimulator() {
                 <div className={styles.turnMeta}>
                   {entry.kind === "examiner" ? (entry.closing ? "examiner · closing" : `examiner · turn ${entry.turn + 1}`) : `learner · answer ${entry.turn}`}
                 </div>
+                {entry.kind === "learner" && entry.heard !== undefined && (
+                  <div style={{ fontSize: 12, color: adminColors.muted, fontStyle: "italic", marginBottom: 4 }}>
+                    heard ({entry.understanding}): {entry.heard}
+                  </div>
+                )}
                 <div className={styles.turnText} style={{ whiteSpace: "pre-wrap" }}>{entry.text}</div>
                 {entry.kind === "examiner" && (
                   <div>

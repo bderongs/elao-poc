@@ -79,7 +79,17 @@
       "Bash(pkill -f \"next dev -p 3411\")",
       "mcp__claude_ai_Supabase__list_migrations",
       "Bash(grep -rn -E \"datePrefix|/turn-\\\\\\\\\\\\$\\\\{|recordings\\\\\"\\\\\\)\" app lib)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" --max-time 5 http://localhost:3000/)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" --max-time 5 http://localhost:3000/)",
+      "Bash(sed -i '' 's/await new Promise\\(r => setTimeout\\(r, 20\\)\\); }/await new Promise\\(r => setTimeout\\(r, 100\\)\\); }/; s/const pcm = fs.readFileSync\\(file\\).subarray\\(44\\);/const pcm = Buffer.concat\\([Buffer.alloc\\(Number\\(process.argv[5] ?? 0\\)*32\\), fs.readFileSync\\(file\\).subarray\\(44\\)]\\);/' /private/tmp/claude-501/-Users-baptiste-ELAO-Speaking/6983bfc3-4acb-499d-8797-7e289fb626fd/scratchpad/gr.mjs)",
+      "Bash(cp /private/tmp/claude-501/-Users-baptiste-ELAO-Speaking/6983bfc3-4acb-499d-8797-7e289fb626fd/scratchpad/gr.mjs ./.tmp-gr.mjs)",
+      "Bash(node ./.tmp-gr.mjs /private/tmp/claude-501/-Users-baptiste-ELAO-Speaking/6983bfc3-4acb-499d-8797-7e289fb626fd/scratchpad/de16.wav de 0 300)",
+      "Bash(curl -s -m 5 -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(lsof -iTCP -sTCP:LISTEN -P)",
+      "Bash(pkill -f \"next dev -p 3100\")",
+      "Bash(lsof -iTCP:3100 -sTCP:LISTEN -P)"
+    ],
+    "additionalDirectories": [
+      "/Users/baptiste/ELAO-Speaking"
     ]
   }
 }

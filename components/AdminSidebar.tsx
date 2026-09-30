@@ -31,7 +31,8 @@ const NAV_ITEMS: NavItem[] = [
         !p.startsWith("/admin/users") &&
         !p.startsWith("/admin/settings") &&
         !p.startsWith("/admin/system-config") &&
-        !p.startsWith("/admin/simulator")),
+        !p.startsWith("/admin/simulator") &&
+        !p.startsWith("/admin/question-bank")),
   },
   {
     href: "/admin/upload",
@@ -76,6 +77,17 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
     isActive: (p) => p.startsWith("/admin/simulator"),
+  },
+  {
+    href: "/admin/question-bank",
+    label: "Question bank",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z" />
+        <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+      </svg>
+    ),
+    isActive: (p) => p.startsWith("/admin/question-bank"),
   },
   {
     href: "/admin/users",

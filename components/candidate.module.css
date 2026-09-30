@@ -1,0 +1,289 @@
+/* Responsive layout for the candidate-facing screens (app/page.tsx test flow,
+   EvaluatingScreen, SessionResultsScreen, results-saved). Colours and type
+   stay inline in the components; only the layout values that change per
+   breakpoint live here, so a media query can override them (inline styles
+   would always win over a class). Breakpoint matches admin.module.css's 640px. */
+
+/* ─── top bar ──────────────────────────────────────────────────────────── */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 22px 36px;
+  padding-top: max(22px, env(safe-area-inset-top));
+  flex-shrink: 0;
+}
+
+/* ─── shared screen scaffolding ────────────────────────────────────────── */
+
+/* Centered single-column screen (welcome, confirm-preference, results-saved). */
+.centerScreen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px 60px;
+}
+
+.titleXL {
+  font-size: 42px;
+}
+
+.titleL {
+  font-size: 38px;
+}
+
+.titleM {
+  font-size: 32px;
+}
+
+.lead {
+  font-size: 17px;
+}
+
+/* Grows a hidden-text-action's hit area to ~44px without moving its
+   underline (which is a border-bottom on the element itself). */
+.tapTarget {
+  position: relative;
+}
+
+.tapTarget::after {
+  content: "";
+  position: absolute;
+  inset: -12px -8px;
+}
+
+/* ─── 1. language picker ───────────────────────────────────────────────── */
+
+.langScreen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 0 24px 60px;
+}
+
+.langGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 236px));
+  gap: 14px;
+}
+
+.langCard {
+  padding: 20px 22px;
+}
+
+.langCta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+/* ─── 2. instructions + mic check ──────────────────────────────────────── */
+
+.instructionsGrid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-areas:
+    "intro mic"
+    "cta mic";
+  column-gap: 64px;
+  row-gap: 36px;
+  align-content: center;
+  padding: 20px 24px 72px;
+}
+
+.instructionsIntro {
+  grid-area: intro;
+}
+
+.instructionsMic {
+  grid-area: mic;
+  align-self: center;
+}
+
+.instructionsCta {
+  grid-area: cta;
+}
+
+/* ─── 3. conversation ──────────────────────────────────────────────────── */
+
+.progressTrack {
+  width: 132px;
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  padding: 0 16px 44px;
+}
+
+/* Scales down with the viewport instead of a fixed 520×420 box: never wider
+   than the screen, never taller than half of it (short landscape phones). */
+.avatarFrame {
+  position: relative;
+  width: min(520px, 100%, calc(55dvh * 520 / 420));
+  aspect-ratio: 520 / 420;
+  border-radius: 200px 200px 24px 24px;
+  overflow: hidden;
+}
+
+.avatarRing {
+  border-radius: inherit;
+}
+
+.pill {
+  max-width: 100%;
+  text-align: center;
+}
+
+.turnActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+}
+
+.chatError {
+  text-align: center;
+  padding: 0 16px;
+}
+
+/* ─── 4. evaluating / results ──────────────────────────────────────────── */
+
+.evalBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  padding: 0 80px 60px;
+}
+
+.resultsBody {
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 12px 24px 60px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ─── mobile ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .topbar {
+    padding: 14px 16px;
+    padding-top: max(14px, env(safe-area-inset-top));
+  }
+
+  .centerScreen {
+    padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .titleXL,
+  .titleL {
+    font-size: 28px;
+  }
+
+  .titleM {
+    font-size: 26px;
+  }
+
+  .lead {
+    font-size: 16px;
+  }
+
+  .hideMobile {
+    display: none;
+  }
+
+  .fullWidthMobile {
+    width: 100%;
+  }
+
+  .langScreen {
+    justify-content: flex-start;
+    gap: 24px;
+    padding: 8px 16px 0;
+  }
+
+  .langGrid {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .langCard {
+    padding: 14px 16px;
+  }
+
+  /* The CTA stays reachable without scrolling past the language cards. */
+  .langCta {
+    position: sticky;
+    bottom: 0;
+    width: 100%;
+    margin-top: auto;
+    padding: 16px 0 calc(16px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, #f7f5f0 75%, rgba(247, 245, 240, 0));
+  }
+
+  .instructionsGrid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "intro"
+      "mic"
+      "cta";
+    row-gap: 24px;
+    align-content: start;
+    padding: 8px 16px calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .instructionsMic {
+    padding: 20px !important;
+  }
+
+  .progressTrack {
+    width: 64px;
+  }
+
+  .stage {
+    gap: 20px;
+    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .avatarFrame {
+    border-radius: 140px 140px 20px 20px;
+  }
+
+  .pill {
+    padding: 10px 18px !important;
+  }
+
+  .turnActions {
+    gap: 12px 20px;
+  }
+
+  .evalBody {
+    gap: 24px;
+    padding: 0 16px calc(40px + env(safe-area-inset-bottom));
+  }
+
+  .resultsBody {
+    padding: 8px 16px calc(40px + env(safe-area-inset-bottom));
+  }
+}

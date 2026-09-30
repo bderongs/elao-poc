@@ -59,13 +59,17 @@ export function ClaimResultsForm({ sessionId, light = false }: { sessionId: stri
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             style={{
-              flex: "1 1 200px",
-              padding: "8px 10px",
-              borderRadius: 6,
+              // Grows far faster than the button so it keeps the leftover
+              // width on desktop; once the row wraps (phones) the button
+              // then fills its own line.
+              flex: "100 1 200px",
+              minWidth: 0,
+              padding: light ? "11px 12px" : "8px 10px",
+              borderRadius: light ? 10 : 6,
               border: `1px solid ${light ? "#DDD9D0" : "#334155"}`,
               background: light ? "#F7F5F0" : "#0f172a",
               color: light ? "#141D33" : "#e5e7eb",
-              fontSize: 14,
+              fontSize: light ? 16 : 14,
               fontFamily: light ? "'DM Sans',system-ui,sans-serif" : undefined,
             }}
           />
@@ -73,7 +77,8 @@ export function ClaimResultsForm({ sessionId, light = false }: { sessionId: stri
             type="submit"
             disabled={status === "sending"}
             style={{
-              padding: "8px 14px",
+              flex: "1 0 auto",
+              padding: light ? "12px 16px" : "8px 14px",
               borderRadius: light ? 10 : 6,
               border: "none",
               background: light ? "#141D33" : "#4f46e5",

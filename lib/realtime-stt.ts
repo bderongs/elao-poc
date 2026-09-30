@@ -60,7 +60,16 @@ interface TurnState {
 
 export type RealtimeSttLifecycleEvent = "ws_open" | "ws_closed" | "ws_error" | "token_error";
 
-export class RealtimeStt {
+/** What app/page.tsx drives — one socket per turn. Implemented by RealtimeStt
+ *  (Mistral) and GradiumRealtimeStt (lib/realtime-stt-gradium.ts). */
+export interface StreamingStt {
+  startTurn(): void;
+  pushAudio(float32: Float32Array): void;
+  finalizeTurn(): Promise<string>;
+  close(): void;
+}
+
+export class RealtimeStt implements StreamingStt {
   private inputSampleRate: number;
   private onLifecycle?: (event: RealtimeSttLifecycleEvent, data?: Record<string, unknown>) => void;
 
@@ -225,7 +234,7 @@ export class RealtimeStt {
  * ended up at — not necessarily 48000) -> mono Int16 PCM at 16kHz, linearly
  * interpolated. Good enough for ASR input; not intended for playback fidelity.
  */
-function resampleTo16kPcm16(float32: Float32Array, inputSampleRate: number): ArrayBuffer {
+export function resampleTo16kPcm16(float32: Float32Array, inputSampleRate: number): ArrayBuffer {
   if (float32.length === 0) return new ArrayBuffer(0);
   const ratio = inputSampleRate / TARGET_SAMPLE_RATE;
   const outLength = Math.max(0, Math.floor(float32.length / ratio));

@@ -4,7 +4,6 @@ import { listSessions } from "@/lib/sessions-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { formatDateTime } from "@/lib/format-date";
 import { languageLabel, languageFlag } from "@/lib/languages";
-import adminStyles from "@/components/admin.module.css";
 import styles from "@/components/dashboard.module.css";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +12,10 @@ const PAGE_SIZE = 9;
 
 function PageLink({ page, disabled, children }: { page: number; disabled: boolean; children: React.ReactNode }) {
   if (disabled) {
-    return <span className={adminStyles.pageLinkDisabled}>{children}</span>;
+    return <span className={styles.pageLinkDisabled}>{children}</span>;
   }
   return (
-    <Link href={`/dashboard?page=${page}`} className={adminStyles.pageLink}>
+    <Link href={`/dashboard?page=${page}`} className={styles.pageLink}>
       {children}
     </Link>
   );
@@ -70,11 +69,11 @@ export default async function DashboardPage({
             ))}
           </div>
 
-          <div className={adminStyles.pagination}>
-            <span className={adminStyles.pageInfo}>
+          <div className={styles.pagination}>
+            <span className={styles.pageInfo}>
               Page {page} / {totalPages}
             </span>
-            <div className={adminStyles.pageLinks}>
+            <div className={styles.pageLinks}>
               <PageLink page={page - 1} disabled={page <= 1}>&larr; Précédent</PageLink>
               <PageLink page={page + 1} disabled={page >= totalPages}>Suivant &rarr;</PageLink>
             </div>

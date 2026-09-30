@@ -34,3 +34,14 @@
   --admin-sidebar-active-bg: rgba(245, 185, 33, 0.16);
   --admin-sidebar-active-accent: #f5b921;
 }
+
+/* Mobile basics for the candidate side: no iOS auto text inflation on
+   rotate, no grey flash on tapped links/spans. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+}

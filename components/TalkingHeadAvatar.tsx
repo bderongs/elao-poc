@@ -109,6 +109,10 @@ export function TalkingHeadAvatar({
         // the rendered head reads smaller within the (unchanged-size) panel
         // — closer to a normal video-call framing than a tight close-up.
         cameraDistance: 0.7,
+        // Renderer pixel ratio is modelPixelRatio × devicePixelRatio — cap the
+        // product at 2 so 3× phones don't render 2.25× the pixels of a 2×
+        // screen for no visible gain (frame rate + battery over a long session).
+        modelPixelRatio: Math.min(1, 2 / (window.devicePixelRatio || 1)),
         avatarMood: "neutral",
         // We only use audio-driven lip-sync (wawa-lipsync), never TalkingHead's
         // own text-driven mode — skip its default eager preload of the

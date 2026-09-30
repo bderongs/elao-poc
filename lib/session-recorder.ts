@@ -8,9 +8,22 @@
  *   new SessionRecorder() — opens its own getUserMedia as a fallback
  *     (HeyGen mode, or if Deepgram fails to start). Mic-only.
  *
- * Quality: Opus at 128 kbps. No DSP constraints on the combined stream
+ * Quality: Opus at 128 kbps (AAC in MP4 on Safari — see pickRecorderMimeType). No DSP constraints on the combined stream
  * (echo cancellation / AGC are applied upstream by the mic's getUserMedia).
  */
+/**
+ * Best MediaRecorder container the browser supports: Opus-in-WebM (best
+ * quality/size for speech) where available, else MP4/AAC — the only option
+ * on iOS Safari before 18.4. "" when nothing is supported.
+ */
+export function pickRecorderMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "";
+  if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+  if (MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
+  if (MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+  return "";
+}
+
 export class SessionRecorder {
   private mediaRecorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
@@ -32,14 +45,11 @@ export class SessionRecorder {
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       }
 
-      // Prefer Opus (best quality/size ratio for speech).
-      // Fall back gracefully on browsers that don't support webm.
-      const mimeType =
-        MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "audio/ogg";
+      const mimeType = pickRecorderMimeType();
+      if (!mimeType) {
+        console.warn("SessionRecorder: no supported mimeType");
+        return;
+      }
 
       this.mediaRecorder = new MediaRecorder(this.stream, {
         mimeType,

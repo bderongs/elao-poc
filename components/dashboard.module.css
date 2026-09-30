@@ -3,7 +3,7 @@
    Fonts are loaded globally in app/layout.tsx. */
 
 .shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   background: #f7f5f0;
   color: #141d33;
   font-family: "DM Sans", system-ui, sans-serif;
@@ -197,14 +197,111 @@
   font-size: 15px;
 }
 
+/* ─── pagination (own copy, so admin restyles can't reach the user side) ─ */
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 20px;
+  font-size: 14px;
+}
+
+.pageInfo {
+  color: #8a8f9c;
+}
+
+.pageLinks {
+  display: flex;
+  gap: 8px;
+}
+
+.pageLink,
+.pageLinkDisabled {
+  display: inline-block;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #e4e0d7;
+  background: #fff;
+  text-decoration: none;
+}
+
+.pageLink {
+  color: #141d33;
+}
+
+.pageLink:hover {
+  border-color: #141d33;
+}
+
+.pageLinkDisabled {
+  color: #c9c4b8;
+}
+
+/* ─── session detail ───────────────────────────────────────────────────── */
+
+.backLink {
+  display: inline-block;
+  padding: 6px 0;
+  margin-bottom: 12px;
+  color: #6b6f7d;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.backLink:hover {
+  color: #141d33;
+}
+
+.detailTitle {
+  font-family: "Outfit", sans-serif;
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0 0 4px;
+}
+
 @media (max-width: 600px) {
   .topbar {
-    padding: 16px;
+    padding: 14px 16px;
+    padding-top: max(14px, env(safe-area-inset-top));
   }
   .userEmail {
     display: none;
   }
+  .main {
+    padding: 16px 16px calc(40px + env(safe-area-inset-bottom));
+  }
+  .hero {
+    margin-bottom: 36px;
+  }
   .heroTitle {
     font-size: 30px;
+  }
+  .heroCta {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pagination {
+    justify-content: center;
+  }
+  .pageLinks {
+    width: 100%;
+  }
+  .pageLink,
+  .pageLinkDisabled {
+    flex: 1;
+    text-align: center;
+  }
+  .detailTitle {
+    font-size: 22px;
   }
 }

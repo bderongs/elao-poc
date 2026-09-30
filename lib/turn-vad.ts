@@ -8,9 +8,10 @@
  * pronunciation-assessment audio + session recording regardless of STT path)
  * own that, and transcription itself is either a Voxtral batch call
  * (lib/mistral.ts's mistralTranscribe, via app/api/transcribe) or, when
- * available, lib/realtime-stt.ts streaming audio to Mistral's realtime
- * endpoint via this file's onAudioFrame callback — fired only while genuine
- * speech is detected, so neither silence nor avatar-TTS bleed gets streamed.
+ * available, a streaming client (lib/realtime-stt.ts, lib/realtime-stt-gradium.ts)
+ * fed via this file's onAudioFrame callback — fired only within an utterance
+ * (plus a short pre-roll), so silence and avatar-TTS bleed between
+ * utterances never get streamed.
  * No live-partial-text callback either — live captions are gone along with
  * Azure; app/page.tsx shows a "…" listening indicator between onSpeechStart
  * and the transcript arriving.
@@ -33,9 +34,9 @@ export interface TurnVadCallbacks {
   /** Fires once, per speech segment, when the user keeps talking through BARGE_IN_MS
    *  while the avatar is speaking — the caller's cue to stop TTS immediately. */
   onBargeIn?: () => void;
-  /** Fires per buffer while genuine speech (above the current threshold) is
-   *  detected — lib/realtime-stt.ts's audio feed, so silence/echo bleed
-   *  between utterances is never streamed to it. */
+  /** Streaming STT's audio feed: every buffer from speech start (preceded by
+   *  PRE_ROLL_FRAMES of lead-in) until the utterance is finalized, quiet
+   *  in-speech buffers included — never the silence/echo between utterances. */
   onAudioFrame?: (float32: Float32Array) => void;
 }
 
@@ -96,6 +97,13 @@ const MIN_SPEECH_MS = 400;
  */
 const BARGE_IN_MS = 500;
 const BUFFER_SIZE = 4096;
+/**
+ * Audio kept from just BEFORE speech crosses the threshold and replayed into
+ * onAudioFrame at speech start (~340 ms at 48 kHz) — a word's soft onset is
+ * below threshold, and without it streaming STT dropped first words ("Ich
+ * wohne…" → "wohne…", confirmed against Gradium).
+ */
+const PRE_ROLL_FRAMES = 4;
 
 export class TurnVad {
   private audioContext: AudioContext | null = null;
@@ -116,11 +124,17 @@ export class TurnVad {
   private bargeInFired = false;
   /** Set by setExtendedPauseTolerance — true while the current question is at the Mastery (C2) difficulty zone. */
   private extendedPauseTolerance = false;
+  /** Last PRE_ROLL_FRAMES sub-threshold frames while not speaking (copies — the browser reuses its buffers). */
+  private preRoll: Float32Array[] = [];
 
   constructor(stream: MediaStream, callbacks: TurnVadCallbacks) {
     this.cb = callbacks;
 
     this.audioContext = new AudioContext();
+    // Built after awaits in startSession, i.e. outside the click's user
+    // activation — iOS Safari can hand it back "suspended", which would mean
+    // no onaudioprocess and no turn detection at all. See also resume().
+    this.resume();
     this.source = this.audioContext.createMediaStreamSource(stream);
     this.processor = this.audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
     this.processor.onaudioprocess = (e) => this.handleAudio(e.inputBuffer.getChannelData(0));
@@ -181,17 +195,29 @@ export class TurnVad {
             }
           }, BARGE_IN_MS);
         }
+        for (const frame of this.preRoll) this.cb.onAudioFrame?.(frame);
+        this.preRoll = [];
       }
       this.cb.onAudioFrame?.(float32);
       if (this.silenceTimer !== null) {
         clearTimeout(this.silenceTimer);
         this.silenceTimer = null;
       }
-    } else if (this.isSpeaking && this.silenceTimer === null) {
-      const spokenMs = Date.now() - this.speechStartMs;
-      const longBudget = this.extendedPauseTolerance ? SILENCE_MS_LONG_EXTENDED : SILENCE_MS_LONG;
-      const silenceMs = spokenMs < SHORT_UTTERANCE_MS ? SILENCE_MS_SHORT : longBudget;
-      this.silenceTimer = setTimeout(() => this.finalize(), silenceMs);
+    } else if (this.isSpeaking) {
+      // Quiet frames INSIDE an utterance (soft consonants, word endings,
+      // short pauses) are still speech to the recogniser: forward them until
+      // finalize(). Only forwarding above-threshold frames handed streaming
+      // STT a chopped, gap-less signal.
+      this.cb.onAudioFrame?.(float32);
+      if (this.silenceTimer === null) {
+        const spokenMs = Date.now() - this.speechStartMs;
+        const longBudget = this.extendedPauseTolerance ? SILENCE_MS_LONG_EXTENDED : SILENCE_MS_LONG;
+        const silenceMs = spokenMs < SHORT_UTTERANCE_MS ? SILENCE_MS_SHORT : longBudget;
+        this.silenceTimer = setTimeout(() => this.finalize(), silenceMs);
+      }
+    } else {
+      this.preRoll.push(float32.slice());
+      if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
     }
   }
 
@@ -211,6 +237,11 @@ export class TurnVad {
    *  rate, since a MediaStreamAudioSourceNode resamples to the context's rate
    *  (which defaults to the output device's, not the mic's). lib/realtime-stt.ts
    *  needs this to resample onAudioFrame's buffers correctly. */
+  /** Un-suspends the analysis context (no-op when already running) — safe to call from any tap handler. */
+  resume() {
+    if (this.audioContext?.state === "suspended") void this.audioContext.resume().catch(() => {});
+  }
+
   getSampleRate(): number {
     return this.audioContext?.sampleRate ?? 48000;
   }

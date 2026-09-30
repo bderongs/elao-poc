@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 /**
  * POST /api/sessions/live  { language } → { id } — creates the 'in_progress'
  * row for a live conversation at its first answer.
- * PATCH /api/sessions/live { id, durationSeconds, turns } — saves progress
+ * PATCH /api/sessions/live { id, durationSeconds, turns, ladder? } — saves progress
  * after each answer. Both are public (see middleware.ts): guests have no
  * account, and the service only ever touches in-progress conversation rows.
  * The final save is still POST /api/sessions, which finalises this row.
@@ -24,14 +24,15 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { id, durationSeconds, turns } = (await req.json()) as {
+    const { id, durationSeconds, turns, ladder } = (await req.json()) as {
       id?: string;
       durationSeconds?: number;
       turns?: Array<{ role: string; content: string; pronunciation: unknown | null }>;
+      ladder?: unknown;
     };
     if (!id || !Array.isArray(turns)) return Response.json({ error: "id and turns required" }, { status: 400 });
     const user = await getCurrentUser();
-    await saveLiveProgress(id, { durationSeconds: Math.max(0, Math.round(durationSeconds ?? 0)), turns }, user?.id ?? null);
+    await saveLiveProgress(id, { durationSeconds: Math.max(0, Math.round(durationSeconds ?? 0)), turns, ladder }, user?.id ?? null);
     return Response.json({ ok: true });
   } catch (e) {
     console.error("[sessions/live] progress failed:", e);

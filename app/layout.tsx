@@ -1,9 +1,17 @@
+import type { Viewport } from "next";
 import "./globals.css";
 import { GlobalDebugPanel } from "@/components/GlobalDebugPanel";
 
 export const metadata = {
   title: "ELAO Speaking",
   description: "Évaluation CEFR par conversation avec avatar 3D",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#F7F5F0",
 };
 
 export default function RootLayout({

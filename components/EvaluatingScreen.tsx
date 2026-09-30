@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CandidateTopBar } from "@/components/CandidateTopBar";
+import styles from "@/components/candidate.module.css";
 
 interface EvaluatingScreenProps {
   /** Flips true once /api/evaluate + saveSession have both settled (success or failure). */
@@ -21,19 +23,6 @@ const MIN_VISIBLE_MS = 2500;
 const LABEL_INTERVAL_MS = 2200;
 const CAP_PERCENT = 90;
 const COMPLETE_ANIM_MS = 400;
-
-const LOGO = (
-  <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
-      <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
-      <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
-      <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
-    </div>
-    <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, color: "#141D33", letterSpacing: "0.02em", lineHeight: 1 }}>
-      ELAO
-    </span>
-  </div>
-);
 
 /**
  * Full-screen takeover shown while a session is being scored — screen 4
@@ -87,8 +76,8 @@ export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: Eval
       <style>{`
         @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
       `}</style>
-      <div style={{ display: "flex", alignItems: "center", padding: "22px 36px" }}>{LOGO}</div>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 34, padding: "0 80px 60px" }}>
+      <CandidateTopBar />
+      <div className={styles.evalBody}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 56 }}>
           {[0, 0.15, 0.3, 0.45, 0.6].map((delay) => (
             <div
@@ -106,10 +95,10 @@ export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: Eval
           ))}
         </div>
         <div style={{ textAlign: "center", maxWidth: 560, display: "flex", flexDirection: "column", gap: 14 }}>
-          <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 38, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+          <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
             C&apos;est terminé, merci.
           </h2>
-          <p style={{ margin: 0, fontSize: 17, color: "#5A5F6E", lineHeight: 1.6 }}>
+          <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.6 }}>
             Nous analysons votre prise de parole : prononciation, fluidité, vocabulaire et grammaire. Votre
             niveau CECRL s&apos;affichera dans un instant.
           </p>
@@ -132,7 +121,7 @@ export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: Eval
             <span>{done ? "TERMINÉ" : `~${secondsLeft} S`}</span>
           </div>
         </div>
-        <span style={{ fontSize: 14, color: "#8A8F9C" }}>
+        <span style={{ fontSize: 14, color: "#8A8F9C", textAlign: "center" }}>
           Vous pouvez fermer cette fenêtre : le rapport vous sera envoyé par e-mail.
         </span>
       </div>

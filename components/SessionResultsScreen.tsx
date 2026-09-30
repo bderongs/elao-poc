@@ -3,6 +3,8 @@
 import { CefrPanel } from "@/components/ScoreDisplay";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { ClaimResultsForm } from "@/components/ClaimResultsForm";
+import { CandidateTopBar } from "@/components/CandidateTopBar";
+import styles from "@/components/candidate.module.css";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
 
 const FR_CEFR_LABELS = {
@@ -13,21 +15,6 @@ const FR_CEFR_LABELS = {
   notableErrors: "Erreurs notables",
   confidence: { high: "FIABLE", medium: "MOYEN", low: "INDICATIF" },
 };
-
-function Logo() {
-  return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 9 }}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 3 }}>
-        <div style={{ width: 4, height: 10, background: "#F5B921", borderRadius: 1 }} />
-        <div style={{ width: 4, height: 17, background: "#F5B921", borderRadius: 1 }} />
-        <div style={{ width: 4, height: 23, background: "#F5B921", borderRadius: 1 }} />
-      </div>
-      <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 21, fontWeight: 500, color: "#141D33", letterSpacing: "0.02em", lineHeight: 1 }}>
-        ELAO
-      </span>
-    </div>
-  );
-}
 
 /**
  * The "done" phase screen (doc/new_design's visual language, extended past
@@ -55,20 +42,22 @@ export function SessionResultsScreen({
 }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto", background: "#F7F5F0" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 36px", flexShrink: 0 }}>
-        <Logo />
-        <span
-          onClick={onRestart}
-          style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
-        >
-          Nouvelle session
-        </span>
-      </div>
+      <CandidateTopBar
+        right={
+          <span
+            onClick={onRestart}
+            className={styles.tapTarget}
+            style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+          >
+            Nouvelle session
+          </span>
+        }
+      />
 
-      <div style={{ maxWidth: 560, width: "100%", margin: "0 auto", padding: "12px 24px 60px", display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className={styles.resultsBody}>
         {/* Hero */}
         <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
-          <h2 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 32, fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
+          <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
             Merci d&apos;avoir passé le test.
           </h2>
           <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>Voici votre résultat.</p>
@@ -108,7 +97,7 @@ export function SessionResultsScreen({
                 </div>
               </div>
             )}
-            <div style={{ border: "1px solid #E4E0D7", borderRadius: 14, overflow: "hidden", maxHeight: 480, display: "flex", flexDirection: "column", background: "#FFFFFF" }}>
+            <div style={{ border: "1px solid #E4E0D7", borderRadius: 14, overflow: "hidden", maxHeight: "min(480px, 60dvh)", display: "flex", flexDirection: "column", background: "#FFFFFF" }}>
               {transcriptPanel}
             </div>
           </div>

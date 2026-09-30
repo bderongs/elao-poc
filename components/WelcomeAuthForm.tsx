@@ -51,12 +51,14 @@ export function WelcomeAuthForm({ light = false }: { light?: boolean }) {
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         style={{
-          padding: "10px 12px",
-          borderRadius: 6,
+          padding: light ? "12px 14px" : "10px 12px",
+          borderRadius: light ? 10 : 6,
           border: `1px solid ${light ? "#DDD9D0" : "#334155"}`,
           background: light ? "#FFFFFF" : "#0f172a",
           color: light ? "#141D33" : "#e5e7eb",
-          fontSize: 14,
+          // 16px on the light (candidate) form: iOS Safari zooms the page
+          // in on focus for any input under 16px.
+          fontSize: light ? 16 : 14,
           fontFamily: light ? "'DM Sans',system-ui,sans-serif" : undefined,
         }}
       />
@@ -67,14 +69,14 @@ export function WelcomeAuthForm({ light = false }: { light?: boolean }) {
         type="submit"
         disabled={status === "sending"}
         style={{
-          padding: "10px 12px",
+          padding: light ? "13px 12px" : "10px 12px",
           borderRadius: light ? 10 : 6,
           border: "none",
           background: light ? "#141D33" : "#4f46e5",
           color: "#fff",
           fontWeight: 600,
           fontFamily: light ? "'Outfit',sans-serif" : undefined,
-          fontSize: 14,
+          fontSize: light ? 15 : 14,
           cursor: status === "sending" ? "default" : "pointer",
           opacity: status === "sending" ? 0.7 : 1,
         }}

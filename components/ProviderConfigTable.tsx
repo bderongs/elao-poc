@@ -49,12 +49,11 @@ function FluencyWpmTooltip() {
 // from lib/session-cost.ts's estimators.
 function costForCapability(c: CapabilityConfig): CostEstimate | null {
   switch (c.capability) {
-    case "STT":
-      return estimateSttCostUsd(c.providerId);
     case "ET":
       return estimateEtCostUsd(c.providerId, c.modelLabel);
     case "CEFR_EVAL":
       return estimateCefrEvalCostUsd(c.providerId, c.modelLabel);
+    case "STT":
     case "TTS":
     case "EO":
       // With a perLanguage breakdown there's no single number (see the
@@ -64,10 +63,12 @@ function costForCapability(c: CapabilityConfig): CostEstimate | null {
 }
 
 // Cost for one language's provider, generalized across every capability that
-// can have a perLanguage breakdown (currently TTS and EO) — mirrors
+// can have a perLanguage breakdown (currently STT, TTS and EO) — mirrors
 // costForCapability's per-capability dispatch above.
 function costForLanguageProvider(capability: CapabilityConfig["capability"], p: { providerId: string; modelLabel: string }): CostEstimate | null {
   switch (capability) {
+    case "STT":
+      return estimateSttCostUsd(p.providerId);
     case "TTS":
       return estimateTtsCostUsd(p.providerId);
     case "EO":

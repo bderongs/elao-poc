@@ -662,6 +662,16 @@
   background: var(--admin-ink-hover);
 }
 
+/* Finger-sized play button on touch screens (also used by the candidate
+   dashboard, app/dashboard/[id]). */
+@media (pointer: coarse) {
+  .audioPlayButton {
+    width: 36px;
+    height: 36px;
+    font-size: 12px;
+  }
+}
+
 .audioSeek {
   flex: 1;
   min-width: 0;

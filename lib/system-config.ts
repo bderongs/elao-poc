@@ -7,18 +7,26 @@
  * "what a session used" view can never drift apart from each other.
  *
  * Each registry's own LIVE_..._ID constant (or, for TTS and EO, a
- * LIVE_..._PROVIDER_BY_LANG map) remains the actual switch — this file only
+ * LIVE_..._PROVIDER_BY_LANG map; for STT, lib/realtime-stt-config.ts's
+ * REALTIME_STT_PROVIDER_BY_LANG on top of LIVE_STT_PROVIDER_ID) remains the actual switch — this file only
  * reads them, it doesn't decide anything itself.
  */
 
 import type { ConvLang } from "@/lib/conversation-prompts";
 import { getProvider as getSttProvider, LIVE_STT_PROVIDER_ID } from "@/lib/stt/registry";
+import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, REALTIME_STT_PROVIDER_LABELS, type RealtimeSttProviderId } from "@/lib/realtime-stt-config";
 import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { getProvider as getPronunciationProvider } from "@/lib/pronunciation/registry";
 import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG } from "@/lib/pronunciation-rollup";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
+import { mistralRealtimeTranscribeModel } from "@/lib/mistral";
+
+const REALTIME_STT_MODEL_LABEL: Record<RealtimeSttProviderId, () => string> = {
+  gradium: () => "gradium-asr (default)",
+  mistral: mistralRealtimeTranscribeModel,
+};
 
 const ALL_LANGUAGES: ConvLang[] = ["en", "fr", "nl-BE", "es", "it", "de"];
 
@@ -31,7 +39,7 @@ export interface ProviderConfig {
 export interface CapabilityConfig extends ProviderConfig {
   capability: "STT" | "TTS" | "ET" | "EO" | "CEFR_EVAL";
   capabilityLabel: string;
-  /** TTS and EO only — provider choice varies by language; absent for STT/ET/CEFR_EVAL. */
+  /** STT, TTS and EO only — provider choice varies by language; absent for ET/CEFR_EVAL. */
   perLanguage?: Partial<Record<ConvLang, ProviderConfig>>;
 }
 
@@ -39,6 +47,17 @@ export function getSystemConfig(): CapabilityConfig[] {
   const stt = getSttProvider(LIVE_STT_PROVIDER_ID);
   const et = getEtProvider(LIVE_ET_PROVIDER_ID);
   const cefrEval = getLlmProvider(LIVE_CONVERSATION_MODEL_ID);
+
+  // The conversation streams to REALTIME_STT_PROVIDER_BY_LANG's provider and
+  // only falls back to the batch provider (LIVE_STT_PROVIDER_ID) for languages
+  // with no streaming provider, or on a failed/timed-out streaming turn.
+  const sttPerLanguage: Partial<Record<ConvLang, ProviderConfig>> = {};
+  for (const lang of ALL_LANGUAGES) {
+    const streaming = REALTIME_STT_ENABLED ? REALTIME_STT_PROVIDER_BY_LANG[lang] : null;
+    sttPerLanguage[lang] = streaming
+      ? { providerId: `${streaming}-realtime`, providerLabel: REALTIME_STT_PROVIDER_LABELS[streaming], modelLabel: REALTIME_STT_MODEL_LABEL[streaming]() }
+      : { providerId: stt.id, providerLabel: "Voxtral batch — no streaming provider for this language", modelLabel: stt.modelLabel };
+  }
 
   const ttsPerLanguage: Partial<Record<ConvLang, ProviderConfig>> = {};
   for (const lang of ALL_LANGUAGES) {
@@ -64,9 +83,10 @@ export function getSystemConfig(): CapabilityConfig[] {
     {
       capability: "STT",
       capabilityLabel: "Speech-to-text (live transcription)",
-      providerId: stt.id,
-      providerLabel: stt.label,
-      modelLabel: stt.modelLabel,
+      providerId: "per-language",
+      providerLabel: "Varies by language — see perLanguage",
+      modelLabel: "Varies by language — see perLanguage",
+      perLanguage: sttPerLanguage,
     },
     {
       capability: "TTS",

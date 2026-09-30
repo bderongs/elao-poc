@@ -1,5 +1,6 @@
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { CapabilityConfig } from "@/lib/system-config";
+import type { LadderRecord } from "@/lib/session-length";
 
 // Domain types shared across API routes, the admin tool, and the eval lab —
 // single source of truth so route handlers and pages don't redeclare the
@@ -68,6 +69,8 @@ export interface SessionDetailRow extends SessionSummary {
    *  this column existed, and for upload/speechace sessions (no live turn
    *  pipeline ran). */
   providers_json: CapabilityConfig[] | null;
+  /** Difficulty ladder + adaptive-length stop decision (lib/session-length.ts). Null before migration 0011 and for upload/speechace sessions. */
+  ladder_json?: LadderRecord | null;
 }
 
 export interface TurnRow {

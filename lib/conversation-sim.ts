@@ -16,17 +16,24 @@
  * - No audio: no pronunciation or WPM, so the evaluation runs without
  *   pronunciationContext — the fluency dimension is judged from text alone.
  * - Session length is a fixed number of learner answers, not a 3-min timer.
+ *
+ * At A1/A2 the learner never reads the examiner's text directly: a separate
+ * "listening" call first reduces each examiner turn to what a learner of that
+ * level would actually catch (unknown parts → "…"), and the learner answers
+ * from that. Prompting alone doesn't work — an LLM that has read the full
+ * question can't convincingly pretend not to understand it.
  */
 
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { CefrRung } from "@/lib/cefr-rung";
 import type { CefrResult } from "@/lib/types";
-import { buildExaminerPrompt } from "@/lib/examiner-prompt";
+import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralComplete } from "@/lib/mistral";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { classifyTopicDomain } from "@/lib/topic-tracking";
 import { pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
+import type { LlmProvider } from "@/lib/llm/types";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
 import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore, type CompositeCefrScore } from "@/lib/cefr-score";
@@ -77,7 +84,7 @@ export type SimEvent =
       switchToDomain?: TopicDomain;
     }
   | { type: "topic"; turn: number; domain: TopicDomain | null; streak: number }
-  | { type: "learner"; turn: number; text: string }
+  | { type: "learner"; turn: number; text: string; heard?: string; understanding?: Understanding }
   | { type: "et"; turn: number; verdict: string; previousRung: CefrRung; nextRung: CefrRung }
   | { type: "evaluation"; result: CefrResult; composite: CompositeCefrScore }
   | { type: "error"; stage: string; message: string }
@@ -99,7 +106,6 @@ const LEVEL_GUIDE: Record<CefrRung, string> = {
   A1: `- Answers of 1 to 8 words. Often fragments, not full sentences.
 - Present tense only. Very basic, concrete vocabulary (family, food, numbers, city).
 - Frequent errors: wrong verb forms, missing or wrong articles/gender, word order mistakes.
-- If a question is longer or abstract, you do not understand it: say so simply ("sorry, I don't understand" in the target language), answer something approximate, or repeat a key word.
 - Sometimes drop a word from your native language when you don't know it.`,
   A2: `- Answers of 5 to 20 words. Simple sentences joined with "and", "but", "because".
 - Mostly present tense; attempts at past tense with frequent mistakes.
@@ -118,6 +124,72 @@ const LEVEL_GUIDE: Record<CefrRung, string> = {
   C2: `- Answers of 50 to 100 words. Near-native: effortless, nuanced, precise.
 - Rich, idiomatic vocabulary, subtle distinctions, varied structures. Practically no errors.`,
 };
+
+// ─── Listening comprehension (A1/A2) ─────────────────────────────────────────
+
+export type Understanding = "full" | "partial" | "none";
+
+/** What a listener at each level catches in spoken speech. B1+ understand the examiner directly. */
+const LISTENING_GUIDE: Partial<Record<CefrRung, string>> = {
+  A1: `- Knows only very frequent, concrete words: greetings, name, age, family members, numbers, days, food, colours, home, city, work, school, "like / live / have / be / do / go" in the present tense, basic question words (what, where, who, how old, how many).
+- Understands a question only if it is short (about 8 words or fewer), slow, in the present tense, and about something concrete and personal.
+- Does NOT understand: future, conditional, past or subjunctive forms, subordinate clauses, formal or administrative wording, abstract or less common words (e.g. "evaluate", "level", "approximately", "favourite pastimes", "experience", "opinion").
+- In a long, multi-sentence turn, only isolated familiar words come through; the meaning of the whole is lost.`,
+  A2: `- Understands short, simple sentences about familiar everyday topics (family, work, shopping, home, free time, daily routine, recent simple events), in present, simple past and near future.
+- Loses the thread in long sentences, several chained questions, formal wording, or less common vocabulary.
+- Does NOT understand abstract, hypothetical or opinion questions phrased in complex language (conditional, subjunctive, "to what extent", "in your view", etc.) — catches only the concrete key words.`,
+};
+
+function listenerSystemPrompt(language: ConvLang, level: CefrRung, guide: string): string {
+  const lang = LANGUAGE_NAME[language];
+  return `You simulate the LISTENING comprehension of a ${lang} learner at CEFR ${level}, hearing an examiner speak ${lang} at natural speed.
+
+WHAT THIS LEARNER UNDERSTANDS:
+${guide}
+
+Given the examiner's words, output what this learner actually catches:
+- "heard": the examiner's text with every word or phrase this learner would NOT understand replaced by "…" (merge consecutive gaps into one "…"). Keep the words they do catch, unchanged and in order. Keep the final "?" if there is a question. Do not translate or explain.
+- "understanding": "full" if they get the whole meaning of the question, "partial" if they get some key words but are unsure what is asked, "none" if they cannot tell what is being asked.
+
+Be strict — err on the side of NOT understanding. Real learners at this level miss much more than a text-reading AI would expect.
+
+Reply with JSON only: {"understanding": "full" | "partial" | "none", "heard": "..."}`;
+}
+
+/** Reduces one examiner turn to what the learner catches. Falls back to the full text on any failure. */
+async function perceiveExaminerTurn(
+  learner: LlmProvider,
+  language: ConvLang,
+  level: CefrRung,
+  examinerText: string,
+  context: string,
+): Promise<{ heard: string; understanding: Understanding } | null> {
+  const guide = LISTENING_GUIDE[level];
+  if (!guide) return null;
+  try {
+    const raw = await learner.complete({
+      system: listenerSystemPrompt(language, level, guide),
+      messages: [{ role: "user", content: examinerText }],
+      maxTokens: 300,
+      json: true,
+      context,
+    });
+    const parsed = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim()) as { heard?: unknown; understanding?: unknown };
+    const understanding: Understanding =
+      parsed.understanding === "full" || parsed.understanding === "partial" || parsed.understanding === "none"
+        ? parsed.understanding
+        : "partial";
+    const heard = typeof parsed.heard === "string" && parsed.heard.trim() ? parsed.heard.trim() : "…";
+    return { heard, understanding };
+  } catch {
+    return { heard: examinerText, understanding: "full" };
+  }
+}
+
+/** How a perceived examiner turn is shown to the learner model. */
+function formatHeard(p: { heard: string; understanding: Understanding }): string {
+  return `[What you caught — understanding: ${p.understanding}]\n${p.heard}`;
+}
 
 export function pickPersona(language: ConvLang): SimPersona {
   const profile = PROFILES[Math.floor(Math.random() * PROFILES.length)];
@@ -138,7 +210,18 @@ ${LEVEL_GUIDE[level]}
 FORMAT:
 - Reply ONLY with what you say out loud, in ${lang} (apart from the occasional native-language slip allowed above). No stage directions, no quotes, no translations, no notes.
 - This is a speech-to-text transcript of you speaking: plain text, simple punctuation, occasional fillers or hesitations fitting your level.
-- Answer the examiner's question like a real candidate would — don't ask the examiner questions back, don't comment on the exam itself.`;
+- Answer the examiner's question like a real candidate would — don't ask the examiner questions back, don't comment on the exam itself.${
+    LISTENING_GUIDE[level]
+      ? `
+
+LISTENING:
+You do not see what the examiner really said, only what you managed to catch. Each examiner message is labelled with how much you understood; "…" marks parts you did not understand at all. You have no idea what was in the "…" — never guess it from context you don't have.
+- understanding "none": do not answer. Say you don't understand, or ask them to repeat or speak slowly — in simple ${lang} fitting your level (broken forms are fine), possibly with a native-language word.
+- understanding "partial": either ask for repetition, or take a guess from the words you caught and answer that — even if it may be the wrong question.
+- understanding "full": answer normally, at your level.
+Asking for repetition is the one exception to "don't ask the examiner questions back".`
+      : ""
+  }`;
 }
 
 // ─── Simulation loop ─────────────────────────────────────────────────────────
@@ -161,8 +244,12 @@ export async function* runConversationSimulation(
   // Examiner-perspective history, same shape as app/page.tsx's historyRef:
   // examiner = "assistant", learner = "user".
   const history: Msg[] = [];
+  // Learner-perspective history: examiner = "user", learner = "assistant", and
+  // at A1/A2 examiner turns are replaced by what the learner caught.
+  const learnerView: Msg[] = [];
   let rung: CefrRung = config.startingRung;
   let usedQuestions: string[] = [];
+  let bankState: BankState = {};
   let currentDomain: TopicDomain | null = null;
   let domainStreak = 0;
   const visitedDomains: TopicDomain[] = [];
@@ -171,8 +258,8 @@ export async function* runConversationSimulation(
   const examinerTurn = async (turn: number, requestHistory: Msg[], userMessage: string, isStart: boolean) => {
     const avoidDomain = !isStart && domainStreak >= MAX_DOMAIN_STREAK ? currentDomain ?? undefined : undefined;
     const switchToDomain = avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomains) : undefined;
-    const { system, targetRung, updatedUsedQuestions } = buildExaminerPrompt({
-      language, rung, usedQuestions, isStart, avoidDomain, switchToDomain,
+    const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
+      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain,
     });
     const text = await mistralComplete({
       model: mistralChatModel(),
@@ -182,6 +269,7 @@ export async function* runConversationSimulation(
       context: `${runId}:examiner-${turn}`,
     });
     usedQuestions = updatedUsedQuestions;
+    bankState = updatedBankState;
     return { text: text.trim(), targetRung, avoidDomain, switchToDomain };
   };
 
@@ -213,16 +301,23 @@ export async function* runConversationSimulation(
       if (signal?.aborted) return;
       const question = history[history.length - 1].content;
 
-      // Learner sees the conversation from its own side: examiner = "user".
+      const perceived = await perceiveExaminerTurn(learner, language, learnerLevel, question, `${runId}:listen-${turn}`);
+      learnerView.push({ role: "user", content: perceived ? formatHeard(perceived) : question });
       const answer = (
         await learner.complete({
           system: learnerSystem,
-          messages: history.map((m) => ({ role: m.role === "assistant" ? "user" : "assistant", content: m.content })),
+          messages: learnerView,
           maxTokens: 400,
           context: `${runId}:learner-${turn}`,
         })
       ).trim();
-      yield { type: "learner", turn, text: answer };
+      learnerView.push({ role: "assistant", content: answer });
+      yield {
+        type: "learner",
+        turn,
+        text: answer,
+        ...(perceived ? { heard: perceived.heard, understanding: perceived.understanding } : {}),
+      };
 
       // ET — awaited here (non-blocking live, see header comment).
       const previousRung = rung;

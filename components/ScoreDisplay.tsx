@@ -52,8 +52,8 @@ export function Bar({
   const pct = Math.round((value / max) * 100);
   const light = theme === "light";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginBottom: 3 }}>
-      <span style={{ width: 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: light ? 12 : 11, marginBottom: light ? 5 : 3 }}>
+      <span style={{ width: light ? 92 : 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
       <div style={{ flex: 1, height: 5, background: light ? "#E4E0D7" : "rgba(0,0,0,0.35)", borderRadius: 3 }}>
         <div
           style={{
@@ -172,12 +172,12 @@ export function CefrPanel({
     <div
       style={
         light
-          ? { padding: 24, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }
+          ? { padding: "clamp(18px, 5vw, 24px)", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }
           : { padding: 12, background: "#141D33", borderRadius: 10 }
       }
     >
       {/* Header row */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: light ? 16 : 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: light ? 16 : 6 }}>
         <div>
           <div
             style={{
@@ -239,8 +239,8 @@ export function CefrPanel({
           val !== null ? (
             <Bar key={label} label={label} value={val} max={10} theme={theme} />
           ) : (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginBottom: 3 }}>
-              <span style={{ width: 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: light ? 12 : 11, marginBottom: light ? 5 : 3 }}>
+              <span style={{ width: light ? 92 : 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
               <span style={{ color: light ? "#8A8F9C" : "#4b5563", fontSize: 10 }}>n/a</span>
             </div>
           )
@@ -258,7 +258,7 @@ export function CefrPanel({
           {result.strengths?.length > 0 && (
             <div style={{ marginBottom: light ? 12 : 6 }}>
               <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.strengths}</div>
-              <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
+              <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
                 {result.strengths.slice(0, showAllDetails ? undefined : 3).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
@@ -268,7 +268,7 @@ export function CefrPanel({
           {result.areas_for_improvement?.length > 0 && (
             <div style={{ marginBottom: light ? 12 : 6 }}>
               <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.toImprove}</div>
-              <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
+              <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
                 {result.areas_for_improvement.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>
@@ -278,7 +278,7 @@ export function CefrPanel({
           {result.notable_errors?.length > 0 && (
             <div style={{ marginBottom: light ? 12 : 6 }}>
               <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.notableErrors}</div>
-              <ul style={{ margin: 0, paddingLeft: 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#B3542E" : "#fca5a5" }}>
+              <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#B3542E" : "#fca5a5" }}>
                 {result.notable_errors.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
               </ul>
             </div>

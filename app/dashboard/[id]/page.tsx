@@ -41,12 +41,12 @@ export default async function DashboardSessionDetailPage({
 
   return (
     <div>
-      <Link href="/dashboard" className={adminStyles.backLink}>
+      <Link href="/dashboard" className={styles.backLink}>
         &larr; Retour à mes sessions
       </Link>
 
       <div className={adminStyles.detailHeaderRow}>
-        <h1 className={adminStyles.pageTitle} style={{ marginBottom: 0 }}>
+        <h1 className={styles.detailTitle}>
           {languageFlag(session.language)} {languageLabel(session.language)} · {formatDateTime(session.created_at)}
         </h1>
       </div>
