@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { TurnVad } from "@/lib/turn-vad";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
-import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG } from "@/lib/realtime-stt-config";
+import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder, pickRecorderMimeType } from "@/lib/session-recorder";
@@ -1314,6 +1314,7 @@ export default function Home() {
       let text = "";
       let wpm = 0;
       let sttPath: "realtime" | "batch-fallback" = "batch-fallback";
+      let suspectTruncated = false;
       let fallbackReason: string | undefined = realtimeTranscriptPromise
         ? undefined
         : REALTIME_STT_PROVIDER_BY_LANG[language] ? "realtime STT not available this turn" : `no realtime STT for ${language}`;
@@ -1326,12 +1327,20 @@ export default function Home() {
           // Gradium's is kept out of it so both paths measure the same way.
           wpm = spokenMs > 0 ? text.split(/\s+/).filter(Boolean).length / (spokenMs / 60000) : 0;
           sttPath = "realtime";
+          // Z-10: Mistral's stream sometimes ends "successfully" with only the
+          // first part of a long answer (replayed offline: engine errors / timeouts
+          // mid-stream) — a 59 s answer came back as ~55 words. Too few words for the
+          // speaking time → cross-check with the batch transcription below.
+          if (spokenMs >= TRUNCATION_CHECK_MIN_SPOKEN_MS && wpm < TRUNCATION_CHECK_MAX_WPM) {
+            suspectTruncated = true;
+            fallbackReason = `suspiciously short realtime transcript (${Math.round(wpm)} wpm over ${Math.round(spokenMs / 1000)} s)`;
+          }
         } catch (e) {
           fallbackReason = String(e instanceof Error ? e.message : e);
         }
       }
 
-      if (sttPath === "batch-fallback") {
+      if (sttPath === "batch-fallback" || suspectTruncated) {
         try {
           const form = new FormData();
           form.append("audio", recording.blob, "turn.webm");
@@ -1340,12 +1349,25 @@ export default function Home() {
           const res = await fetch("/api/transcribe", { method: "POST", body: form });
           if (!res.ok) throw new Error(`transcribe API error ${res.status}`);
           const data = (await res.json()) as { text: string; wpm: number };
-          text = data.text;
-          wpm = data.wpm;
+          if (suspectTruncated) {
+            // Keep the realtime text unless batch clearly heard more.
+            const wordsOf = (t: string) => t.split(/\s+/).filter(Boolean).length;
+            const batchLonger = wordsOf(data.text) >= wordsOf(text) * 1.2;
+            logClientEvent("turn_stt_truncation_check", {
+              turnLogId, realtimeWords: wordsOf(text), batchWords: wordsOf(data.text), spokenMs, usedBatch: batchLonger,
+            });
+            if (batchLonger) { text = data.text; wpm = data.wpm; sttPath = "batch-fallback"; }
+          } else {
+            text = data.text;
+            wpm = data.wpm;
+          }
         } catch (e) {
           console.error("Transcribe failed:", e);
-          abandonTurn(`transcribe-failed: ${e instanceof Error ? e.message : String(e)}`, true);
-          return;
+          if (!suspectTruncated) {
+            abandonTurn(`transcribe-failed: ${e instanceof Error ? e.message : String(e)}`, true);
+            return;
+          }
+          // suspectTruncated: the cross-check failed — keep the realtime transcript.
         }
       }
       if (!text.trim()) {

@@ -51,3 +51,15 @@ export const REALTIME_STT_PROVIDER_LABELS: Record<RealtimeSttProviderId, string>
   gradium: "Gradium streaming ASR (EU) — Voxtral batch fallback",
   mistral: "Mistral realtime (Voxtral) — Voxtral batch fallback",
 };
+
+/**
+ * Z-10 truncation guard. A realtime stream can end "successfully" with only
+ * the first part of a long answer (Mistral engine errors / timeouts
+ * mid-stream, reproduced offline with scripts/stt-replay.ts). An answer of at
+ * least this much speech with fewer words per minute than the limit is
+ * cross-checked against the batch transcription, and the batch text wins if it
+ * has ≥ 20 % more words. Slow beginners also trip it — they just pay one batch
+ * round trip (~1 s), nothing else changes.
+ */
+export const TRUNCATION_CHECK_MIN_SPOKEN_MS = 8000;
+export const TRUNCATION_CHECK_MAX_WPM = 70;
