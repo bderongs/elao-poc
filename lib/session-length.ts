@@ -66,7 +66,7 @@ const PLATEAU_RUN = 3;
 /** Ceiling / floor: this many consecutive "well" at C2, or non-"well" at A1. */
 const EDGE_RUN = 2;
 /** Evidence gate: never stop on fewer judged answers than this. */
-const MIN_ANSWERS = 5;
+export const MIN_ANSWERS = 5;
 /** Evidence gate for an estimate ≥ B2: at least one answer this long at or above the estimate. */
 const LONG_ANSWER_WORDS = 25;
 const LONG_ANSWER_FROM: CefrRung = "B2";

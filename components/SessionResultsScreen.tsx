@@ -1,11 +1,17 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
+import { SatisfactionModal } from "@/components/SatisfactionModal";
 import { CefrPanel } from "@/components/ScoreDisplay";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { ClaimResultsForm } from "@/components/ClaimResultsForm";
 import { CandidateTopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
+
+const SATISFACTION_ENABLED = process.env.NEXT_PUBLIC_SATISFACTION_MODAL === "1";
+// Gives the candidate time to read their grade before the survey opens.
+const SATISFACTION_DELAY_MS = 10_000;
 
 const FR_CEFR_LABELS = {
   eyebrow: "VOTRE NIVEAU",
@@ -40,12 +46,50 @@ export function SessionResultsScreen({
   sessionId: string | null;
   onRestart: () => void;
 }) {
+  const [surveyOpen, setSurveyOpen] = useState(false);
+  const surveyShown = useRef(false);
+  const restartAfterSurvey = useRef(false);
+
+  const openSurvey = useCallback(() => {
+    if (!SATISFACTION_ENABLED || !sessionId || surveyShown.current) return false;
+    try {
+      if (sessionStorage.getItem(`satisfaction-${sessionId}`)) return false;
+      sessionStorage.setItem(`satisfaction-${sessionId}`, "1");
+    } catch {
+      // storage unavailable — the ref still limits it to once per mount
+    }
+    surveyShown.current = true;
+    setSurveyOpen(true);
+    return true;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!SATISFACTION_ENABLED || !sessionId) return;
+    const t = setTimeout(openSurvey, SATISFACTION_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [sessionId, openSurvey]);
+
+  const closeSurvey = useCallback(() => {
+    setSurveyOpen(false);
+    if (restartAfterSurvey.current) {
+      restartAfterSurvey.current = false;
+      onRestart();
+    }
+  }, [onRestart]);
+
+  const handleRestart = () => {
+    // Leaving before the survey was shown: ask first, restart once it closes.
+    if (openSurvey()) restartAfterSurvey.current = true;
+    else onRestart();
+  };
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto", background: "#F7F5F0" }}>
+      {surveyOpen && sessionId && <SatisfactionModal sessionId={sessionId} onClose={closeSurvey} />}
       <CandidateTopBar
         right={
           <span
-            onClick={onRestart}
+            onClick={handleRestart}
             className={styles.tapTarget}
             style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
           >

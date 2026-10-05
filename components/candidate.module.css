@@ -114,10 +114,6 @@
 
 /* ─── 3. conversation ──────────────────────────────────────────────────── */
 
-.progressTrack {
-  width: 132px;
-}
-
 .stage {
   flex: 1;
   display: flex;
@@ -255,10 +251,6 @@
 
   .instructionsMic {
     padding: 20px !important;
-  }
-
-  .progressTrack {
-    width: 64px;
   }
 
   .stage {

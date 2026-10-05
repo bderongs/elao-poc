@@ -20,17 +20,17 @@ const PROVIDERS: Record<string, TtsProvider> = {
  * getProvider(LIVE_TTS_PROVIDER_BY_LANG[language]) directly, so this map IS
  * the switch. en/fr moved from Mistral (Voxtral) to Gradium after Voxtral's
  * latency spikes (see lib/tts/providers/gradium.ts); mistral stays
- * registered so switching back is a one-line change here. The other four
- * languages stay on Azure — Gradium covers de/es but not nl-BE/it.
+ * registered so switching back is a one-line change here. de/es moved to
+ * Gradium too; nl-BE/it stay on Azure — Gradium doesn't cover them.
  * DEV-PLAN.md Track M has the follow-up to close this gap.
  */
 export const LIVE_TTS_PROVIDER_BY_LANG: Record<ConvLang, string> = {
   en: "gradium",
   fr: "gradium",
   "nl-BE": "azure",
-  es: "azure",
+  es: "gradium",
   it: "azure",
-  de: "azure",
+  de: "gradium",
 };
 
 export function getProvider(id: string): TtsProvider {

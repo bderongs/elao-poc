@@ -7,8 +7,9 @@
  * reports whether that pin is active ("pinned; zone=eu") or not yet enabled
  * on the account ("best-effort; zone=eu"); it's logged below.
  *
- * Gradium also covers de/es (not nl-BE/it) — those stay on Azure for now,
- * see lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
+ * Gradium also covers de/es, which are live on it too. nl-BE/it aren't
+ * supported — those stay on Azure, see lib/tts/registry.ts's
+ * LIVE_TTS_PROVIDER_BY_LANG.
  */
 
 import { logServerEvent } from "@/lib/server-log";
@@ -23,11 +24,15 @@ const GRADIUM_TTS_MODEL = "default";
 // https://docs.gradium.ai/guides/voices/flagship-voices). Unlike Mistral,
 // Gradium has US-accented female English voices, so English goes back to a
 // US accent (matching Azure's en-US-AvaNeural).
-//   en: Harper — "Modern, confident and friendly voice with a standard American accent."
-//   fr: Apolline — "A sparky, attentive French adult voice that gets to the point with a smile."
+//   en: Zoey — "Playful, upbeat and Gen Z energy voice with a standard American accent."
+//   fr: Solène — "A young French voice, bright and high-pitched, warm and enthusiastic at a lively pace."
 const GRADIUM_VOICE: Partial<Record<ConvLang, { id: string; name: string }>> = {
-  en: { id: "4SZHfMpw-p46Ywgs", name: "Harper" },
-  fr: { id: "6oIkS98REoVZ1dEw", name: "Apolline" },
+  en: { id: "NbpkqMVS3CJeq2j8", name: "Zoey" },
+  fr: { id: "YhIHaAfQ0cQPDV9R", name: "Solène" },
+  //   de: Resi — "Warm, grounded Bavarian woman's voice with a measured, trustworthy delivery."
+  //   es: Vera — "A sweet, expressive young Castilian Spanish voice, soft and girly with excited emphasis."
+  de: { id: "MAYVpVTYBzLRqNC7", name: "Resi" },
+  es: { id: "iTQW2xFICXk8riV4", name: "Vera" },
 };
 
 /**

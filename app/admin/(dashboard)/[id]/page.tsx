@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionDetail } from "@/lib/sessions-service";
+import { getSessionFeedback } from "@/lib/feedback-service";
 import { CefrPanel, UserWords, UtteranceBadges, wordColor } from "@/components/ScoreDisplay";
 import { PronunciationLabPanel } from "@/components/PronunciationLabPanel";
 import { SttLabPanel } from "@/components/SttLabPanel";
@@ -37,6 +38,7 @@ export default async function AdminSessionDetailPage({
   if (!detail) notFound();
 
   const { session, turns, evaluations, turnEvaluations } = detail;
+  const feedback = await getSessionFeedback(id).catch(() => null);
   const providerOptions = listProviders().map((p) => ({ id: p.id, label: p.label }));
   const pronunciationProviderOptions = listPronunciationProviders().map((p) => ({ id: p.id, label: p.label }));
 
@@ -204,6 +206,21 @@ export default async function AdminSessionDetailPage({
         <div style={{ marginTop: 24 }}>
           <CollapsibleSection title="Difficulty ladder & session length">
             <LadderPanel ladder={session.ladder_json} durationSeconds={session.duration_seconds} finalLevel={session.cefr_level} />
+          </CollapsibleSection>
+        </div>
+      )}
+
+      {feedback && (
+        <div style={{ marginTop: 24 }}>
+          <CollapsibleSection title="Candidate satisfaction">
+            <table className={styles.table}>
+              <tbody>
+                <tr><td>Experience</td><td>{feedback.experience_rating}/10</td></tr>
+                <tr><td>Question relevance</td><td>{feedback.questions_relevance}/10</td></tr>
+                <tr><td>Grade relevance</td><td>{feedback.grade_relevance}/10</td></tr>
+                {feedback.comment && <tr><td>Comment</td><td>{feedback.comment}</td></tr>}
+              </tbody>
+            </table>
           </CollapsibleSection>
         </div>
       )}

@@ -32,6 +32,8 @@ export default function SystemConfigPage() {
     ["Delivery", `POST, ${callback.timeoutMs / 1000} s timeout, up to ${callback.maxAttempts} attempts (no retry on 4xx); attempts logged as score_callback_* server events`],
   ];
 
+  const satisfactionEnabled = process.env.NEXT_PUBLIC_SATISFACTION_MODAL === "1";
+
   return (
     <div>
       <h1 className={styles.pageTitle}>System configuration</h1>
@@ -64,6 +66,34 @@ export default function SystemConfigPage() {
                 <td>{value}</td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 style={{ fontSize: 16, color: adminColors.ink, margin: "32px 0 4px" }}>Satisfaction survey</h2>
+      <div style={{ color: adminColors.muted, fontSize: 13, marginBottom: 12, maxWidth: 620 }}>
+        Optional modal on the candidate results screen. Read-only — enabled with{" "}
+        <code>NEXT_PUBLIC_SATISFACTION_MODAL=1</code>; answers are shown on each session&apos;s detail page.
+      </div>
+      <div className={styles.tableCard}>
+        <table className={styles.table}>
+          <tbody>
+            <tr>
+              <td style={{ width: 140, color: adminColors.muted }}>Status</td>
+              <td>
+                <span
+                  style={{
+                    padding: "2px 8px",
+                    borderRadius: 100,
+                    fontSize: 12,
+                    background: satisfactionEnabled ? "#E3F4EC" : adminColors.warningBg,
+                    color: satisfactionEnabled ? adminColors.success : adminColors.warning,
+                  }}
+                >
+                  {satisfactionEnabled ? "Active" : "Not activated"}
+                </span>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>

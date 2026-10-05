@@ -24,7 +24,7 @@ import styles from "@/components/candidate.module.css";
 import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
 import { SESSION_DURATION_MINUTES, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
-import { evaluateStop, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
+import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   UserWords,
@@ -297,6 +297,7 @@ export default function Home() {
    * mode, it's what "shadow" mode exists to collect.
    */
   const ladderStepsRef = useRef<LadderStep[]>([]);
+  const [answersCount, setAnswersCount] = useState(0);
   const ladderDecisionRef = useRef<StopDecision>({ converged: false, estimatedLevel: null, reason: "not_converged" });
   const wouldStopAtRef = useRef<{ at: number; estimatedLevel: LadderRecord["estimatedLevel"]; reason: LadderRecord["reason"] } | null>(null);
   const endTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -867,6 +868,7 @@ export default function Home() {
           },
         ];
         ladderDecisionRef.current = evaluateStop(ladderStepsRef.current);
+        setAnswersCount(ladderStepsRef.current.length);
         if (debugMode) {
           setDebugEvents((prev) => [
             ...prev,
@@ -1100,6 +1102,7 @@ export default function Home() {
     startedAtRef.current = Date.now();
     closeRequestedRef.current = false;
     ladderStepsRef.current = [];
+    setAnswersCount(0);
     ladderDecisionRef.current = { converged: false, estimatedLevel: null, reason: "not_converged" };
     wouldStopAtRef.current = null;
 
@@ -1903,13 +1906,9 @@ export default function Home() {
     </div>
   );
 
-  // Adaptive mode has no known end — count down to the cap (a proper
-  // "elapsed + up to N min" display is due before adaptive goes live).
-  const sessionCapSeconds = SESSION_LENGTH_MODE === "adaptive" ? SESSION_MAX_SECONDS : fixedSessionSeconds;
-  const remaining = Math.max(0, sessionCapSeconds - elapsed);
-  const rmm = Math.floor(remaining / 60).toString().padStart(2, "0");
-  const rss = (remaining % 60).toString().padStart(2, "0");
-  const progressPercent = Math.min(100, (elapsed / sessionCapSeconds) * 100);
+  // Session length is variable, so progress is shown as answers given, not time left.
+  const dotsTotal = Math.min(8, Math.max(MIN_ANSWERS, answersCount + 1));
+  const dotsFilled = Math.min(answersCount, dotsTotal);
 
   return (
     <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
@@ -2142,11 +2141,20 @@ export default function Home() {
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div className={styles.progressTrack} style={{ height: 4, background: "#E4E0D7", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ width: `${progressPercent}%`, height: "100%", background: "#141D33" }} />
+                  <div
+                    role="img"
+                    aria-label={`${answersCount} réponse${answersCount > 1 ? "s" : ""} donnée${answersCount > 1 ? "s" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    {Array.from({ length: dotsTotal }, (_, i) => (
+                      <span
+                        key={i}
+                        style={{ width: 8, height: 8, borderRadius: "50%", background: i < dotsFilled ? "#141D33" : "#E4E0D7", transition: "background 200ms" }}
+                      />
+                    ))}
                   </div>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 14, color: "#5A5F6E" }}>
-                    {rmm}:{rss}<span className={styles.hideMobile}> restantes</span>
+                  <span className={styles.hideMobile} style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 14, color: "#5A5F6E" }}>
+                    {answersCount} réponse{answersCount > 1 ? "s" : ""}
                   </span>
                 </div>
                 <span

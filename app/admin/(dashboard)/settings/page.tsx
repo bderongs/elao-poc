@@ -64,7 +64,7 @@ export default async function ConversationSettingsPage() {
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>URL parameters (dev/testing)</div>
         <div style={{ fontSize: 13, color: adminColors.ink, lineHeight: 1.6 }}>
           <p style={{ margin: "0 0 14px" }}>
-            Two query-string flags on the main session page (<code>/</code>) are for testing, not
+            Three query-string flags on the main session page (<code>/</code>) are for testing, not
             end users — neither is linked from the product UI.
           </p>
 
@@ -120,6 +120,27 @@ export default async function ConversationSettingsPage() {
               Example: <code>https://your-domain/?level=A1&amp;debug=1</code> — combine with{" "}
               <code>?level=</code> to watch a specific zone&apos;s behaviour end to end. No admin
               auth required to view it, same as <code>?level=</code>.
+            </p>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              <code>?survey=1</code> — preview the satisfaction survey
+            </div>
+            <p style={{ margin: "0 0 6px", color: adminColors.muted }}>
+              Normally the satisfaction modal opens about 10 seconds after the results screen
+              appears (or when the candidate clicks &ldquo;Nouvelle session&rdquo;), once per session.
+              With this flag it opens immediately on whatever page you load, so you can check how it looks.
+            </p>
+            <ul style={{ margin: "0 0 6px", paddingLeft: 18, color: adminColors.muted }}>
+              <li>
+                Preview only: nothing is sent or stored, even on submit, and it works even if the
+                survey is not enabled (<code>NEXT_PUBLIC_SATISFACTION_MODAL</code>, see System configuration).
+              </li>
+              <li>It does not enable the real survey — that still needs the env variable.</li>
+            </ul>
+            <p style={{ margin: 0, color: adminColors.faint }}>
+              Example: <code>https://your-domain/?survey=1</code>
             </p>
           </div>
         </div>

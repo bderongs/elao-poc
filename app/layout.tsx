@@ -1,6 +1,7 @@
 import type { Viewport } from "next";
 import "./globals.css";
 import { GlobalDebugPanel } from "@/components/GlobalDebugPanel";
+import { SurveyPreview } from "@/components/SurveyPreview";
 
 export const metadata = {
   title: "ELAO Speaking",
@@ -32,6 +33,7 @@ export default function RootLayout({
       <body style={{ margin: 0, fontFamily: "'DM Sans', system-ui, sans-serif", background: "#F7F5F0", color: "#141D33" }}>
         {children}
         <GlobalDebugPanel />
+        <SurveyPreview />
       </body>
     </html>
   );
