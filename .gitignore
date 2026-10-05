@@ -41,3 +41,6 @@ DEV-PLAN.md
 # Supabase CLI local cache
 supabase/.temp/
 .vercel
+
+# simulation batch output (scripts/sim-batch.ts)
+sim-runs/

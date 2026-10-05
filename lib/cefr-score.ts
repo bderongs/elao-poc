@@ -25,7 +25,8 @@ export interface CompositeCefrScore {
  * "Our" global score for a session: the CEFR evaluator's holistic
  * score_percent, with a +5% excellence bonus when at least 2 of the 4
  * dimensions (pronunciation from our own audio engine, fluency/
- * vocabulary_grammar/communication from the LLM) reach 9/10 — two standout
+ * vocabulary_grammar/communication from the LLM) reach 9/10 — 8.5 does not
+ * count now that the LLM axes are in half points (Track AE) — two standout
  * dimensions signal a stronger candidate than a flat profile at the same
  * average. Single source of truth for "our global score", shared by the
  * live CefrPanel display and the Speechace comparison — anywhere the app

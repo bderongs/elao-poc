@@ -25,17 +25,18 @@
  */
 
 import type { ConvLang } from "@/lib/conversation-prompts";
-import type { CefrRung } from "@/lib/cefr-rung";
+import { guardStepUp, type CefrRung } from "@/lib/cefr-rung";
 import type { CefrResult } from "@/lib/types";
 import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralComplete } from "@/lib/mistral";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { classifyTopicDomain } from "@/lib/topic-tracking";
+import { isNonComprehension } from "@/lib/comprehension";
 import { pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import type { LlmProvider } from "@/lib/llm/types";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
-import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage } from "@/lib/cefr-prompt";
+import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore, type CompositeCefrScore } from "@/lib/cefr-score";
 
 /** Mirrors app/page.tsx's MAX_DOMAIN_STREAK. */
@@ -248,6 +249,7 @@ export async function* runConversationSimulation(
   // at A1/A2 examiner turns are replaced by what the learner caught.
   const learnerView: Msg[] = [];
   let rung: CefrRung = config.startingRung;
+  let lastVerdict: string | undefined;
   let usedQuestions: string[] = [];
   let bankState: BankState = {};
   let currentDomain: TopicDomain | null = null;
@@ -255,11 +257,11 @@ export async function* runConversationSimulation(
   const visitedDomains: TopicDomain[] = [];
 
   /** One examiner turn — same inputs app/page.tsx sends to /api/chat. */
-  const examinerTurn = async (turn: number, requestHistory: Msg[], userMessage: string, isStart: boolean) => {
-    const avoidDomain = !isStart && domainStreak >= MAX_DOMAIN_STREAK ? currentDomain ?? undefined : undefined;
+  const examinerTurn = async (turn: number, requestHistory: Msg[], userMessage: string, isStart: boolean, clarify = false) => {
+    const avoidDomain = !isStart && !clarify && domainStreak >= MAX_DOMAIN_STREAK ? currentDomain ?? undefined : undefined;
     const switchToDomain = avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomains) : undefined;
     const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
-      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain,
+      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify,
     });
     const text = await mistralComplete({
       model: mistralChatModel(),
@@ -324,14 +326,20 @@ export async function* runConversationSimulation(
       const et = await getEtProvider(LIVE_ET_PROVIDER_ID).assess({
         language, questionAsked: question, userAnswer: answer, currentRung: rung, turnLogId: `${runId}-${turn}`, stepSize,
       });
-      if (et) rung = et.nextRung;
+      if (et) {
+        rung = guardStepUp(rung, et.nextRung, lastVerdict);
+        lastVerdict = et.verdict;
+      }
       yield { type: "et", turn, verdict: et?.verdict ?? "unavailable", previousRung, nextRung: rung };
 
       // app/page.tsx sends the answer both inside `history` and as
       // `userMessage` — mirrored as-is so the examiner sees what it sees live.
       const newHistory: Msg[] = [...history, { role: "user", content: answer }];
       const isLast = turn === answers;
-      const reply = await examinerTurn(turn, newHistory, isLast ? "__END__" : answer, false);
+      // Live (app/page.tsx): a spoken "je ne comprends pas"-style answer makes the examiner
+      // re-ask the same question more simply instead of moving on (lib/comprehension.ts).
+      const clarify = !isLast && isNonComprehension(answer);
+      const reply = await examinerTurn(turn, newHistory, isLast ? "__END__" : answer, false, clarify);
       history.push({ role: "user", content: answer }, { role: "assistant", content: reply.text });
       yield {
         type: "examiner",
@@ -342,7 +350,8 @@ export async function* runConversationSimulation(
         ...(reply.avoidDomain ? { avoidDomain: reply.avoidDomain } : {}),
         ...(reply.switchToDomain ? { switchToDomain: reply.switchToDomain } : {}),
       };
-      if (!isLast) {
+      // A clarify re-ask is the same question again — not classified, like live.
+      if (!isLast && !clarify) {
         const recentExchange = newHistory.slice(-2).map((m) => `${m.role}: ${m.content}`).join("\n");
         yield await classify(turn, reply.text, recentExchange);
       }
@@ -365,7 +374,7 @@ export async function* runConversationSimulation(
       json: true,
       context: `${runId}:cefr-eval`,
     });
-    const result = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim()) as CefrResult;
+    const result = parseCefrEvaluation(raw);
     yield { type: "evaluation", result, composite: computeCompositeCefrScore(result, null) };
   } catch (e) {
     yield { type: "error", stage: "evaluation", message: String(e) };

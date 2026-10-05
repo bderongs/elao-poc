@@ -1,15 +1,16 @@
 /**
  * Expert oral language assessor prompt.
  * Purely transcript-based — no Azure mandatory scores.
- * Returns a JSON object with 5 dimensions (0-10) and a CEFR level.
+ * Returns a JSON object with 3 LLM dimensions (0-10, half points) and a CEFR level.
  */
 
 import type { ConvLang } from "@/lib/conversation-prompts";
+import type { CefrResult } from "@/lib/types";
 
 // Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
 // every session_evaluations row with it, so scoring drift across prompt
 // edits stays distinguishable from drift across models.
-export const CEFR_PROMPT_VERSION = "v2";
+export const CEFR_PROMPT_VERSION = "v3"; // v3: dimensions in half points (Track AE)
 
 // Single source of truth for the WPM → fluency mapping baked into
 // CEFR_SYSTEM_PROMPT below — also read by the admin system-config page to
@@ -23,8 +24,8 @@ export const FLUENCY_WPM_BANDS: { range: string; fluency: string; note: string }
   { range: "70-84", fluency: "5-6", note: "A2/B1 — some hesitation, ideas come through" },
   { range: "85-99", fluency: "6-7", note: "B1 — approaching natural conversational pace" },
   { range: "100-114", fluency: "7-8", note: "B1/B2 — mostly natural, occasional pause" },
-  { range: "115-129", fluency: "8", note: "B2/C1 — natural conversational pace" },
-  { range: "130-144", fluency: "9", note: "C1/C2 — smooth, effortless delivery" },
+  { range: "115-129", fluency: "8-8.5", note: "B2/C1 — natural conversational pace" },
+  { range: "130-144", fluency: "9-9.5", note: "C1/C2 — smooth, effortless delivery" },
   { range: "≥ 145", fluency: "10", note: "C2 — fully native-like rate" },
 ];
 
@@ -52,9 +53,9 @@ OUTPUT SCHEMA:
   "score_percent": number,       // integer 0-100 mapped to CEFR band (see scale below)
   "confidence": "high" | "medium" | "low",  // low if transcript < ~300 words
   "dimensions": {
-    "fluency": number | null,            // 0-10
-    "vocabulary_grammar": number | null, // 0-10  (vocabulary range + grammatical accuracy combined)
-    "communication": number | null       // 0-10  (message delivery, coherence, and comprehension)
+    "fluency": number | null,            // 0-10 in half points (e.g. 7, 7.5, 8)
+    "vocabulary_grammar": number | null, // 0-10 in half points (vocabulary range + grammatical accuracy combined)
+    "communication": number | null       // 0-10 in half points (message delivery, coherence, and comprehension)
   },
   "strengths": [string],         // 3-5 specific observations from the transcript
   "areas_for_improvement": [string], // 3-5 specific observations with examples where possible
@@ -83,6 +84,8 @@ Place the candidate within the band based on where they sit relative to band bou
 GENERAL BIAS: This assessment is used to encourage learners and guide coaching. When evidence is mixed, assign the higher adjacent level. Penalise only consistent, repeated patterns across multiple turns — never isolated errors.
 
 DIMENSION SCORING GUIDE:
+
+HALF POINTS: score every dimension in steps of 0.5 (0, 0.5, 1 … 9.5, 10) — never any other decimal. Use a .5 when the speaker sits between two whole-number descriptors: e.g. 8.5 = clearly beyond the 8 description, but not consistently at the level of 9. Do not default to whole numbers when the evidence is in between.
 
 Fluency (naturalness of delivery):
 1-3: Frequent long pauses, many restarts, speech barely flows
@@ -230,4 +233,29 @@ Interviewee's turns (in order, with word counts):
 ${userTurns.map((t, i) => `[Turn ${i + 1} · ${wordCounts[i]}w] ${t}`).join("\n")}
 
 Assess now and return the JSON object.`;
+}
+
+/**
+ * Parses the evaluator's raw reply into a CefrResult. Single place every
+ * caller (live /api/evaluate, eval lab, simulator) goes through, so the
+ * dimensions are always on the half-point scale the prompt asks for (Track
+ * AE): clamped to 0-10 and rounded to the nearest 0.5, whatever decimals or
+ * strings the model actually returned. score_percent is rounded to an integer.
+ */
+export function parseCefrEvaluation(raw: string): CefrResult {
+  const result = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim()) as CefrResult;
+  const toHalf = (v: unknown): number | null => {
+    const n = typeof v === "string" ? Number(v) : v;
+    return typeof n === "number" && Number.isFinite(n) ? Math.round(Math.min(10, Math.max(0, n)) * 2) / 2 : null;
+  };
+  if (result.dimensions) {
+    result.dimensions = {
+      ...result.dimensions,
+      fluency: toHalf(result.dimensions.fluency),
+      vocabulary_grammar: toHalf(result.dimensions.vocabulary_grammar),
+      communication: toHalf(result.dimensions.communication),
+    };
+  }
+  if (typeof result.score_percent === "number") result.score_percent = Math.round(result.score_percent);
+  return result;
 }

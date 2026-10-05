@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseServer } from "@/lib/supabase-server";
+import type { ScoreCallbackSession } from "@/lib/score-callback";
 import {
   computePronunciationAvg,
   liveConversationPronunciationProviderId,
@@ -1047,4 +1048,15 @@ export async function promoteConversationRollup(sessionId: string): Promise<void
     .eq("id", sessionId)
     .eq("source", "conversation");
   if (updateError) throw new Error(updateError.message);
+}
+
+/** The fields lib/score-callback.ts sends for a completed session (Track AG). */
+export async function getSessionForScoreCallback(id: string): Promise<ScoreCallbackSession | null> {
+  const { data, error } = await getSupabaseServer()
+    .from("sessions")
+    .select("id, language, user_id, duration_seconds, evaluation_json, pronunciation_scores")
+    .eq("id", id)
+    .single();
+  if (error) return null;
+  return data as ScoreCallbackSession;
 }

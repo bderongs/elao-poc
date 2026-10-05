@@ -146,6 +146,8 @@ export interface PromptOpts {
    *  "picked" — a C1/C2 directive from buildPickedQuestionText (the code chose the question);
    *  "none"   — no bank this turn (opening and closing turns). */
   bankMode?: "slice" | "picked" | "none";
+  /** Opening turn only, when the session starts at A1/A2: keep the intro and the question very short so a beginner catches them. */
+  easyOpening?: boolean;
 }
 
 /**
@@ -199,7 +201,12 @@ Strict rules:
 - NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "I understand", "I understood", "Understood", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead.
 - Do NOT be encouraging or complimentary about the learner's language ability. Stay neutral and professional.
 - COMPREHENSION: if the speaker says they did not understand, cannot answer in ${languageName}, find the question too hard, or asks you to repeat — in any language — do NOT acknowledge it with a pivot and move to a new question. Ask the SAME question again in simpler words — shorter, the most common everyday words, or as an easy choice ("X or Y?"), with no pivot word before it.
-
+${
+  isFoundation
+    ? `- QUESTION SHAPE at this level: one single, simple question of at most 10 words — ONE clause, ONE idea, the most common everyday words. Never join two questions ("X, and Y?"), never add "and why?" to the question itself (the follow-up turn is for that), no multi-part or abstract phrasing. If a bank question below contains two questions or a "why", ask only its first part.
+`
+    : ""
+}
 DIFFICULTY LADDER — you run a live, branching oral exam that converges on the speaker's true level, exactly like a human examiner. There is NO fixed question schedule; a separate process judges each answer and tells you which rung to target next.
 
   Difficulty ladder (six rungs): A1 → A2 → B1 → B2 → C1 → C2.
@@ -294,7 +301,21 @@ const OPENING_QUESTION_LINE: Record<ConvLang, (question?: string) => string> = {
     : "End with ONE simple, everyday warm-up question.",
 };
 
+const EASY_OPENING_NOTE = (languageName: string) => `
+
+EASY OPENING (overrides the OPENING section above where they differ): the speaker may be a beginner who catches only a few words. Say the greeting and your name in ONE very short, natural sentence (e.g. "Hello, my name is ${AVATAR_NAME}."). Do NOT mention the duration of the conversation or the assessment at all. Then ask the opening question — ONE short, simple question of at most 8 words, most common everyday words. If the opening question given above has two parts ("X, and why?" / two questions in a row), ask ONLY its first part. The whole opening must stay under 15 words, in ${languageName}, and sound like a natural spoken greeting.`;
+
 export function getSystemPrompt(
+  language: ConvLang,
+  rung: CefrRung,
+  bank: string,
+  opts: PromptOpts & { openerQuestion?: string } = {}
+): string {
+  const base = buildSystemPrompt(language, rung, bank, opts);
+  return opts.easyOpening ? base + EASY_OPENING_NOTE(LANGUAGE_NAME[language]) : base;
+}
+
+function buildSystemPrompt(
   language: ConvLang,
   rung: CefrRung,
   bank: string,

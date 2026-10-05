@@ -22,3 +22,12 @@ export function zoneForRung(rung: CefrRung): CefrZone {
   if (rung === "C2") return "mastery";
   return "core";
 }
+
+/** After a "struggled" turn, don't step back up on the very next verdict: the
+ *  speaker gets at least two questions at the lowered rung before climbing
+ *  (a single lucky answer shouldn't undo a comprehension failure). Only
+ *  vetoes step-ups; holds at `current`. */
+export function guardStepUp(current: CefrRung, next: CefrRung, previousVerdict: string | undefined): CefrRung {
+  if (previousVerdict === "struggled" && CEFR_LADDER.indexOf(next) > CEFR_LADDER.indexOf(current)) return current;
+  return next;
+}

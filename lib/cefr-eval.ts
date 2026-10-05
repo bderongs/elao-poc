@@ -1,7 +1,7 @@
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { getSessionDetail } from "@/lib/sessions-service";
 import { getProvider } from "@/lib/llm/registry";
-import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage } from "@/lib/cefr-prompt";
+import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage, parseCefrEvaluation } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore } from "@/lib/cefr-score";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { PronunciationAvg, CefrResult, EvaluationRow } from "@/lib/types";
@@ -105,8 +105,7 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
           maxTokens: 1500,
           json: true,
         });
-        const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();
-        const resultJson = JSON.parse(cleaned);
+        const resultJson = parseCefrEvaluation(text);
         const durationMs = Date.now() - startedAt;
 
         const { data: row, error: updateError } = await supabase

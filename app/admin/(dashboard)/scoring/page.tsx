@@ -111,7 +111,8 @@ export default function ScoringGuidePage() {
           level (like B2 or C1), not four separate numbers averaged together.
         </p>
         <p style={{ ...label, marginBottom: 0 }}>
-          On top of that judgement, one fixed rule applies afterwards: if two of those four hit 9 or 10/10, the score
+          Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). On top of that
+          judgement, one fixed rule applies afterwards: if two of those four hit 9/10 or more (8.5 doesn&apos;t count), the score
           gets a flat +5% (capped at 100) and the level is recalculated. Example above: 82 → 86, since Pronunciation
           (9) and Fluency (9) both qualify — C1 becomes C1+.
         </p>
@@ -153,8 +154,8 @@ export default function ScoringGuidePage() {
       <ExplainerCard id="score-fluency" accent={accentFluency} title="Fluency">
         <p style={{ ...label, marginBottom: 0 }}>
           Scored by the same AI reading the transcript, but anchored to something measurable: how many words were
-          spoken per minute, taken from the recording. A fixed scale converts that speaking rate into the 0-10 score
-          — roughly 140 words/min lands at 9/10. It&apos;s not a free judgment call; the rate does most of the work.
+          spoken per minute, taken from the recording. A fixed scale converts that speaking rate into the 0-10 score (in half points)
+          — roughly 140 words/min lands at 9-9.5/10. It&apos;s not a free judgment call; the rate does most of the work.
         </p>
       </ExplainerCard>
 

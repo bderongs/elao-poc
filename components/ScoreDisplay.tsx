@@ -35,6 +35,11 @@ export const CONFIDENCE_COLOR: Record<string, string> = {
 
 // ─── small reusable bar ───────────────────────────────────────────────────────
 
+/** 0-10 bars keep one decimal (axes are scored in half points, Track AE; pronunciation /10 is continuous) — "8.5", "9", never "9.0". 0-100 bars stay whole numbers. */
+function formatBarValue(value: number, max: number): string {
+  return max <= 10 ? String(Math.round(value * 10) / 10) : String(Math.round(value));
+}
+
 export function Bar({
   label,
   value,
@@ -65,7 +70,7 @@ export function Bar({
           }}
         />
       </div>
-      <span style={{ width: 28, textAlign: "right", color: light ? "#141D33" : "#e5e7eb" }}>{Math.round(value)}</span>
+      <span style={{ width: 28, textAlign: "right", color: light ? "#141D33" : "#e5e7eb" }}>{formatBarValue(value, max)}</span>
     </div>
   );
 }

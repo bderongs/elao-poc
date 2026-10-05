@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   CEFR_SYSTEM_PROMPT,
   buildEvaluationUserMessage,
+  parseCefrEvaluation,
 } from "@/lib/cefr-prompt";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import { getProvider } from "@/lib/llm/registry";
@@ -47,9 +48,8 @@ export async function POST(req: Request) {
       context: "cefr-eval",
     });
 
-    // Strip any accidental markdown fences and parse
-    const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();
-    const evaluation = JSON.parse(cleaned);
+    // Strips markdown fences, normalises dimensions to half points (Track AE)
+    const evaluation = parseCefrEvaluation(text);
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
     return NextResponse.json(evaluation);

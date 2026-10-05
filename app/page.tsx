@@ -11,7 +11,7 @@ import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder, pickRecorderMimeType } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import { logClientEvent } from "@/lib/client-log";
-import { isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
+import { guardStepUp, isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
 import { isTopicDomain, pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import type { BankState } from "@/lib/examiner-prompt";
 import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
@@ -853,13 +853,16 @@ export default function Home() {
         verdict,
       });
       if (isCefrRung(nextRung)) {
+        // Hold the rung for one more turn after a "struggled" verdict (lib/cefr-rung.ts).
+        const steps = ladderStepsRef.current;
+        const guardedRung = guardStepUp(currentRungRef.current, nextRung, steps[steps.length - 1]?.verdict);
         ladderStepsRef.current = [
           ...ladderStepsRef.current,
           {
             atSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0,
             rung: currentRungRef.current,
             verdict,
-            nextRung,
+            nextRung: guardedRung,
             words: countWords(userAnswer),
           },
         ];
@@ -871,14 +874,14 @@ export default function Home() {
               questionAsked,
               userAnswer,
               previousRung: currentRungRef.current,
-              nextRung,
+              nextRung: guardedRung,
               verdict,
-              zone: zoneForRung(nextRung),
+              zone: zoneForRung(guardedRung),
             },
           ]);
         }
-        currentRungRef.current = nextRung;
-        vadRef.current?.setExtendedPauseTolerance(nextRung === "C2");
+        currentRungRef.current = guardedRung;
+        vadRef.current?.setExtendedPauseTolerance(guardedRung === "C2");
       }
     } catch (e) {
       logClientEvent("et_failed", { turnLogId, process: etProcess, error: String(e) });

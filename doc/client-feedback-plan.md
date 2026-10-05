@@ -205,6 +205,13 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 | AA | Questions too hard / DELF-DALF-like, no warm-up, for/against arguments | 🟡 question bank built (6 languages); simulator + live check and client review to do |
 | AB | Levels compressed around B2 (72/100), C1/C2 hard to reach, "2-step" scoring felt harsher | ⬜ to investigate once sessions are saved again |
 | AC | *(Baptiste's idea)* Adaptive session length: stop early when the level is clear, run longer when it isn't | 🟡 built in **shadow mode** (records only); calibrate, then switch on |
+| AD | "Jokers": don't penalise answers when the error looks like a speech-to-text error | ⬜ to do — design proposed |
+| AE | Score in steps of 5 instead of steps of 10 | ✅ built — axes in half points (prompt v3); replay over stored sessions to do |
+| AF | Questions still too hard for an A1 speaker | ⬜ to do |
+| AG | Configurable "callback" when a score is available, visible in admin | 🟡 built, **not activated** (default URL https://www.elao-test.com/callback), shown on `/admin/system-config`; receiving side to agree with the client |
+| AH | Satisfaction form at the end of the test (beta period) | ⬜ to do |
+
+**Order (2026-10-01 additions):** AE and AG done first (Baptiste's call, 2026-10-01) → AF and AH (small, directly visible to beta testers, and AH starts collecting data right away) → AD (overlaps AB-06 / Z-03, do them together).
 
 **Order:** X → Z → AA → Y (rest) → AB. AB-06/AB-07 (scoring penalised by recognition errors) can go before AA — small, contained, and they directly explain "levels compressed around B2".
 
@@ -353,13 +360,143 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 ---
 
+## Track AD — "Jokers" for likely speech-to-text errors ⬜
+
+**Feedback (2026-10-01):** study "jokers" so that some answers are not penalised when the error seems to come from the speech-to-text, not the speaker.
+
+**Where recognition errors hurt today (⚠ finding, from AB-06 / Z-03 / Track V finding 6):**
+1. **Pronunciation**: misheard words are assessed against the wrong reference text and score 16–42 while correctly heard words score ~96 (`e96e95b8…`). A handful of them pulls the session average under 90 and removes the +5 % bonus.
+2. **Vocabulary/grammar**: the final evaluator quotes recognition errors as the speaker's errors ("s'allader", "strike") and caps the axis at 8, although its prompt says to dismiss them.
+3. **Pacing (ET)**: a garbled answer can be judged "struggled" and lower the rung.
+
+**Proposal: detect, then forgive**
+- **Detection, without a new STT call**: we already get two independent hearings of each answer: the live transcript (Mistral realtime / Voxtral) and Deepgram nova-3's verbatim transcript (pronunciation pipeline, `lib/pronunciation/providers/azure-ensemble.ts` / `azure-intended.ts`). Words where the two **disagree** are "ASR-uncertain". Also flag words with low recogniser confidence (Deepgram per-word confidence) and words that are not real words in the session language.
+- **Joker = a forgiven word or answer**:
+  - pronunciation: ASR-uncertain words are excluded from the pronunciation average (or weighted down), never scored against a reference they don't match;
+  - evaluator: the transcript sent to `lib/cefr-prompt.ts` marks uncertain words (e.g. `[?word]`), and the prompt says marked words can never be quoted as errors or lower vocabulary/grammar;
+  - ET: an answer where more than ~30 % of the words are uncertain cannot be "struggled" (it holds the rung).
+- **Cap**: limit the forgiveness (e.g. at most ~15 % of the words of a session, or N answers) so a genuinely unintelligible speaker isn't rescued by the mechanism. To calibrate.
+- **Transparency**: store the flagged words per turn and show them in the admin session detail ("3 words forgiven as likely recognition errors"), so the client can check a joker wasn't hiding a real error.
+
+**To do**
+- [ ] **AD-01** Measure first: on stored sessions (turn WAVs + transcripts), compute live-vs-Deepgram disagreement per turn and check by ear that disagreements are really ASR errors (reuse the Z-09 side-by-side script).
+- [ ] **AD-02** Pronunciation: exclude ASR-uncertain words from the average (fixes AB-06).
+- [ ] **AD-03** Evaluator: mark uncertain words in the transcript + prompt rule; bump `CEFR_PROMPT_VERSION` (fixes Z-03 / Track V finding 6).
+- [ ] **AD-04** ET: uncertain-heavy answers can't be "struggled".
+- [ ] **AD-05** Admin: show forgiven words per turn and per session.
+- [ ] **AD-06** Replay over stored sessions (same script as AB-03): which levels change, check nothing jumps more than one "+" without reason.
+
+---
+
+## Track AE — Score in steps of 5 instead of steps of 10 ✅
+
+**Feedback (2026-10-01):** "faire évoluer le scoring vers des paliers de 5 plutôt que des scores par dizaines."
+
+**What the code did (⚠ finding):** the level bands were **already** 5 points wide (`scoreToLevel` in `lib/cefr-score.ts`: A1 40, A1+ 45, … C2 90). What moved in steps of 10 were the **three LLM axes** (fluency, vocabulary/grammar, communication): whole numbers 0–10, i.e. 70 / 80 / 90 on a 100 scale. That is coarse exactly where it matters, because one point on an axis is the difference between 8 and 9, which decides the "2 axes ≥ 9" bonus. Pronunciation was already 0–100.
+
+**Decision (Baptiste, 2026-10-01):** axes in **half points** (0, 0.5 … 10 = steps of 5 on 100).
+
+**Done (2026-10-01, uncommitted)**
+- [x] **AE-02** `lib/cefr-prompt.ts`: "HALF POINTS" rule in the dimension guide (a .5 when the speaker sits between two descriptors, no other decimals), schema comments, WPM → fluency bands 8–8.5 / 9–9.5 at the top. `CEFR_PROMPT_VERSION` bumped to **v3** (eval-lab rows stay distinguishable from v2).
+- [x] New `parseCefrEvaluation()` (same file), used by all three callers (live `/api/evaluate`, eval lab `lib/cefr-eval.ts`, simulator): clamps each axis to 0–10 and rounds it to the nearest 0.5 whatever the model returns (8.7 → 8.5, "8.2" → 8, 11 → 10); `score_percent` rounded to an integer.
+- [x] **AE-03** Bonus rule unchanged: an axis must be **≥ 9** to count; **8.5 does not count** (comment in `lib/cefr-score.ts`, copy on `/admin/scoring`). To revisit with the Track V C2-floor rule.
+- [x] **AE-04** Display: `Bar` (`components/ScoreDisplay.tsx`) showed `Math.round(value)`, which would have turned 8.5 into 9. 0–10 bars now show one decimal ("8.5", "9", pronunciation /10 e.g. "9.1"). The admin score breakdown already shows axes ×10, so 8.5 appears as 85 there. `/admin/scoring` copy updated.
+- Existing sessions keep their whole-number axes; nothing is migrated.
+
+**To do**
+- [ ] **AE-05** Replay over stored sessions (AB-03 script): level changes old vs new, and check that the model actually uses half points (not only whole numbers).
+- [ ] **AE-06** One live session to check the results screen and admin panel show the half points.
+
+---
+
+## Track AF — Questions still too hard for A1 ⬜
+
+**Feedback (2026-10-01):** "Les questions posées à un user A1 sont encore trop dures, il faudrait vraiment simplifier."
+
+**Likely causes (⚠ finding, from the code; to confirm on the tester's session):**
+1. **French starts at A2** (`startingRung` default A2, admin setting), so an A1 speaker gets A2 questions until ET drops them, and a drop takes a "struggled" verdict.
+2. **The warm-up opener is the same for everyone** (Track AA-01): "Parlez-moi un peu de l'endroit où vous habitez" is an open "tell me about" question — too open for a true beginner. It is also preceded by a 2–3-sentence intro at natural complexity.
+3. **The A1 bank itself is still open-ended**: "Tell me about your brothers or sisters", "Tell me about a pet…". The rule "avoid yes/no questions" (`buildCommonRules`) pushes the model away from what a beginner can actually answer.
+4. **Follow-ups are model-written**: the A1/A2 prompt allows one own follow-up, which can be more complex than the bank question.
+5. TTS is slowed until B1 (`SLOW_RATE`), so speech speed is already handled.
+
+**Proposal**
+- **A1 = closed and choice questions are allowed and preferred**: "Vous avez des frères ou des sœurs ?", "Vous habitez dans une maison ou un appartement ?", "Vous aimez le sport ?". At most ~8 words, present tense, the 500 most common words, one idea. The "avoid yes/no" rule is lifted at A1 only; the follow-up is a fixed, very short "Pourquoi ?" / "Comment s'appelle-t-il ?" type.
+- **Rewrite the A1 bank** (all 6 languages) in that style, each entry with a pre-written short follow-up, and **let the code pick at A1** like at C1/C2 (same `bankState` mechanism), so the model can't make A1 questions harder.
+- **Adaptive warm-up**: when the starting rung is A1/A2, use an A1-style warm-up ("Vous habitez où ?") and a shorter intro (one sentence: "Bonjour, je m'appelle Léa. On parle trois minutes en français ?").
+- **Starting rung**: consider starting at A1 (or offering "Je débute" on the landing page) instead of A2 — trade-off: stronger speakers spend one more turn climbing (to weigh against AC's adaptive length and AB-04 faster promotion).
+- **ET at A1**: one-word or two-word correct answers are "well" (already in the foundation addendum) — check it holds in the tester's session.
+
+**To do**
+- [ ] **AF-01** Get the A1 tester's session (language, date) and read the questions actually asked and the rung per turn (`ladder_json`, Track AC).
+- [ ] **AF-02** Rewrite the A1 bank (short closed/choice questions + fixed follow-ups), 6 languages.
+- [ ] **AF-03** Code-picked questions at A1 (reuse the C1/C2 `bankState` flow in `lib/examiner-prompt.ts`); lift the yes/no rule at A1.
+- [ ] **AF-04** A1-style warm-up and one-sentence intro when the starting rung is A1/A2.
+- [ ] **AF-05** Decide the starting rung / "Je débute" option with the client.
+- [x] **AF-06a** Batch tool: `npm run sim:batch -- --level A1 --lang fr --runs 10` (`scripts/sim-batch.ts`) plays N simulated sessions through the real examiner/ET/evaluator, computes per-turn metrics (understanding, question length, rung path, ET verdicts, final level vs simulated level) and writes `sim-runs/<date>-<level>/report.md` + an LLM analyst reading. Mistral is paced to ~26 req/min, so 10 sessions ≈ 15 min. Also works for A2/C1/C2 (`--level C1 --start C1`). The simulator now mirrors live's "I didn't understand" re-ask (it didn't before).
+- **Baseline, 2026-10-01 (FR, learner A1, examiner starting at A2, 10 sessions, *before* the clarify fix above):** final level A1 ×6 / A1+ ×4 (calibration fine). But: the opening line (intro + warm-up, 20–29 words) was **never** fully understood by the simulated A1 learner; only ~3-word questions ("Où habitez-vous ?") were understood in full; 80 % of sessions had at least one question not understood at all; ET judged short fragments ("Liège. Grande ville.") "well" (avg 9.8 words for "well" vs 9.4 for "struggled") so the ladder yo-yoed A1↔A2 and reached B1 in 4/10 sessions.
+- [ ] **AF-06b** Re-run the baseline with the clarify fix, then after each AF change (AF-02…AF-04) with the same command, and compare `summary.json`.
+
+---
+
+## Track AG — Score callback, visible in admin 🟡 (built, not activated)
+
+**Feedback (2026-10-01):** add a possible "callback" at the end, configurable, when a score is available. Configured in the code, but visible in the admin.
+
+**Decision (Baptiste, 2026-10-01):** default URL `https://www.elao-test.com/callback`, **not activated**, but shown in the admin.
+
+**Done (2026-10-01, uncommitted)**
+- [x] **AG-02** `lib/score-callback.ts`: `SCORE_CALLBACK = { enabled: false, url, events: ["session.completed"], timeoutMs: 5000, maxAttempts: 3, signatureHeader: "X-Elao-Signature" }`. The URL defaults to `https://www.elao-test.com/callback`, overridable per environment with `SCORE_CALLBACK_URL`. The body is signed with HMAC-SHA256 (`sha256=<hex>`) when `SCORE_CALLBACK_SECRET` is set (both documented in `.env.example`). Delivery: POST, retries with backoff (1 s, 2 s) on network errors and 5xx, no retry on 4xx. Never throws.
+- [x] **Payload**: `event`, `session_id`, `user_id`, `language`, `duration_seconds`, `completed_at`, `level` + `score` (our headline composite score, bonus included, i.e. what the user sees), `confidence`, `axes` (pronunciation, fluency, vocabulary_grammar, communication, all 0–100), `report_url` (admin session page).
+- [x] **AG-03** Fired server-side from `POST /api/sessions` after the final save, via `next/server`'s `after()` (runs after the response, never delays or fails the save). It reloads the saved row (`getSessionForScoreCallback` in `lib/sessions-service.ts`). Skipped when disabled or when the session has no evaluation.
+- [x] **AG-04 (part)** `/admin/system-config`: new "Score callback" section with status (**Not activated**), URL (default / from env), trigger, payload, signature, delivery. Read-only.
+- [x] **AG-05 (part)** Tested locally against a test receiver: signature verifies, a 500 is retried and the second attempt succeeds, and with the flag off the send is skipped (`score_callback_skipped` log).
+
+**Not built (on purpose)**
+- No delivery table yet: attempts are only logged as `score_callback_sent` / `score_callback_failed` / `score_callback_skipped` server events. A `score_callbacks` table (migration) and a per-session status + "resend" button on the session detail make sense once it is activated. The DB is shared between dev and prod, so no migration until then.
+- No callback after an eval-lab re-run, and no external reference (`?ref=`) on the test link yet.
+
+**To do**
+- [ ] **AG-01** Agree with the client: real receiving URL, payload fields, authentication (HMAC signature vs bearer token), whether they need their own user reference on the test link, which events.
+- [ ] **AG-06** Activate: `enabled: true` + `SCORE_CALLBACK_URL` / `SCORE_CALLBACK_SECRET` in Vercel, then one real session to check delivery.
+- [ ] **AG-07** (when activated) Delivery table + status/resend on the session detail.
+
+---
+
+## Track AH — Satisfaction form at the end of the test (beta) ⬜
+
+**Feedback (2026-10-01):** add a satisfaction form at the end of the test, for the beta period.
+
+**Design (proposal)**
+- **Where**: on the results screen (`phase === "done"` in `app/page.tsx`), below the level, as a short card — optional, skippable, one submit. Behind a `BETA_FEEDBACK_ENABLED` flag in `lib/session-config.ts` so it disappears after the beta with a one-line change.
+- **Questions** (short, in the session language — or FR/EN UI only, see AH-01):
+  1. Overall, how was the test? (1–5 stars)
+  2. Does the level you got seem right to you? (too low / about right / too high) — **directly useful for AB calibration**
+  3. Were the questions… (too easy / about right / too hard) — useful for AA/AF
+  4. Did Léa understand you well? (1–5) — useful for Z/Y (transcription, turn-taking)
+  5. Free comment (optional)
+- **Storage**: new `session_feedback` table (session id, rating, level_feeling, difficulty_feeling, understood_rating, comment, created_at), migration 0012/0013, written by a public route in the same style as `/api/sessions/live` (only for the caller's own session).
+- **Admin**: answers shown on the session detail page, a column/filter in the list (e.g. "level felt too low"), and a small summary (average rating, % "level about right").
+
+**To do**
+- [ ] **AH-01** Agree on the questions with the client (and whether the form is FR-only or in all 6 languages).
+- [ ] **AH-02** Migration + public route (`POST /api/sessions/feedback`).
+- [ ] **AH-03** Form on the results screen behind `BETA_FEEDBACK_ENABLED`.
+- [ ] **AH-04** Admin: answers on the session detail + list column + summary.
+
+---
+
 ## Questions for the client
 1. What does "la nouvelle manière de fonctionner (en 2 temps)" refer to? (AB-02)
 2. Should warm-up answers count in the evaluation? (AA-01)
 3. Review of the question bank on `/admin/question-bank` (all levels, 6 languages). (AA-07)
 4. After the X fix is deployed: can the testers redo one full session each so we have stored results to analyse? (AB-01)
 5. Variable session length (3–7 min depending on how quickly the level is clear) — OK, and what should the landing say instead of "Votre niveau en 3 minutes"? (AC-10)
+6. ~~"Paliers de 5" meaning~~ — decided 2026-10-01: axes in half points (AE).
+7. Which A1 tester session showed questions that were too hard (language, date)? Should beginners be able to say "Je débute" before the test? (AF-01, AF-05)
+8. Score callback: it is built but not activated, pointing at https://www.elao-test.com/callback. What is the real receiving URL? Are the payload fields OK? HMAC signature or bearer token? Do you need your own user reference on the test link? (AG-01)
+9. Satisfaction form: OK with the 5 proposed questions? FR only or all 6 languages? (AH-01)
 
 ## Files touched (this round)
 
-`lib/question-bank/*` (new) · `app/admin/(dashboard)/question-bank/page.tsx` (new) · `components/AdminSidebar.tsx` · `lib/topic-domain.ts` · `lib/conversation-sim.ts` · `lib/session-length.ts` (new) · `components/LadderPanel.tsx` (new) · `supabase/migrations/0011_session_ladder.sql` (new) · `lib/session-config.ts` · `app/admin/(dashboard)/[id]/page.tsx` · `app/api/sessions/live/route.ts` · `lib/types.ts` · `app/api/sessions/audio-urls/route.ts` (new) · `app/api/gradium-token/route.ts` (new) · `lib/realtime-stt-gradium.ts` (new) · `lib/realtime-stt-config.ts` · `lib/realtime-stt.ts` · `lib/turn-vad.ts` · `lib/comprehension.ts` (new) · `lib/tts/providers/gradium.ts` (new) · `lib/sessions-service.ts` · `app/page.tsx` · `middleware.ts` · `lib/supabase-browser.ts` · `app/api/chat/route.ts` · `lib/conversation-prompts.ts` · `lib/examiner-prompt.ts` · `lib/tts/registry.ts` · `lib/turn-labels.ts` · `.env.example`
+`lib/score-callback.ts` (new) · `app/api/sessions/route.ts` · `app/admin/(dashboard)/system-config/page.tsx` · `lib/cefr-prompt.ts` · `lib/cefr-eval.ts` · `app/api/evaluate/route.ts` · `components/ScoreDisplay.tsx` · `lib/cefr-score.ts` · `app/admin/(dashboard)/scoring/page.tsx` · `lib/question-bank/*` (new) · `app/admin/(dashboard)/question-bank/page.tsx` (new) · `components/AdminSidebar.tsx` · `lib/topic-domain.ts` · `lib/conversation-sim.ts` · `lib/session-length.ts` (new) · `components/LadderPanel.tsx` (new) · `supabase/migrations/0011_session_ladder.sql` (new) · `lib/session-config.ts` · `app/admin/(dashboard)/[id]/page.tsx` · `app/api/sessions/live/route.ts` · `lib/types.ts` · `app/api/sessions/audio-urls/route.ts` (new) · `app/api/gradium-token/route.ts` (new) · `lib/realtime-stt-gradium.ts` (new) · `lib/realtime-stt-config.ts` · `lib/realtime-stt.ts` · `lib/turn-vad.ts` · `lib/comprehension.ts` (new) · `lib/tts/providers/gradium.ts` (new) · `lib/sessions-service.ts` · `app/page.tsx` · `middleware.ts` · `lib/supabase-browser.ts` · `app/api/chat/route.ts` · `lib/conversation-prompts.ts` · `lib/examiner-prompt.ts` · `lib/tts/registry.ts` · `lib/turn-labels.ts` · `.env.example`

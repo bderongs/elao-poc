@@ -1,5 +1,5 @@
 import { getSystemPrompt, buildQuestionBank, buildPickedQuestionText, type ConvLang, type PromptOpts } from "@/lib/conversation-prompts";
-import { isCefrRung, type CefrRung } from "@/lib/cefr-rung";
+import { isCefrRung, zoneForRung, type CefrRung } from "@/lib/cefr-rung";
 import { isTopicDomain } from "@/lib/topic-domain";
 import { isMasteryBankRung, pickBankQuestion, questionById } from "@/lib/question-bank";
 
@@ -57,10 +57,13 @@ export function buildExaminerPrompt(params: {
   });
 
   if (isStart) {
-    const { question, updatedUsedIds } = pickBankQuestion({ rung: "warmup", usedIds: usedQuestions });
+    // Starting at A1/A2 (explicit or the A2 default): a beginner can't catch the
+    // regular warm-up wording, so open with the A1 bank and a very short intro.
+    const easy = zoneForRung(targetRung) === "foundation";
+    const { question, updatedUsedIds } = pickBankQuestion({ rung: easy ? "A1" : "warmup", usedIds: usedQuestions });
     // Kept as the current question (follow-up already "done") so a first C1/C2
     // pick avoids the warm-up's topic.
-    return build("", { bankMode: "none", openerQuestion: question.text[language] }, updatedUsedIds, { currentId: question.id, followUpDone: true });
+    return build("", { bankMode: "none", openerQuestion: question.text[language], ...(easy ? { easyOpening: true } : {}) }, updatedUsedIds, { currentId: question.id, followUpDone: true });
   }
   if (isEnd) {
     return build("", { bankMode: "none" }, usedQuestions, bankState);

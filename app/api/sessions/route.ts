@@ -1,5 +1,7 @@
-import { createSessionFromForm, listSessions } from "@/lib/sessions-service";
+import { after } from "next/server";
+import { createSessionFromForm, getSessionForScoreCallback, listSessions } from "@/lib/sessions-service";
 import { getCurrentUser } from "@/lib/current-user";
+import { sendScoreCallback } from "@/lib/score-callback";
 
 export const runtime = "nodejs";
 
@@ -11,11 +13,19 @@ export const runtime = "nodejs";
  * updated (see createSessionFromForm) — otherwise it's saved anonymously
  * exactly as before, and the post-session ClaimResultsForm remains the way
  * to attach it later.
+ *
+ * Once saved, the score callback (lib/score-callback.ts, Track AG) runs
+ * after the response is sent — it never delays or fails the save.
  */
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
     const { id } = await createSessionFromForm(await req.formData(), user?.id ?? null);
+    const reportUrl = `${new URL(req.url).origin}/admin/${id}`;
+    after(async () => {
+      const session = await getSessionForScoreCallback(id);
+      if (session) await sendScoreCallback(session, reportUrl);
+    });
     return Response.json({ id });
   } catch (e) {
     console.error("[sessions] create failed:", e);

@@ -13,6 +13,8 @@ export interface EtAssessParams {
 export interface EtResult {
   nextRung: CefrRung;
   verdict: string;
+  /** "Well above" the rung (A1/A2 only) — what a step up requires there; see lib/level-assessment.ts. */
+  strong?: boolean;
 }
 
 export interface EtProvider {
