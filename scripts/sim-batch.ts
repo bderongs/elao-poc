@@ -19,6 +19,13 @@
  *   --learner mistral|anthropic  who plays the learner           (mistral)
  *   --concurrency N              sessions in parallel            (4)
  *   --no-analysis                skip the analyst LLM call (metrics only)
+ *   --no-save                    don't save the sessions to the database
+ *   --label TEXT                 free-text tag stored on each saved session (e.g. "after step-up guard")
+
+ * Each finished session is saved to the sessions table with source "simulation"
+ * (same rows as a live session, no audio) and simulation_json.batchId = the
+ * sim-runs/ folder name — filter Source = simulation in the admin sessions list,
+ * and compare runs by batchId/label. Needs Supabase env vars and migration 0013.
  *
  * Mistral is paced globally to ~26 requests/minute (this key's limit is 30),
  * so 10 sessions take roughly 12-15 minutes whatever --concurrency is.
@@ -43,6 +50,8 @@ import { runConversationSimulation, type SimConfig, type SimEvent, type Understa
 import { isConvLang, type ConvLang } from "@/lib/conversation-prompts";
 import { CEFR_LADDER, isCefrRung, type CefrRung } from "@/lib/cefr-rung";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
+import { buildSimulationRecord } from "@/lib/simulation-record";
+import { saveSimulationSession } from "@/lib/sessions-service";
 
 // ─── args ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +72,10 @@ const stepSize = Number(arg("step", "1"));
 const learnerProvider = arg("learner", "mistral") as SimConfig["learnerProvider"];
 const concurrency = Number(arg("concurrency", "4"));
 const analyse = !flag("no-analysis");
+const save = !flag("no-save");
+const label = arg("label", "") || null;
+/** Also the sim-runs/ folder name — stored on every saved session as simulation_json.batchId. */
+const batchId = `${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${level}`;
 
 // ─── console noise: the lib logs every LLM call, mute it and print our own progress ──
 
@@ -128,6 +141,8 @@ interface SessionRecord {
   summary: string | null;
   errors: string[];
   durationMs: number;
+  /** sessions.id of the saved copy (null with --no-save or if saving failed). */
+  savedId: string | null;
 }
 
 // ─── one session ─────────────────────────────────────────────────────────────
@@ -136,13 +151,15 @@ async function playSession(language: ConvLang): Promise<SessionRecord> {
   const config: SimConfig = { language, learnerLevel: level as CefrRung, startingRung: start as CefrRung, stepSize, answers, learnerProvider };
   const rec: SessionRecord = {
     language, persona: "", turns: [], rungPath: [], finalLevel: null, finalScore: null,
-    axes: null, confidence: null, summary: null, errors: [], durationMs: 0,
+    axes: null, confidence: null, summary: null, errors: [], durationMs: 0, savedId: null,
   };
+  const events: SimEvent[] = [];
   // The examiner event for turn N is the question the learner answers in turn N+1.
   let pending: { rung: CefrRung; text: string } | null = null;
   let current: TurnRecord | null = null;
 
   for await (const e of runConversationSimulation(config) as AsyncGenerator<SimEvent>) {
+    events.push(e);
     switch (e.type) {
       case "start":
         rec.persona = `${e.persona.name}, ${e.persona.age}, ${e.persona.job}`;
@@ -192,6 +209,14 @@ async function playSession(language: ConvLang): Promise<SessionRecord> {
       case "done":
         rec.durationMs = e.durationMs;
         break;
+    }
+  }
+  if (save && rec.finalLevel) {
+    try {
+      const record = buildSimulationRecord(events, { batchId, label });
+      if (record) rec.savedId = (await saveSimulationSession(record)).id;
+    } catch (err) {
+      rec.errors.push(`save: ${String(err)}`);
     }
   }
   return rec;
@@ -394,7 +419,7 @@ async function main() {
       try {
         sessions[i] = await playSession(jobs[i]);
       } catch (e) {
-        sessions[i] = { language: jobs[i], persona: "", turns: [], rungPath: [], finalLevel: null, finalScore: null, axes: null, confidence: null, summary: null, errors: [String(e)], durationMs: 0 };
+        sessions[i] = { language: jobs[i], persona: "", turns: [], rungPath: [], finalLevel: null, finalScore: null, axes: null, confidence: null, summary: null, errors: [String(e)], durationMs: 0, savedId: null };
       }
       say(`  ${++done}/${jobs.length} · ${sessions[i].language} · rungs ${sessions[i].rungPath.join("→") || "—"} · final ${sessions[i].finalLevel ?? "FAILED"}`);
     }
@@ -415,7 +440,7 @@ async function main() {
     }
   }
 
-  const dir = join("sim-runs", `${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${level}`);
+  const dir = join("sim-runs", batchId);
   mkdirSync(dir, { recursive: true });
   const report = renderReport(summary, sessions, analysis);
   writeFileSync(join(dir, "report.md"), report);
@@ -426,7 +451,7 @@ async function main() {
   console.warn = realWarn;
   console.error = realError;
   console.log(report);
-  say(`\nSaved to ${dir}/`);
+  say(`\nSaved to ${dir}/` + (save ? ` — ${sessions.filter((x) => x.savedId).length}/${sessions.length} sessions saved to the database (source "simulation", batch ${batchId})` : ""));
 }
 
 main().catch((e) => {

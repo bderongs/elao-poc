@@ -2,13 +2,17 @@
  * POST /api/simulations — runs one simulated conversation (lib/conversation-sim.ts)
  * and streams its events as NDJSON (one SimEvent per line) so the admin
  * simulator page can render turns as they're produced. Admin-only (see
- * middleware.ts). Nothing is persisted — sessions/evaluations tables are untouched.
+ * middleware.ts). The finished run is saved as a session with source 'simulation'
+ * (lib/simulation-record.ts, saveSimulationSession); a final NDJSON line
+ * {type:"saved", id} tells the page where. Pass save:false to skip saving.
  */
 
 import { isConvLang } from "@/lib/conversation-prompts";
 import { isCefrRung } from "@/lib/cefr-rung";
 import { resolveConversationSettings } from "@/lib/conversation-settings-service";
-import { runConversationSimulation } from "@/lib/conversation-sim";
+import { runConversationSimulation, type SimEvent } from "@/lib/conversation-sim";
+import { buildSimulationRecord } from "@/lib/simulation-record";
+import { saveSimulationSession } from "@/lib/sessions-service";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -20,10 +24,13 @@ interface SimulateRequest {
   startingRung?: string;
   answers?: number;
   learnerProvider?: string;
+  /** Default true; false = don't persist (throwaway run). */
+  save?: boolean;
+  label?: string;
 }
 
 export async function POST(req: Request) {
-  const { language, learnerLevel, startingRung, answers, learnerProvider } = (await req.json()) as SimulateRequest;
+  const { language, learnerLevel, startingRung, answers, learnerProvider, save, label } = (await req.json()) as SimulateRequest;
   if (!isConvLang(language) || !isCefrRung(learnerLevel)) {
     return Response.json({ error: "language and learnerLevel are required" }, { status: 400 });
   }
@@ -42,8 +49,22 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      const events: SimEvent[] = [];
       for await (const event of runConversationSimulation(config, req.signal)) {
+        events.push(event);
         controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      }
+      // An aborted run (admin hit stop) has no evaluation — not worth keeping.
+      if (save !== false && !req.signal.aborted && events.some((e) => e.type === "evaluation")) {
+        try {
+          const record = buildSimulationRecord(events, { label: label ?? null });
+          if (record) {
+            const { id } = await saveSimulationSession(record);
+            controller.enqueue(encoder.encode(JSON.stringify({ type: "saved", id }) + "\n"));
+          }
+        } catch (e) {
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "error", stage: "save", message: String(e) }) + "\n"));
+        }
       }
       controller.close();
     },

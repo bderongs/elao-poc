@@ -76,6 +76,8 @@ interface RunState {
   evaluation?: { result: CefrResult; composite: CompositeCefrScore };
   errors: string[];
   durationMs?: number;
+  /** Session id once the run was saved (POST /api/simulations' final "saved" line). */
+  savedId?: string;
 }
 
 /**
@@ -94,7 +96,7 @@ export function ConversationSimulator() {
   const [run, setRun] = useState<RunState | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const apply = (state: RunState, e: SimEvent): RunState => {
+  const apply = (state: RunState, e: SimEvent | { type: "saved"; id: string }): RunState => {
     switch (e.type) {
       case "start":
         return { ...state, config: e.config, persona: e.persona, learnerModel: e.learnerModel, examinerModel: e.examinerModel };
@@ -124,6 +126,8 @@ export function ConversationSimulator() {
         return { ...state, errors: [...state.errors, `${e.stage}: ${e.message}`] };
       case "done":
         return { ...state, durationMs: e.durationMs };
+      case "saved":
+        return { ...state, savedId: e.id };
     }
   };
 
@@ -152,7 +156,7 @@ export function ConversationSimulator() {
         buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.trim()) continue;
-          state = apply(state, JSON.parse(line) as SimEvent);
+          state = apply(state, JSON.parse(line) as SimEvent | { type: "saved"; id: string });
           setRun(state);
         }
       }
@@ -238,6 +242,7 @@ export function ConversationSimulator() {
               Starting rung {run.config.startingRung} · step size {run.config.stepSize} · learner model{" "}
               {run.learnerModel} · examiner model {run.examinerModel}
               {run.durationMs !== undefined && <> · took {Math.round(run.durationMs / 1000)}s</>}
+              {run.savedId && <> · <a href={`/admin/${run.savedId}`}>saved as session</a></>}
             </div>
           )}
 

@@ -125,6 +125,10 @@ export default async function AdminSessionsPage({
                         <span className={styles.badge} style={{ background: "#f59e0b", color: "#000" }}>
                           speechace
                         </span>
+                      ) : s.source === "simulation" ? (
+                        <span className={styles.badge} style={{ background: "#a78bfa", color: "#000" }}>
+                          simulation
+                        </span>
                       ) : (
                         <span style={{ color: adminColors.muted }}>conversation</span>
                       )}

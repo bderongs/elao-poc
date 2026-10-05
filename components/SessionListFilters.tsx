@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { languageLabel, LANGUAGE_CODES } from "@/lib/languages";
 import styles from "@/components/admin.module.css";
 
-const SOURCES = ["conversation", "upload", "speechace"];
+const SOURCES = ["conversation", "upload", "speechace", "simulation"];
 
 /**
  * Per-column filter row for the admin session table — lives inside <thead>

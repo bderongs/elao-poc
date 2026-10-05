@@ -11,6 +11,7 @@ import { isCefrRung } from "@/lib/cefr-rung";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { LadderRecord } from "@/lib/session-length";
+import type { SimulationRecord } from "@/lib/simulation-record";
 
 // Single source of truth for reading/writing sessions — used by both the
 // /api/sessions* route handlers and the admin pages (which call these
@@ -427,6 +428,48 @@ function sanitizeLadder(raw: unknown): LadderRecord | null {
 async function saveLadder(sessionId: string, ladder: LadderRecord): Promise<void> {
   const { error } = await getSupabaseServer().from("sessions").update({ ladder_json: ladder }).eq("id", sessionId);
   if (error) console.warn("[sessions] ladder_json not saved:", error.message);
+}
+
+/**
+ * Saves one finished conversation simulation (lib/simulation-record.ts) as a
+ * regular session — same sessions/session_turns rows a live one produces, no
+ * audio — flagged `source: 'simulation'` so it can be filtered in the admin
+ * list and compared (simulation_json carries learner level, models, batch id,
+ * per-turn comprehension). Nothing else writes this source.
+ */
+export async function saveSimulationSession(record: SimulationRecord): Promise<{ id: string }> {
+  const supabase = getSupabaseServer();
+  const { data, error } = await supabase
+    .from("sessions")
+    .insert({
+      language: record.language,
+      source: "simulation",
+      duration_seconds: Math.round(record.durationMs / 1000),
+      cefr_level: record.cefrLevel,
+      global_score: record.globalScore,
+      evaluation_json: record.evaluation,
+      transcript: record.transcript,
+      providers_json: getSystemConfig(),
+      status: "completed" as const,
+      last_activity_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "simulation session insert failed");
+  const sessionId = data.id as string;
+
+  const turnRows = record.transcript.map((t, i) => ({
+    session_id: sessionId, turn_index: i, role: t.role, content: t.content, audio_url: null, pronunciation_json: null,
+  }));
+  if (turnRows.length) {
+    const { error: turnsError } = await supabase.from("session_turns").insert(turnRows);
+    if (turnsError) console.error("[sessions] simulation turn insert failed:", turnsError.message);
+  }
+  await saveLadder(sessionId, record.ladder);
+  // Best-effort like the ladder: a missing column (migration 0013 not run) must not lose the session.
+  const { error: simError } = await supabase.from("sessions").update({ simulation_json: record.simulation }).eq("id", sessionId);
+  if (simError) console.warn("[sessions] simulation_json not saved (run migration 0013?):", simError.message);
+  return { id: sessionId };
 }
 
 export async function startLiveSession(language: string, userId: string | null): Promise<{ id: string }> {

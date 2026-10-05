@@ -9,7 +9,8 @@ export default function SimulatorPage() {
       <div style={{ color: adminColors.muted, fontSize: 13, marginBottom: 20, maxWidth: 640 }}>
         Runs a text-only session: an AI learner at the chosen CEFR level answers the real examiner
         (same prompts, level steps and topic switching as a live session), then the real CEFR
-        evaluation scores the learner&apos;s answers. Nothing is saved.
+        evaluation scores the learner&apos;s answers. Each finished run is saved as a session
+        with source “simulation” (filter by Source in the sessions list).
       </div>
       <ConversationSimulator />
     </div>

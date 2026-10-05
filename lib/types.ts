@@ -46,8 +46,8 @@ export interface SessionSummary {
   cefr_level: string | null;
   global_score: number | null;
   duration_seconds: number | null;
-  /** 'conversation' = real live session, 'upload' = created from an uploaded audio file, 'speechace' = imported from a competitor report. */
-  source: "conversation" | "upload" | "speechace";
+  /** 'conversation' = real live session, 'upload' = created from an uploaded audio file, 'speechace' = imported from a competitor report, 'simulation' = saved run of the admin conversation simulator (text only, no audio). */
+  source: "conversation" | "upload" | "speechace" | "simulation";
   /** Present only for 'conversation' sessions — the live flow is the only writer of this column. */
   evaluation_json: CefrResult | null;
   pronunciation_scores: PronunciationAvg | null;
