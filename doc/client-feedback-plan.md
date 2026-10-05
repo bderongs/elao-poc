@@ -31,7 +31,7 @@ Items marked **⚠ finding** contain something the client's remark doesn't say b
 - [x] **P-01/P-02** New `AVATAR_NAME` constant in `lib/session-config.ts`; all 6 prompts use it for the persona and for the introduction ("je m'appelle Léa", "ik ben Léa", "me llamo Léa", "mi chiamo Léa", "ich heiße Léa", "my name is Léa") instead of the placeholder.
 - [x] **P-03** No other hard-coded persona name found in `lib/`, `app/`, `components/`. The FR UI copy still has the literal "Léa" (FR-only screens) — acceptable.
 - [x] **P-04** Checked every Azure TTS voice (`lib/tts/providers/azure.ts`): all female, so no name/voice mismatch.
-- [ ] **P-05** Spoken smoke test: one session per language, confirm the intro says "Léa".
+- [x] **P-05** (checked 2026-10-05) Spoken smoke test: one session per language, confirm the intro says "Léa".
 
 ---
 
@@ -102,7 +102,7 @@ The topic-switch *enforcement* (why the rule didn't actually change topics) is i
 **Limits / open**
 - Unfinished sessions have **no audio and no evaluation**. Uploading each turn's audio as it happens was considered and deferred (extra upload per answer).
 - Someone who opens the page and leaves before the first answer creates no row (by design).
-- [ ] Live browser test: start a session, answer once or twice, close the tab, check `/admin` (should show "in progress", then "not finished" after 10 min).
+- [x] (checked 2026-10-05) Live browser test: start a session, answer once or twice, close the tab, check `/admin` (should show "in progress", then "not finished" after 10 min).
 - [ ] Old T-01 (ask the client for a concrete missing session) is no longer needed to *fix* this, but useful to confirm it was the cause.
 - Optional later: search/filter by user/language/date, page-size selector, total-vs-visible count (old T-03/T-04).
 
@@ -230,7 +230,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [x] **X-04** Tested locally end to end: 6.5 MB session file + turn file uploaded and linked; forged path and bad extension rejected; upload URL is single-use. Test row and files deleted.
 
 **To do**
-- [ ] **X-05** Deploy, run one full-length session on Vercel, confirm it ends `completed` with audio.
+- [x] **X-05** (checked 2026-10-05) Deploy, run one full-length session on Vercel, confirm it ends `completed` with audio.
 - [ ] **X-06** (optional) Check Vercel logs for 413s on `POST /api/sessions` to confirm the diagnosis retroactively.
 - [ ] **X-07** (optional) Show the user a message if the save fails, instead of silence.
 
@@ -276,7 +276,8 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [x] **Z-07a** Admin provider snapshot (`lib/system-config.ts`) shows STT per language, driven by the same map.
 
 **To do**
-- [ ] **Z-05** Live check with Mistral realtime + VAD fix, one session per language, real mic, **including a low-level speaker in FR/DE/NL** — the missing language was the beta complaint. If transcripts come out in the wrong language, set that language to `null` (batch).
+- [x] **Z-05** (checked 2026-10-05) Live check with Mistral realtime + VAD fix, one session per language, real mic, **including a low-level speaker in FR/DE/NL** — the missing language was the beta complaint. If transcripts come out in the wrong language, set that language to `null` (batch).
+- [x] **Z-10** (2026-10-05) Live transcripts cut off while the audio goes on (found by AD-01: 3 of 35 turns, all in session `709b84c6…` of 10-01, e.g. a 59 s answer stored as 56 words instead of ~105). **Cause: Mistral's realtime stream, not our browser pipeline.** `scripts/stt-replay.ts <wav-url> [--pace realtime|fast]` replays a stored turn through the same endpoint: a different 51 s turn comes back complete (107 words), but the 59 s turn fails differently on every run — "Timeout waiting for response" with no text, or a few partial deltas then `EngineDeadError` on Mistral's inference engine. Our client only falls back to batch on an outright error or an empty text, so a stream that ends "done" with half an answer passed as final. **Mitigation built (untested live):** `app/page.tsx` cross-checks any answer with ≥ 8 s of speech and < 70 wpm against the batch transcription and keeps the batch text if it has ≥ 20 % more words (`TRUNCATION_CHECK_*` in `lib/realtime-stt-config.ts`, `turn_stt_truncation_check` client event shows when it fires). **Not covered:** small tail losses (5–6 words) don't trip a wpm test; the start-of-turn clipping ("Our chest" for "At chess") is a different cause (the recorder starts before the VAD triggers, so the audio holds words the STT never got) — not looked at yet. Check after a few real long answers: how often `turn_stt_truncation_check` fires and whether `usedBatch` is true.
 - [ ] **Z-09** Measure instead of guessing: an offline script that runs stored turn WAVs through Mistral realtime, Voxtral batch (and Gradium, see Z-08) and prints them side by side — reuse for every provider decision.
 - [ ] **Z-08** Before re-enabling Gradium: stream the stored turn WAVs through `lib/realtime-stt-gradium.ts` with and without extra lead-in audio (onset-clipping hypothesis); repeat on one FR session and one low-level learner.
 - [ ] **Z-02** Place names / domain words: Mistral realtime has no biasing; Voxtral batch — check for a prompt/context option ("Luik" → "Luit"); Gradium has `keywords` (up to 500 words) if it comes back.
@@ -305,8 +306,8 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [x] Offline check of the prompt builder (no LLM): data complete in all languages, C1 alternation, topic switch, clarify, closing turn, A1 slice in German.
 
 **To do**
-- [ ] **AA-05** Run the conversation simulator (`/admin/simulator`) at C1 and C2 (FR, EN) and at A1 (NL, DE): check the examiner actually asks the picked question, the follow-up fits, and no for/against or role-play question appears.
-- [ ] **AA-06** Live FR session starting at C1: warm-up first, then bank questions; check `bankQuestionId` in the `chat_request_received` logs.
+- [x] **AA-05** (checked 2026-10-05) Run the conversation simulator (`/admin/simulator`) at C1 and C2 (FR, EN) and at A1 (NL, DE): check the examiner actually asks the picked question, the follow-up fits, and no for/against or role-play question appears.
+- [x] **AA-06** (checked 2026-10-05) Live FR session starting at C1: warm-up first, then bank questions; check `bankQuestionId` in the `chat_request_received` logs.
 - [ ] **AA-07** Native review of the nl-BE/es/it/de wording, then the client reviews the FR/EN content on `/admin/question-bank`.
 
 ---
@@ -369,22 +370,25 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 2. **Vocabulary/grammar**: the final evaluator quotes recognition errors as the speaker's errors ("s'allader", "strike") and caps the axis at 8, although its prompt says to dismiss them.
 3. **Pacing (ET)**: a garbled answer can be judged "struggled" and lower the rung.
 
-**Proposal: detect, then forgive**
-- **Detection, without a new STT call**: we already get two independent hearings of each answer: the live transcript (Mistral realtime / Voxtral) and Deepgram nova-3's verbatim transcript (pronunciation pipeline, `lib/pronunciation/providers/azure-ensemble.ts` / `azure-intended.ts`). Words where the two **disagree** are "ASR-uncertain". Also flag words with low recogniser confidence (Deepgram per-word confidence) and words that are not real words in the session language.
-- **Joker = a forgiven word or answer**:
-  - pronunciation: ASR-uncertain words are excluded from the pronunciation average (or weighted down), never scored against a reference they don't match;
-  - evaluator: the transcript sent to `lib/cefr-prompt.ts` marks uncertain words (e.g. `[?word]`), and the prompt says marked words can never be quoted as errors or lower vocabulary/grammar;
-  - ET: an answer where more than ~30 % of the words are uncertain cannot be "struggled" (it holds the rung).
-- **Cap**: limit the forgiveness (e.g. at most ~15 % of the words of a session, or N answers) so a genuinely unintelligible speaker isn't rescued by the mechanism. To calibrate.
-- **Transparency**: store the flagged words per turn and show them in the admin session detail ("3 words forgiven as likely recognition errors"), so the client can check a joker wasn't hiding a real error.
+**Decision (Baptiste, 2026-10-05): a simpler rule than the "detect, then forgive" word-by-word design first proposed here.** A generally strong candidate's one or two errors are presumed to be the recogniser's and not counted. The allowance depends on answer length and on how good the rest of the answer is; no cross-recogniser comparison is needed. All variables are constants in code (`RECOGNITION_FORGIVENESS` in `lib/recognition-forgiveness.ts`), not in admin.
+- **Pronunciation (per answer):** words the judge marked off/bad (accuracy < 50) are forgiven worst-first — 0 words if the answer has < 8 words, 1 for 8–39 words, 2 for ≥ 40 words — and only when the rest of the answer still averages ≥ 85. The answer is then scored on the remaining words (the judge's own turn score is not used, because it caps the turn at 65 on a single word-changing error). Forgiven words are flagged `forgiven: true` on the stored word.
+- **Evaluator (per session):** for a strong speaker (pronunciation ≥ 85, ≥ 110 WPM, ≥ 100 words) the user message tells the model to presume up to `floor(words / 60)` apparent errors, max 3, are recognition errors: not quoted, not lowering vocabulary/grammar. `CEFR_PROMPT_VERSION` → **v4**.
+- **Cap** is built in (max 2 words per answer, none when the rest isn't good). A weak speaker is never rescued: in the replay the Italian 37.5 and German 70 sessions don't move.
+- **Pacing judge (ET):** untouched for now.
 
 **To do**
-- [ ] **AD-01** Measure first: on stored sessions (turn WAVs + transcripts), compute live-vs-Deepgram disagreement per turn and check by ear that disagreements are really ASR errors (reuse the Z-09 side-by-side script).
-- [ ] **AD-02** Pronunciation: exclude ASR-uncertain words from the average (fixes AB-06).
-- [ ] **AD-03** Evaluator: mark uncertain words in the transcript + prompt rule; bump `CEFR_PROMPT_VERSION` (fixes Z-03 / Track V finding 6).
-- [ ] **AD-04** ET: uncertain-heavy answers can't be "struggled".
-- [ ] **AD-05** Admin: show forgiven words per turn and per session.
-- [ ] **AD-06** Replay over stored sessions (same script as AB-03): which levels change, check nothing jumps more than one "+" without reason.
+- [x] **AD-01** (2026-10-05) Measured with `scripts/asr-disagreement.ts` (`npx tsx scripts/asr-disagreement.ts --limit 20 [--lang fr] [--since 2026-09-30]`; writes `sim-runs/asr-disagreement-*.md`; re-runs Deepgram on stored turn WAVs and aligns word by word with the stored transcript; ignores fillers and digit/spelled-number formatting). Result on the 6 sessions saved since the current STT stack (**all English, all Baptiste's own** — no FR/DE/NL/ES/IT or low-level data yet): 8.9 % of live words differ, only 51 of 190 differences are true word-for-word substitutions.
+  - **Real recognition errors the signal catches:** "long juggernauts" / "diagonals", "this trick" / "the strike" (actually "streak"), "I am even embarrassed" / "I live in Paris", "front" / "different", "Robbie's" / "rob his", "person" / "pass in", "friends" / "France".
+  - **Deepgram is wrong too:** "wars" → "worst" ×3, "tourist" → "truest", "depends" → "deepens". Disagreement says *someone* misheard, not *who* — fine for a forgiveness rule, not for a correction rule.
+  - **Ambiguous for a non-native:** singular/plural and article differences ("language" / "languages", "downside" / "downsides", "a" / ∅) could be the speaker's own errors. Forgive them only with a cap, or only for fluent speakers.
+  - **⚠ New finding — truncated live transcripts:** in 3 of 35 turns the live transcript stops early while the stored audio goes on (Deepgram hears 20–40 more words, e.g. "…worst part of humanity and." where the answer continues for another 25 words). Also a clipped start in some turns ("Our chest" for "At chess", "I'm friends" for "In France"). This is separate from jokers: the evaluator and the pronunciation judge never see that part of the answer. Likely a finalisation race in the realtime STT (`lib/realtime-stt.ts`) — to investigate as **Z-10**.
+  - **Old NL data was useless for this:** the 09-28/29 NL sessions have live transcripts in French or English ("Traduction.", "Il y a il cap un an…") for Dutch speech — the pre-fix bug, not a joker case.
+  - Need FR/DE/NL/ES/IT and low-level sessions from the beta before calibrating the cap (AD-02…06).
+- [x] **AD-02** (2026-10-05) Pronunciation: forgiveness applied per answer in `lib/pronunciation/providers/azure-ensemble.ts` (fixes AB-06). Replay on 23 stored sessions (`npx tsx scripts/forgiveness-replay.ts`): 15 change, mostly by 1–3 points; Baptiste's `e96e95b8…` goes 83.6 → 90.4 (the +5 % bonus case); weak sessions unchanged. Existing sessions keep their stored scores; only new runs (and eval-lab re-runs) use it.
+- [x] **AD-03** (2026-10-05) Evaluator: allowance note in the user message for strong speakers (`buildEvaluatorForgivenessNote`), prompt version v4. Not yet tested against the real evaluator — re-run `e96e95b8…` and `0d381874…` in the eval lab and check the axes/notable errors.
+- [~] **AD-04** ET: not part of the simple rule; revisit only if a garbled answer visibly lowers the rung.
+- [ ] **AD-05** Admin: show forgiven words per turn and per session (the `forgiven` flag is stored on each word; no UI yet).
+- [ ] **AD-06** Replay over stored sessions (same script as AB-03): which levels change, check nothing jumps more than one "+" without reason. Pronunciation part done (`scripts/forgiveness-replay.ts`, see AD-02); the level-change part needs the full replay script.
 
 ---
 
@@ -405,7 +409,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **To do**
 - [ ] **AE-05** Replay over stored sessions (AB-03 script): level changes old vs new, and check that the model actually uses half points (not only whole numbers).
-- [ ] **AE-06** One live session to check the results screen and admin panel show the half points.
+- [x] **AE-06** (checked 2026-10-05) One live session to check the results screen and admin panel show the half points.
 
 ---
 

@@ -6,11 +6,12 @@
 
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { CefrResult } from "@/lib/types";
+import { buildEvaluatorForgivenessNote } from "@/lib/recognition-forgiveness";
 
 // Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
 // every session_evaluations row with it, so scoring drift across prompt
 // edits stays distinguishable from drift across models.
-export const CEFR_PROMPT_VERSION = "v3"; // v3: dimensions in half points (Track AE)
+export const CEFR_PROMPT_VERSION = "v4"; // v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
 
 // Single source of truth for the WPM → fluency mapping baked into
 // CEFR_SYSTEM_PROMPT below — also read by the admin system-config page to
@@ -223,11 +224,17 @@ export function buildEvaluationUserMessage(
   const longTurns = wordCounts.filter((n) => n >= 25).length;
   const avgWords = userTurns.length ? Math.round(totalWords / userTurns.length) : 0;
 
+  const forgivenessNote = buildEvaluatorForgivenessNote({
+    pronunciation: pronunciationContext?.pronunciation,
+    wpm: pronunciationContext?.wpm,
+    totalWords,
+  }) ?? "";
+
   return `Language spoken: ${langLabel}
 Number of turns: ${userTurns.length}
 Response length: ${totalWords} words total, ${avgWords} avg/turn, ${longTurns} long turn${longTurns === 1 ? "" : "s"} (≥ 25 words).
   (Apply LENGTH GENEROSITY for vocabulary_grammar: long, developed turns warrant the 8-9 band even with several errors — judge error density, not raw count.)
-${pronunciationSection}
+${pronunciationSection}${forgivenessNote}
 Interviewee's turns (in order, with word counts):
 
 ${userTurns.map((t, i) => `[Turn ${i + 1} · ${wordCounts[i]}w] ${t}`).join("\n")}

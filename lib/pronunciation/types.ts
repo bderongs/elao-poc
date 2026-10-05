@@ -5,6 +5,9 @@ export interface WordScore {
   accuracyScore: number;
   /** "None" | "Omission" | "Insertion" | "Mispronunciation" | "UnexpectedBreak" | "MissingBreak" | "Monotone" */
   errorType: string;
+  /** Left out of this answer's score as a presumed recognition error
+   *  (lib/recognition-forgiveness.ts). The word keeps its own score/colour. */
+  forgiven?: boolean;
 }
 
 export interface PronunciationResult {

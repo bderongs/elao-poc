@@ -27,8 +27,9 @@
 
 import { mistralComplete, mistralPronunciationModel } from "@/lib/mistral";
 import { discreteWordConfidence, wordAccuracy } from "@/lib/pronunciation-scoring";
+import { applyPronunciationForgiveness } from "@/lib/recognition-forgiveness";
 import type { PronunciationProvider, PronunciationAssessParams } from "@/lib/pronunciation/types";
-import type { PronunciationResult } from "@/lib/pronunciation/types";
+import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 
 // ─── Evidence collectors ──────────────────────────────────────────────────────
 
@@ -325,7 +326,7 @@ async function assess({
 
   if (verdict) {
     // Defensive alignment: one entry per live-transcript word, in order.
-    const words = liveWords.map((w, i) => {
+    const words: WordScore[] = liveWords.map((w, i) => {
       const v = verdict.words[i]?.v ?? "ok";
       const m = VERDICT_MAP[v] ?? VERDICT_MAP.ok;
       return { word: w, confidence: m.confidence, accuracyScore: m.accuracyScore, errorType: m.errorType };
@@ -336,9 +337,18 @@ async function assess({
     const wordAvg = words.length
       ? Math.round(words.reduce((s, w) => s + w.accuracyScore, 0) / words.length)
       : 0;
-    const score = Math.max(0, Math.min(100, Math.round(verdict.turn_score), wordAvg));
+    let score = Math.max(0, Math.min(100, Math.round(verdict.turn_score), wordAvg));
+    // Jokers (Track AD): a strong answer's one or two worst words are presumed
+    // to be recognition errors — score the answer without them. The judge's own
+    // turn_score is not used then (it caps the turn on a single word-changing error).
+    const forgiveness = applyPronunciationForgiveness(words);
+    if (forgiveness.score !== null) {
+      for (const i of forgiveness.forgivenIndices) words[i].forgiven = true;
+      score = Math.max(score, forgiveness.score);
+    }
     console.log(
-      `[pronunciation] judge OK score=${score} verdicts=${verdict.words.map((w) => `${w.w}:${w.v}`).join(" ")}${verdict.summary ? ` — ${verdict.summary}` : ""}`
+      `[pronunciation] judge OK score=${score} verdicts=${verdict.words.map((w) => `${w.w}:${w.v}`).join(" ")}${verdict.summary ? ` — ${verdict.summary}` : ""}` +
+        (forgiveness.score !== null ? ` | forgiven: ${forgiveness.forgivenIndices.map((i) => words[i].word).join(", ")}` : "")
     );
     return {
       text: liveText,
