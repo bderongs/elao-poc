@@ -303,13 +303,23 @@ export function CefrPanel({
 
 // ─── Utterance mini-badges ────────────────────────────────────────────────────
 
-export function UtteranceBadges({ p }: { p: PronunciationResult }) {
+export function UtteranceBadges({ p, showForgiven = false }: { p: PronunciationResult; showForgiven?: boolean }) {
   const dims: [string, number, string][] = [
     ["P", p.pronunciationScore, "Pronunciation confidence"],
     ["W", p.wpm, "Words per minute"],
   ];
+  // Admin only (showForgiven): words left out of this answer's score as presumed recognition errors (Track AD).
+  const forgiven = showForgiven ? p.words.filter((w) => w.forgiven) : [];
   return (
     <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+      {forgiven.length > 0 && (
+        <span
+          title={`Left out of this answer's score as presumed recognition errors: ${forgiven.map((w) => w.word).join(", ")}`}
+          style={{ border: "1px dashed #94a3b8", color: "#475569", borderRadius: 3, padding: "0 5px", fontSize: 10, fontWeight: 700, cursor: "help" }}
+        >
+          {forgiven.length} forgiven: {forgiven.map((w) => w.word).join(", ")}
+        </span>
+      )}
       {dims.map(([lbl, val, title]) => (
         <span
           key={lbl}
@@ -355,7 +365,7 @@ export function UtteranceBadges({ p }: { p: PronunciationResult }) {
 
 // ─── Word-annotated user message ──────────────────────────────────────────────
 
-export function UserWords({ words }: { words: WordScore[] }) {
+export function UserWords({ words, showForgiven = false }: { words: WordScore[]; showForgiven?: boolean }) {
   if (!words.length) return null;
   return (
     <>
@@ -365,12 +375,13 @@ export function UserWords({ words }: { words: WordScore[] }) {
         return (
           <span
             key={i}
-            title={`${w.word}: ${label}`}
+            title={`${w.word}: ${label}${showForgiven && w.forgiven ? " — left out of the score (presumed recognition error)" : ""}`}
             style={{
               color: wordColor(pct),
               marginRight: 4,
               cursor: "help",
               textDecoration: w.confidence < 0.7 ? "underline dotted" : "none",
+              ...(showForgiven && w.forgiven ? { outline: "1px dashed #94a3b8", outlineOffset: 2, borderRadius: 2 } : {}),
             }}
           >
             {w.word}

@@ -9,6 +9,7 @@ import type { ConvLang } from "@/lib/conversation-prompts";
 import { getProvider } from "@/lib/llm/registry";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
 import { logServerEvent } from "@/lib/server-log";
+import { fluencyFromWpm } from "@/lib/cefr-score";
 
 interface SttContext {
   pronunciation: number;
@@ -51,6 +52,15 @@ export async function POST(req: Request) {
 
     // Strips markdown fences, normalises dimensions to half points (Track AE)
     const evaluation = withAnswerEvidence(parseCefrEvaluation(text), userTurns);
+    // AB-07: the speaking rate dictates the fluency band — store the enforced value so the bar users see matches the score.
+    if (evaluation.dimensions.fluency !== null && pronunciationContext) {
+      evaluation.dimensions.fluency = fluencyFromWpm(
+        evaluation.dimensions.fluency,
+        pronunciationContext.wpm,
+        evaluation.answer_count ?? null,
+        evaluation.words_per_answer ?? null,
+      );
+    }
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
     return NextResponse.json(evaluation);

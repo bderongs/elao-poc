@@ -246,9 +246,6 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [x] **Y-02** "Je ne comprends pas" button + detection of non-comprehension phrases in all 6 languages (`lib/comprehension.ts`) → Léa re-asks the same question more simply; a second failure switches to an easy concrete topic.
 
 **To do**
-- [ ] **Y-03** End-of-turn silence is 1.2 s for short answers (`SILENCE_MS_SHORT`, `lib/turn-vad.ts`) — too short for beginners searching for words. Lengthen it at A1/A2 rungs.
-- [ ] **Y-04** "Next question came as if I had answered": check the 2026-09-24 ES session (`cc410a09…`) logs for phantom turns (Léa's own voice or noise picked up as an answer).
-- [ ] **Y-05** "Stuck on the brother's name": confirm in the same logs that it was a bad or empty transcript (should be covered by Y-01 + Z-01).
 
 ---
 
@@ -279,11 +276,10 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 **To do**
 - [x] **Z-05** (checked 2026-10-05) Live check with Mistral realtime + VAD fix, one session per language, real mic, **including a low-level speaker in FR/DE/NL** — the missing language was the beta complaint. If transcripts come out in the wrong language, set that language to `null` (batch).
 - [x] **Z-10** (2026-10-05) Live transcripts cut off while the audio goes on (found by AD-01: 3 of 35 turns, all in session `709b84c6…` of 10-01, e.g. a 59 s answer stored as 56 words instead of ~105). **Cause: Mistral's realtime stream, not our browser pipeline.** `scripts/stt-replay.ts <wav-url> [--pace realtime|fast]` replays a stored turn through the same endpoint: a different 51 s turn comes back complete (107 words), but the 59 s turn fails differently on every run — "Timeout waiting for response" with no text, or a few partial deltas then `EngineDeadError` on Mistral's inference engine. Our client only falls back to batch on an outright error or an empty text, so a stream that ends "done" with half an answer passed as final. **Mitigation built (untested live):** `app/page.tsx` cross-checks any answer with ≥ 8 s of speech and < 70 wpm against the batch transcription and keeps the batch text if it has ≥ 20 % more words (`TRUNCATION_CHECK_*` in `lib/realtime-stt-config.ts`, `turn_stt_truncation_check` client event shows when it fires). **Not covered:** small tail losses (5–6 words) don't trip a wpm test; the start-of-turn clipping ("Our chest" for "At chess") is a different cause (the recorder starts before the VAD triggers, so the audio holds words the STT never got) — not looked at yet. Check after a few real long answers: how often `turn_stt_truncation_check` fires and whether `usedBatch` is true.
-- [ ] **Z-09** Measure instead of guessing: an offline script that runs stored turn WAVs through Mistral realtime, Voxtral batch (and Gradium, see Z-08) and prints them side by side — reuse for every provider decision.
 - [ ] **Z-08** Before re-enabling Gradium: stream the stored turn WAVs through `lib/realtime-stt-gradium.ts` with and without extra lead-in audio (onset-clipping hypothesis); repeat on one FR session and one low-level learner.
 - [ ] **Z-02** Place names / domain words: Mistral realtime has no biasing; Voxtral batch — check for a prompt/context option ("Luik" → "Luit"); Gradium has `keywords` (up to 500 words) if it comes back.
 - [ ] **Z-03** Final evaluator still counts likely recognition errors as speaker errors (Track V finding 6, NL tester's "errors I didn't make", "strike" in `e96e95b8…`). Enforce the "dismiss recognition errors" rule.
-- [ ] **Z-07b** Update the STT row in `doc/assessment_process.md` (still says batch Voxtral only).
+- [x] **Z-07b** (2026-10-08) Updated the STT row (and the live-STT paragraph) in `doc/assessment_process.md`: realtime Mistral streaming, batch fallback, truncation check. Was: Update the STT row in `doc/assessment_process.md` (still says batch Voxtral only).
 - [ ] **Z-04** Tell the client: their suggested Voxtral + Azure setup was already in place; the gaps were the missing language and the chopped audio. Gradium (with language) was tried and dropped on accuracy; now Voxtral realtime + VAD fix, language-tagged batch available per language if needed.
 
 ---
@@ -299,7 +295,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 **Design (Baptiste, 2026-09-30):** code picks the question at C1/C2 only; A1–B2 keep "the model picks from a slice"; every entry written in all 6 languages; bank kept in code with a read-only admin page for review.
 
 **Done (uncommitted)**
-- [x] **AA-01** Warm-up: the opening question comes from a warm-up bank (10 easy everyday questions), whatever the starting rung. It counts as a normal answer (client question 2 still open). Only the first question is a warm-up; a second one wasn't added.
+- [x] **AA-01** Warm-up: the opening question comes from a warm-up bank (10 easy everyday questions), whatever the starting rung. It counts as a normal answer (client question 1 still open). Only the first question is a warm-up; a second one wasn't added.
 - [x] **AA-02** New examiner rule: never ask to argue for/against, argue the opposite, play a role or convince/justify to an imagined person. C1/C2 ladder descriptions rewritten around personal experience and reflection. The C1/C2 debate examples and the abstract switch seeds are deleted.
 - [x] **AA-03** Bank in `lib/question-bank/` (115 entries: warm-up 10, A1 15, A2 17, B1 17, B2 24, C1 16, C2 16), each in fr/en/nl-BE/es/it/de. A1–B2 ported from the old English lists and tagged by topic ("What is your name?" / "How old are you?" dropped as one-word answers). C1/C2 are new: 2 per topic, each with a simpler version and 2 follow-ups. FR + EN drafted first, the other 4 languages translated in the same pass → **needs native review**.
 - [x] **AA-04** C1/C2 flow in `lib/examiner-prompt.ts`: bank question (unused, preferring a topic not covered yet or the forced-switch target) → ONE of its pre-written follow-ups → next bank question. A forced topic switch skips the follow-up. "Je ne comprends pas" at C1/C2 uses the pre-written simpler version. State (`bankState`) is round-tripped with the client like `usedQuestions`, which now holds bank ids. At A1/A2 the examiner is told to ask bank questions as written and only add simple follow-ups.
@@ -321,14 +317,14 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **To do**
 - [ ] **AB-01** After X ships: collect new tester sessions and inspect stored evaluations (axes, raw LLM score, bonus, fallback path) — especially any repeated 72.
-- [ ] **AB-02** Ask the client what "2 temps" means (live difficulty ladder + final evaluation? the new pronunciation system?) and which earlier behaviour they preferred.
-- [x] **AB-03** (2026-10-08, uncommitted) Scoring replay built in the new `analysis/` folder: `npm run analysis:scoring -- --scenario <name[,name]>` (`--list`, `--lang`, `--since`, `--source`). Scoring rules are data (`analysis/lib/rules.ts`, checked against the live `computeCompositeCefrScore` on every run — 59/59 today), scenarios in `analysis/scenarios.ts` (now overrides of the live rules: `llm-base`, `no-floor`, `floor-looser`, `wpm-fluency`, `bonus-8.5`, `bonus-3-axes`, `no-bonus`). Full guide in `analysis/README.md`; admin mention on `/admin/scoring`. Reports go to `analysis/reports/` (git-ignored). **First results (59 stored live sessions):** `c2-floor` moves 5 C1+ → C2 and nothing else; `wpm-fluency` alone moves nothing (axes only matter through the +5 % bonus; fluency 9 → 10 changes no level); `axis-mean` moves 42 of 59 up, 9 by more than two steps — confirms Track V finding 4 (averaging the axes inflates weaker candidates), do not ship. Note: the DB column `cefr_level` is the evaluator's level *before* the bonus; users see the composite.
+- [x] **AB-03** (2026-10-08, uncommitted) Scoring replay built in the new `analysis/` folder: `npm run analysis:scoring -- --scenario <name[,name]>` (`--list`, `--lang`, `--since`, `--source`). Scoring rules are data (`analysis/lib/rules.ts`, checked against the live `computeCompositeCefrScore` on every run — 59/59 today), scenarios in `analysis/scenarios.ts` (now overrides of the live rules: `llm-base`, `no-floor`, `floor-looser`, `no-wpm-fluency`, `bonus-8.5`, `bonus-3-axes`, `no-bonus`). Full guide in `analysis/README.md`; admin mention on `/admin/scoring`. Reports go to `analysis/reports/` (git-ignored). **First results (59 stored live sessions):** `c2-floor` moves 5 C1+ → C2 and nothing else; `wpm-fluency` alone moves nothing (axes only matter through the +5 % bonus; fluency 9 → 10 changes no level); `axis-mean` moves 42 of 59 up, 9 by more than two steps — confirms Track V finding 4 (averaging the axes inflates weaker candidates), do not ship. Note: the DB column `cefr_level` is the evaluator's level *before* the bonus; users see the composite.
 - [ ] **AB-04** Faster promotion when no starting level is given (Track V "level-promotion detection": jump ≥ 2 rungs on a clearly stronger answer, guarded by evidence).
 - [ ] **AB-05** Low levels (NL/DE A2 → A1): re-check after Z-05 — bad transcripts at low levels probably pulled scores down.
 
 **⚠ finding (Baptiste's EN session `e96e95b8…`, 2026-09-30, B2+ 78 — should likely be C1):** axes fluency 9 / vocab-grammar 8 / communication 8, pronunciation 83.6 → only 1 axis ≥ 9, so no +5 % bonus (78 × 1.05 = 82 = C1). Causes, all on the system side:
 - [ ] **AB-06** **Pronunciation is penalised for recognition errors**: every correctly heard word scored 96, the misheard ones 16–42 (the assessment is run against the wrong reference text). Without them the average is ~90+ → bonus → C1. Ignore or down-weight words the recogniser was unsure of, or assess against a better transcript.
-- [ ] **AB-07** **Judge ignores its own rubric**: 161 WPM (table says ≥ 145 → fluency 10) got 9; its summary ("near-native fluency… no significant weaknesses") matches the prompt's "→ C1, not B2" anchor yet it chose B2+. Enforce the WPM → fluency mapping in code rather than trusting the LLM; consider deriving the level from the axes instead of the LLM's `score_percent` (see Track V finding 5).
+- [x] **AB-07** (2026-10-08, rule enforced; the evaluator prompt is unchanged) **Judge ignores its own rubric**: 161 WPM (table says ≥ 145 → fluency 10) got 9; its summary ("near-native fluency… no significant weaknesses") matches the prompt's "→ C1, not B2" anchor yet it chose B2+. Enforce the WPM → fluency mapping in code rather than trusting the LLM; consider deriving the level from the axes instead of the LLM's `score_percent` (see Track V finding 5).
+  - **Built:** `fluencyFromWpm` in `lib/cefr-score.ts` (`SCORING_RULES.fluencyFromWpm = true`) forces the fluency axis into the band `FLUENCY_WPM_BANDS` dictates (≥ 145 wpm → 10). **Guard (`WPM_RELIABLE`):** only with ≥ 3 answers, ≥ 100 words in total and a rate ≤ 220 wpm — without it a 7-word answer measured at 341 wpm would jump an A1 session to C1 once the axis feeds the base score. Needs the answer evidence, so new evaluations only; `/api/evaluate` also stores the enforced value, so the fluency bar matches the score. Backtest on all sessions: `npm run analysis:scoring -- --scenario no-wpm-fluency --evidence turns` (10 of 60 move: 9 up — strong speakers at ≥ 145 wpm — 1 down: a 125-wpm session the LLM had at 9 where the table says 8–8.5).
 - [ ] **AB-08** **Last answer had no pronunciation data**: the longest answer (100 words) came back from the fallback EO path with `words: []`, score 0 — correctly excluded from the average (count 5 of 6), but the best evidence was lost. Check why EO fell back on that turn.
 - [ ] **AB-09** **Questions gave little room at the top**: "Which game?", "Longest streak?" produced a 5-word answer; no opinion/hypothetical question in 3 minutes → little C1 evidence. Feed into Track AA (warm-up then at least one open, personal-opinion question).
 
@@ -385,9 +381,9 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
   - **Old NL data was useless for this:** the 09-28/29 NL sessions have live transcripts in French or English ("Traduction.", "Il y a il cap un an…") for Dutch speech — the pre-fix bug, not a joker case.
   - Need FR/DE/NL/ES/IT and low-level sessions from the beta before calibrating the cap (AD-02…06).
 - [x] **AD-02** (2026-10-05) Pronunciation: forgiveness applied per answer in `lib/pronunciation/providers/azure-ensemble.ts` (fixes AB-06). Replay on 23 stored sessions (`npx tsx scripts/forgiveness-replay.ts`): 15 change, mostly by 1–3 points; Baptiste's `e96e95b8…` goes 83.6 → 90.4 (the +5 % bonus case); weak sessions unchanged. Existing sessions keep their stored scores; only new runs (and eval-lab re-runs) use it.
-- [x] **AD-03** (2026-10-05) Evaluator: allowance note in the user message for strong speakers (`buildEvaluatorForgivenessNote`), prompt version v4. Not yet tested against the real evaluator — re-run `e96e95b8…` and `0d381874…` in the eval lab and check the axes/notable errors.
+- [x] **AD-03** (2026-10-05) Evaluator: allowance note in the user message for strong speakers (`buildEvaluatorForgivenessNote`), prompt version v4.
 - [~] **AD-04** ET: not part of the simple rule; revisit only if a garbled answer visibly lowers the rung.
-- [ ] **AD-05** Admin: show forgiven words per turn and per session (the `forgiven` flag is stored on each word; no UI yet).
+- [x] **AD-05** (2026-10-08) Admin session detail: forgiven words are outlined in the transcript, a "N forgiven: …" badge under each answer, and a session summary above the transcript (words forgiven per answer + the evaluator's allowance, derived at read time from stored turns). `UserWords` / `UtteranceBadges` take `showForgiven` — admin only, the candidate screens are unchanged.
 - [ ] **AD-06** Replay over stored sessions (same script as AB-03): which levels change, check nothing jumps more than one "+" without reason. Pronunciation part done (`scripts/forgiveness-replay.ts`, see AD-02); the level-change part needs the full replay script.
 
 ---
@@ -436,7 +432,6 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [~] **AF-02** (afd3376, 2026-10-05) A1 bank rewritten: one short question per entry, no compound "X, and why?". Closed/choice style and fixed follow-ups not confirmed.
 - [x] **AF-03** (2026-10-07, uncommitted: A1 added to the code-picked rungs via `isCodePickedRung`, one fixed follow-up per A1 entry in 6 languages — native review needed; yes/no rule lifted at A1; family-01 made closed) Code-picked questions at A1 (reuse the C1/C2 `bankState` flow in `lib/examiner-prompt.ts`); lift the yes/no rule at A1.
 - [x] **AF-04** (already in the code before this round: `easyOpening` + A1-bank opener for foundation starts) A1-style warm-up and one-sentence intro when the starting rung is A1/A2.
-- [ ] **AF-05** Decide the starting rung / "Je débute" option with the client.
 - [x] **AF-06a** Batch tool: `npm run sim:batch -- --level A1 --lang fr --runs 10` (`scripts/sim-batch.ts`) plays N simulated sessions through the real examiner/ET/evaluator, computes per-turn metrics (understanding, question length, rung path, ET verdicts, final level vs simulated level) and writes `sim-runs/<date>-<level>/report.md` + an LLM analyst reading. Mistral is paced to ~26 req/min, so 10 sessions ≈ 15 min. Also works for A2/C1/C2 (`--level C1 --start C1`). The simulator now mirrors live's "I didn't understand" re-ask (it didn't before).
 - **Baseline, 2026-10-01 (FR, learner A1, examiner starting at A2, 10 sessions, *before* the clarify fix above):** final level A1 ×6 / A1+ ×4 (calibration fine). But: the opening line (intro + warm-up, 20–29 words) was **never** fully understood by the simulated A1 learner; only ~3-word questions ("Où habitez-vous ?") were understood in full; 80 % of sessions had at least one question not understood at all; ET judged short fragments ("Liège. Grande ville.") "well" (avg 9.8 words for "well" vs 9.4 for "struggled") so the ladder yo-yoed A1↔A2 and reached B1 in 4/10 sessions.
 - [~] **AF-06b** Re-run the baseline with the clarify fix, then after each AF change (AF-02…AF-04) with the same command, and compare `summary.json`.
@@ -497,14 +492,13 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 ---
 
 ## Questions for the client
-1. What does "la nouvelle manière de fonctionner (en 2 temps)" refer to? (AB-02)
-2. Should warm-up answers count in the evaluation? (AA-01)
-3. Review of the question bank on `/admin/question-bank` (all levels, 6 languages). (AA-07)
-4. After the X fix is deployed: can the testers redo one full session each so we have stored results to analyse? (AB-01)
-5. ~~"Paliers de 5" meaning~~ — decided 2026-10-01: axes in half points (AE).
-6. Which A1 tester session showed questions that were too hard (language, date)? Should beginners be able to say "Je débute" before the test? (AF-01, AF-05)
-7. Score callback: it is built but not activated, pointing at https://www.elao-test.com/callback. What is the real receiving URL? Are the payload fields OK? HMAC signature or bearer token? Do you need your own user reference on the test link? (AG-01)
-8. ~~Satisfaction form~~ — built (3 ratings + comment, 2026-10-05); confirm the wording with the client. (AH-01)
+1. Should warm-up answers count in the evaluation? (AA-01)
+2. Review of the question bank on `/admin/question-bank` (all levels, 6 languages). (AA-07)
+3. After the X fix is deployed: can the testers redo one full session each so we have stored results to analyse? (AB-01)
+4. ~~"Paliers de 5" meaning~~ — decided 2026-10-01: axes in half points (AE).
+5. Which A1 tester session showed questions that were too hard (language, date)? (AF-01)
+6. Score callback: it is built but not activated, pointing at https://www.elao-test.com/callback. What is the real receiving URL? Are the payload fields OK? HMAC signature or bearer token? Do you need your own user reference on the test link? (AG-01)
+7. ~~Satisfaction form~~ — built (3 ratings + comment, 2026-10-05); confirm the wording with the client. (AH-01)
 
 ## Files touched (this round)
 

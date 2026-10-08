@@ -19,19 +19,23 @@ you talk to the moment the session is scored and saved.
 | Step | What it does | Model | Where |
 |---|---|---|---|
 | VAD | Detects when you've stopped talking (client-side, no model) | — | `lib/turn-vad.ts` |
-| STT | Transcribes the recorded clip, once VAD ends the turn | Mistral Voxtral (transcription endpoint) | `app/api/transcribe/route.ts` |
+| STT | Transcribes the answer — streamed live to Mistral realtime (Voxtral) while you speak, language-tagged Voxtral batch as the fallback | Mistral realtime (Voxtral), Voxtral batch | `lib/realtime-stt.ts`, `app/api/transcribe/route.ts` |
 | ET | Grades the answer from text, sets next difficulty | Mistral (text) | `lib/level-assessment.ts` |
 | EO | Grades pronunciation from the recording | Deepgram + Azure evidence, judged by Mistral | `lib/pronunciation/providers/azure-ensemble.ts` |
 | A | Writes the examiner's next reply | Mistral (text) | `app/api/chat/route.ts` |
 | TTS | Speaks that reply out loud | Voxtral or Azure — see note | `app/api/chat/route.ts` |
 
 Notes:
-- STT runs on **all 6 languages** via Voxtral; EO runs on **all 6 languages**
+- STT runs on **all 6 languages**: by default streamed to Mistral's realtime
+  Voxtral endpoint (no language hint — that endpoint has none), with the
+  language-tagged Voxtral batch call as the automatic fallback on any error,
+  empty text or suspected truncation (see "Live speech-to-text" below). EO runs on **all 6 languages**
   via the `azure-ensemble` provider (Deepgram verbatim transcript + Azure
   acoustic scores, triangulated by a Mistral judge). EO switched from
   Azure+Deepgram to Voxtral on 2026-08-11, then back to Azure+Deepgram+Mistral
   judge on 2026-08-14 at the client's request; STT switched from the Azure
-  Speech SDK to Voxtral on 2026-08-11 and is unaffected by the EO change —
+  Speech SDK to Voxtral on 2026-08-11 (and to Mistral realtime streaming on
+  2026-09-30) and is unaffected by the EO change —
   they're independent capabilities/registries (`lib/stt/registry.ts` vs.
   `lib/pronunciation/registry.ts`).
 - STT and EO are two **separate, independent** calls, not one: STT uses
@@ -48,7 +52,7 @@ Notes:
 
 | Step | What it does | Model | Where |
 |---|---|---|---|
-| CEFR score | Fresh read of the whole transcript | Mistral (text) | `app/api/evaluate/route.ts` |
+| CEFR score | Fresh read of the whole transcript (axes + level), then combined with the pronunciation average into the headline score — see `/admin/scoring` and `analysis/README.md` | Mistral (text) | `app/api/evaluate/route.ts`, `lib/cefr-score.ts` |
 | Pronunciation score | Averages all of this session's EO scores | none — math only | `lib/pronunciation-rollup.ts` |
 | Session save | Stores transcript, audio, and both scores | none | `lib/sessions-service.ts` |
 
@@ -69,21 +73,40 @@ Yes, on two separate, unrelated paths:
 
 What's **not** on Azure: what you're recognized as having said. Live
 speech-to-text (the transcript driving ET, A, and chat history) is Voxtral
-only, and is a separate capability/registry from EO — see below.
+only (realtime streaming, batch as fallback), and is a separate
+capability/registry from EO — see below.
 
 Live speech-to-text — the transcript that drives ET, A, and chat history —
 used to run on the Azure Speech SDK's continuous streaming recognizer, which
 did double duty as both the transcriber AND the turn-boundary detector (its
 segmentation-silence timeout decided when you'd stopped talking, alongside
-debounce/continuation-word heuristics). Voxtral has no streaming equivalent —
-it's a batch call, not a live one — so that recognizer was replaced with two
-separate pieces: a lightweight client-side VAD (`lib/turn-vad.ts`, energy/
-silence-based, replaces the turn-boundary-detection half) and a Voxtral
-transcription call once VAD ends a turn (`app/api/transcribe/route.ts`,
-replaces the transcription half). One consequence: **live partial captions
-are gone** — there's no streaming text to show while you're still talking,
-just a "…" listening indicator between speech-start and the transcript
-arriving.
+debounce/continuation-word heuristics). It was replaced by two separate
+pieces: a lightweight client-side VAD (`lib/turn-vad.ts`, energy/
+silence-based, replaces the turn-boundary-detection half) and Voxtral
+transcription (replaces the transcription half). One consequence: **live
+partial captions are gone** — just a "…" listening indicator between
+speech-start and the transcript arriving.
+
+Transcription itself went through three stages. First a Voxtral **batch** call
+once VAD ended a turn (`app/api/transcribe/route.ts`; language-tagged, ~1 s
+more wait per answer). Then, on 2026-09-30, **streaming**: the VAD forwards
+audio frames to a realtime endpoint while the user speaks, so the transcript is
+ready almost as soon as the turn ends. The default is **Mistral realtime
+(Voxtral) for every language** (`lib/realtime-stt.ts`); that endpoint takes no
+language parameter, so low-level speakers can be transcribed in the wrong
+language. A Gradium streaming client (`lib/realtime-stt-gradium.ts`, takes a
+language) is wired but switched off — on a real English session it made about
+9 meaning-changing errors against about 3 for Voxtral batch.
+
+The switches are in `lib/realtime-stt-config.ts`: `REALTIME_STT_ENABLED = false`
+puts every language back on batch; `REALTIME_STT_PROVIDER_BY_LANG[lang] = null`
+does it for one language. The client also falls back to the batch call
+automatically when a stream errors, times out or returns nothing, and
+**cross-checks long answers** (≥ 8 s of speech but < 70 words per minute)
+against a batch transcription, keeping the batch text if it has ≥ 20 % more
+words — Mistral's stream sometimes ends "done" with only the first part of a
+long answer. The VAD forwards every frame from speech start (plus ~340 ms of
+pre-roll), not only the loud ones, so soft word endings aren't clipped.
 
 ## The four per-turn processes
 
@@ -145,6 +168,8 @@ it's still new latency that didn't exist before 2026-08-12 and should be
 checked against real `logs/server-*.log` timings (`mistral_request_start`/
 `mistral_request_success` for `process` values like `"STT2"`), the same way
 the H-02a latency claim above is backed by log evidence, not assumption.
+Since 2026-09-30 streaming STT (above) removes most of that wait: the transcript
+is ready almost as soon as the turn ends.
 
 **Firing order, per turn** (`app/page.tsx`, `onSpeechEnd`):
 0. VAD (`lib/turn-vad.ts`) detects the user has stopped talking; the turn

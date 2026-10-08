@@ -24,7 +24,7 @@ Needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`. The database is 
 ```bash
 npm run analysis:scoring -- --list                       # available scenarios
 npm run analysis:scoring -- --scenario no-floor          # one change vs. today's rules
-npm run analysis:scoring -- --scenario wpm-fluency,bonus-8.5   # stack changes
+npm run analysis:scoring -- --scenario no-wpm-fluency,bonus-8.5   # stack changes
 npm run analysis:scoring -- --scenario no-floor --evidence turns --lang fr --since 2026-09-17
 ```
 
@@ -57,6 +57,7 @@ Baseline check: the replay's production rules equal the live formula on 59/59 se
 
 ```
 LLM evaluator ──► fluency / vocabulary-grammar / communication axes (0–10, half points)
+                  (fluency is forced into the band its speaking rate dictates, when the rate is reliable)
 Audio engine  ──► pronunciation (0–100 → /10)
                           │
    base = mean of the axes × 10 ── +5 % if ≥ 2 axes ≥ 9 ── C2 floor (90) if ≥ 3 axes ≥ 9, none < 8,
@@ -81,6 +82,10 @@ The replay runs the **same engine** as the app (`PRODUCTION_RULES` *is* `SCORING
 
 **Display is computed when read.** The level and score users and admins see are computed from the stored axes each time a page is shown. Changing `SCORING_RULES` therefore changes how *every* stored session is displayed (list, detail, score breakdown). The database columns `cefr_level` / `global_score` keep what was saved at the time (the evaluator's level, before the bonus).
 
+### The WPM → fluency rule (AB-07)
+
+The fluency axis is held inside the band the speaking rate dictates (`FLUENCY_WPM_BANDS`, e.g. ≥ 145 wpm → 10, 130–144 → 9–9.5), instead of trusting the LLM to follow its own table. A speaking rate measured on little speech is noise (one 7-word answer came out at 341 wpm), so the rule only applies when there are **≥ 3 answers, ≥ 100 words in total and a rate ≤ 220 wpm** (`WPM_RELIABLE` in `lib/cefr-score.ts`). Like the C2 floor it needs the answer evidence, so it applies to sessions evaluated since 2026-10-08; for new evaluations the enforced value is also what is stored, so the fluency bar matches the score. Backtest it on old sessions with `--scenario no-wpm-fluency --evidence turns`.
+
 ### The C2 floor and old sessions
 
 The floor needs the answer count and mean answer length. They are stamped on the evaluation when it is created (`answer_count`, `words_per_answer`), so **sessions evaluated before 2026-10-08 never get the floor**. To see what the floor would do on them, add `--evidence turns`: the figures are recomputed from the stored turns for every session and "Before" becomes hypothetical (the report says so).
@@ -94,7 +99,7 @@ Each is an override of today's rules.
 | `llm-base` | Go back to the evaluator's `score_percent` as the base (the pre-2026-10-08 behaviour) | Track V |
 | `no-floor` | Switch the C2 floor off | Track V |
 | `floor-looser` | Floor with 2 axes ≥ 9 and 15 words/answer | Track V |
-| `wpm-fluency` | Clamp the LLM's fluency axis into the band its speaking rate dictates | AB-07 |
+| `no-wpm-fluency` | Do not force the fluency axis into the band its speaking rate dictates (the pre-AB-07 behaviour) | AB-07 |
 | `bonus-8.5` | Bonus counts an axis from 8.5 instead of 9 | AE-03 |
 | `bonus-3-axes` | Bonus needs 3 axes ≥ 9 | — |
 | `no-bonus` | Switch the +5 % bonus off | — |

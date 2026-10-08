@@ -97,20 +97,34 @@ export function applyPronunciationForgiveness(words: Pick<WordScore, "accuracySc
 }
 
 /**
+ * How many apparent vocabulary/grammar errors the final evaluator is told to
+ * presume are recognition errors for this session (0 = no allowance: the
+ * speaker isn't strong enough, the session is too short, or it's disabled).
+ * Shared by the evaluator note and the admin summary.
+ */
+export function evaluatorAllowance(args: {
+  pronunciation: number | null | undefined;
+  wpm: number | null | undefined;
+  totalWords: number;
+}): number {
+  const c = RECOGNITION_FORGIVENESS;
+  if (!c.enabled) return 0;
+  if (args.totalWords < c.evaluatorMinTotalWords) return 0;
+  if ((args.pronunciation ?? 0) < c.evaluatorMinPronunciation) return 0;
+  if ((args.wpm ?? 0) < c.evaluatorMinWpm) return 0;
+  return Math.min(c.evaluatorMaxForgivenErrors, Math.floor(args.totalWords / c.evaluatorWordsPerForgivenError));
+}
+
+/**
  * Note appended to the evaluator's user message for a strong speaker; null when
- * the speaker isn't strong enough, the session is too short, or it's disabled.
+ * evaluatorAllowance is 0.
  */
 export function buildEvaluatorForgivenessNote(args: {
   pronunciation: number | null | undefined;
   wpm: number | null | undefined;
   totalWords: number;
 }): string | null {
-  const c = RECOGNITION_FORGIVENESS;
-  if (!c.enabled) return null;
-  if (args.totalWords < c.evaluatorMinTotalWords) return null;
-  if ((args.pronunciation ?? 0) < c.evaluatorMinPronunciation) return null;
-  if ((args.wpm ?? 0) < c.evaluatorMinWpm) return null;
-  const n = Math.min(c.evaluatorMaxForgivenErrors, Math.floor(args.totalWords / c.evaluatorWordsPerForgivenError));
+  const n = evaluatorAllowance(args);
   if (n < 1) return null;
   return (
     `\nRECOGNITION-ERROR ALLOWANCE: this speaker is strong (pronunciation ${Math.round(args.pronunciation ?? 0)}/100, ${Math.round(args.wpm ?? 0)} WPM). ` +

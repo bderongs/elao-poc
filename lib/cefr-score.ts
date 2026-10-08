@@ -31,7 +31,7 @@ export interface CompositeCefrScore {
 export interface ScoringRules {
   /** "llm" = the evaluator's holistic score_percent. "axis-mean" = mean of the available axes (pronunciation, fluency, vocabulary/grammar, communication) × 10. */
   baseScore: "llm" | "axis-mean";
-  /** Clamp the LLM's fluency axis into the band the speaking rate dictates (FLUENCY_WPM_BANDS). */
+  /** Clamp the LLM's fluency axis into the band the speaking rate dictates (FLUENCY_WPM_BANDS) — only when the rate is trustworthy, see WPM_RELIABLE. Needs the answer evidence; sessions without it are left as the LLM scored them. */
   fluencyFromWpm: boolean;
   /** Excellence bonus: `pct` % on top of the base score when `minAxes` of the axes reach `axisThreshold` (0–10 scale; 8.5 does not count at 9). */
   bonus: { minAxes: number; axisThreshold: number; pct: number };
@@ -46,13 +46,20 @@ export interface ScoringRules {
   };
 }
 
-/** Activated 2026-10-08 (Baptiste): axis mean as the base, and the Track V C2 floor. */
+/** Activated 2026-10-08 (Baptiste): axis mean as the base, the Track V C2 floor, and the WPM→fluency table enforced in code (AB-07). */
 export const SCORING_RULES: ScoringRules = {
   baseScore: "axis-mean",
-  fluencyFromWpm: false,
+  fluencyFromWpm: true,
   bonus: { minAxes: 2, axisThreshold: 9, pct: 5 },
   c2Floor: { floor: 90, minAxesHigh: 3, axisHigh: 9, noAxisBelow: 8, minAnswers: 5, minWordsPerAnswer: 20 },
 };
+
+/**
+ * A speaking rate measured on a handful of words is noise (one 7-word answer
+ * measured at 341 wpm), so the WPM→fluency clamp only applies when there is
+ * enough speech behind the number and the rate is plausible.
+ */
+export const WPM_RELIABLE = { minAnswers: 3, minWords: 100, maxWpm: 220 };
 
 export interface ScoreEvidence {
   answers: number | null;
@@ -79,7 +86,20 @@ function wpmBands(): WpmBand[] {
   });
 }
 
-function clampFluencyToWpm(fluency: number, wpm: number): number {
+/**
+ * The fluency axis forced into the band the speaking rate dictates
+ * (FLUENCY_WPM_BANDS) — returned unchanged when the rate is not trustworthy
+ * (WPM_RELIABLE) or the answer evidence is missing. Idempotent.
+ */
+export function fluencyFromWpm(fluency: number, wpm: number, answers: number | null, wordsPerAnswer: number | null): number {
+  const reliable =
+    wpm > 0 &&
+    wpm <= WPM_RELIABLE.maxWpm &&
+    answers !== null &&
+    wordsPerAnswer !== null &&
+    answers >= WPM_RELIABLE.minAnswers &&
+    answers * wordsPerAnswer >= WPM_RELIABLE.minWords;
+  if (!reliable) return fluency;
   const bands = wpmBands();
   // Last band whose lower bound the rate reaches (handles rates like 34.6 that fall between two integer-bounded bands).
   const b = [...bands].reverse().find((x) => wpm >= x.min) ?? bands[0];
@@ -96,8 +116,8 @@ export function scoreWithRules(
   const pronScore = pronunciationAvg ? pronunciationAvg.pronunciation / 10 : null;
 
   let fluency = result.dimensions.fluency;
-  if (rules.fluencyFromWpm && fluency !== null && pronunciationAvg && pronunciationAvg.wpm > 0) {
-    const clamped = clampFluencyToWpm(fluency, pronunciationAvg.wpm);
+  if (rules.fluencyFromWpm && fluency !== null && pronunciationAvg) {
+    const clamped = fluencyFromWpm(fluency, pronunciationAvg.wpm, evidence.answers, evidence.wordsPerAnswer);
     if (clamped !== fluency) notes.push(`fluency ${fluency}→${clamped} (${Math.round(pronunciationAvg.wpm)} wpm)`);
     fluency = clamped;
   }

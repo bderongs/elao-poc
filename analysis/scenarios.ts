@@ -30,10 +30,10 @@ export const SCENARIOS: Record<string, Scenario> = {
     ref: "Track V",
     overrides: { c2Floor: { floor: 90, minAxesHigh: 2, axisHigh: 9, noAxisBelow: 8, minAnswers: 5, minWordsPerAnswer: 15 } },
   },
-  "wpm-fluency": {
-    description: "Enforce the WPM → fluency table in code: the LLM's fluency axis is clamped into the band its speaking rate dictates.",
+  "no-wpm-fluency": {
+    description: "Do not enforce the WPM → fluency table: keep the LLM's fluency axis as it scored it.",
     ref: "AB-07",
-    overrides: { fluencyFromWpm: true },
+    overrides: { fluencyFromWpm: false },
   },
   "bonus-8.5": {
     description: "The +5 % bonus counts an axis from 8.5 instead of 9 (half-point axes).",

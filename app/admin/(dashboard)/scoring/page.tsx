@@ -158,7 +158,7 @@ export default function ScoringGuidePage() {
         <p style={{ ...label, marginBottom: 0 }}>
           Scored by the same AI reading the transcript, but anchored to something measurable: how many words were
           spoken per minute, taken from the recording. A fixed scale converts that speaking rate into the 0-10 score (in half points)
-          — roughly 140 words/min lands at 9-9.5/10. It&apos;s not a free judgment call; the rate does most of the work.
+          — roughly 140 words/min lands at 9-9.5/10. It&apos;s not a free judgment call: the score is forced into the band the rate dictates, as long as there is enough speech to measure it reliably (at least 3 answers and 100 words, and a plausible rate). Applies to sessions evaluated since 2026-10-08.
         </p>
       </ExplainerCard>
 

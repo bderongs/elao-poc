@@ -22,6 +22,7 @@ import {
 } from "@/lib/pronunciation-rollup";
 import { latestEvaluationResult, isEvalProviderPending, LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
 import { sessionDisplayStatus } from "@/lib/session-status";
+import { RECOGNITION_FORGIVENESS, evaluatorAllowance } from "@/lib/recognition-forgiveness";
 import { formatDateTime } from "@/lib/format-date";
 import styles from "@/components/admin.module.css";
 
@@ -58,6 +59,28 @@ export default async function AdminSessionDetailPage({
   });
 
   const turnsWithAudioIds = turns.filter((t) => t.audio_url).map((t) => t.id);
+
+  // Track AD: words left out of the pronunciation score as presumed recognition errors, and the evaluator's allowance.
+  const userTurnsForForgiveness = turns.filter((t) => t.role === "user");
+  const forgivenByTurn = userTurnsForForgiveness
+    .map((t) => ({ turn: t.turn_index + 1, words: (t.pronunciation_json?.words ?? []).filter((w) => w.forgiven).map((w) => w.word) }))
+    .filter((x) => x.words.length);
+  const totalUserWords = userTurnsForForgiveness.reduce((n, t) => n + t.content.trim().split(/\s+/).filter(Boolean).length, 0);
+  const evalAllowance = evaluatorAllowance({
+    pronunciation: session.pronunciation_scores?.pronunciation,
+    wpm: session.pronunciation_scores?.wpm,
+    totalWords: totalUserWords,
+  });
+  const forgivenCount = forgivenByTurn.reduce((n, x) => n + x.words.length, 0);
+  const forgivenessSummary = !RECOGNITION_FORGIVENESS.enabled
+    ? null
+    : forgivenCount || evalAllowance
+    ? `Recognition-error forgiveness — pronunciation: ${
+        forgivenCount
+          ? `${forgivenCount} word${forgivenCount === 1 ? "" : "s"} left out of the score (${forgivenByTurn.map((x) => `answer ${x.turn}: ${x.words.join(", ")}`).join("; ")})`
+          : "no word forgiven"
+      }. Evaluator: ${evalAllowance ? `told to presume up to ${evalAllowance} apparent error${evalAllowance === 1 ? "" : "s"} are the recogniser's (strong speaker)` : "no allowance (speaker not strong enough or session too short)"}. Forgiven words are outlined in the transcript below. Rules: lib/recognition-forgiveness.ts.`
+    : null;
   const canRunBatchEvaluation = turnsWithAudioIds.length > 0;
 
   // This session's language decides which pronunciation provider is "the
@@ -227,6 +250,7 @@ export default async function AdminSessionDetailPage({
 
       <div style={{ marginTop: 24 }}>
         <CollapsibleSection title="Transcript">
+          {forgivenessSummary && <div className={styles.emptyState} style={{ marginBottom: 12, textAlign: "left" }}>{forgivenessSummary}</div>}
           <div className={styles.turnList}>
             {turns.map((t) => (
               <div
@@ -238,10 +262,10 @@ export default async function AdminSessionDetailPage({
                 </div>
                 <div className={styles.turnText}>
                   {t.role === "user" && t.pronunciation_json?.words?.length
-                    ? <UserWords words={t.pronunciation_json.words} />
+                    ? <UserWords words={t.pronunciation_json.words} showForgiven />
                     : t.content}
                 </div>
-                {t.role === "user" && t.pronunciation_json && <UtteranceBadges p={t.pronunciation_json} />}
+                {t.role === "user" && t.pronunciation_json && <UtteranceBadges p={t.pronunciation_json} showForgiven />}
                 {t.role === "user" && t.audio_url && <AudioPlayer src={t.audio_url} compact />}
                 {t.role === "user" && t.audio_url && (
                   <PronunciationLabPanel
