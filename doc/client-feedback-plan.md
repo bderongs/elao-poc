@@ -356,7 +356,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [x] **AC-07** `0011_session_ladder.sql` applied to `ootlydfnbghchqolxbru` (single project for dev and prod) on 2026-09-30, by hand in the SQL editor.
 - [ ] **AC-08** Collect ~15–20 shadow sessions, including several `?minutes=7` runs at different levels.
   - **#1 (Baptiste, EN, 2026-09-30, `0d381874…`, 7:16, 8 answers, Mistral realtime):** final C1 82 → **C1+ 86** with bonus (axes 9/9/8, pron 90 — vs 84 on Gradium this morning, supports AB-06). Rule: **would stop at 4:42, "ceiling", estimate C2**. Final evaluator re-run on the first 5 answers only (×2) = **identical C1+ 86** → nothing lost by stopping early. Notes: ET said "well" to all 8 answers (C2 by 1:53), so the ladder estimate (C2) ≠ final level (C1+) — use it for the stop decision only, never as a score; strong speakers will mostly stop on "ceiling"; the binding constraint was the 5-answer gate (ceiling reached at 3:49 on answer 4), not the 3-min floor — long answers make 5 answers ≈ 5 min.
-- [~] **AC-10** (2026-10-08, uncommitted) **Adaptive length is now the default:** `SESSION_LENGTH_MODE = "adaptive"` in `lib/session-config.ts` (3–7 min; the session ends once the ladder has settled past 3:00, always at 7:00). The progress UI already showed answers given rather than a countdown; the examiner intro says "a few minutes" (6 languages); the French landing now reads "Votre niveau en quelques minutes" / "Une conversation de quelques minutes" (`SESSION_LENGTH_LABEL_FR`), replacing the client-approved "3 minutes" wording — **client to confirm**. Still open: update `lib/session-cost.ts` `AVG_SESSION` with the real median length. The stop-rule thresholds were calibrated on one session only (a stored-ladder replay was considered and dropped). Revert = `"shadow"`.
+- [x] **AC-10** (2026-10-08) **Adaptive length is now the default:** `SESSION_LENGTH_MODE = "adaptive"` in `lib/session-config.ts` (3–7 min; the session ends once the ladder has settled past 3:00, always at 7:00). The progress UI already showed answers given rather than a countdown; the examiner intro says "a few minutes" (6 languages); the French landing now reads "Votre niveau en quelques minutes" / "Une conversation de quelques minutes" (`SESSION_LENGTH_LABEL_FR`), replacing the client-approved "3 minutes" wording — wording confirmed by Baptiste 2026-10-08. `lib/session-cost.ts` `AVG_SESSION` deliberately left at its old values for now. The stop-rule thresholds were calibrated on one session only (a stored-ladder replay was considered and dropped). Revert = `"shadow"`.
 - Known quirk in shadow `?minutes=7` runs: Léa still announces "about 3 minutes".
 
 ---
@@ -501,11 +501,10 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 2. Should warm-up answers count in the evaluation? (AA-01)
 3. Review of the question bank on `/admin/question-bank` (all levels, 6 languages). (AA-07)
 4. After the X fix is deployed: can the testers redo one full session each so we have stored results to analyse? (AB-01)
-5. Variable session length (3–7 min depending on how quickly the level is clear) — OK, and what should the landing say instead of "Votre niveau en 3 minutes"? (AC-10)
-6. ~~"Paliers de 5" meaning~~ — decided 2026-10-01: axes in half points (AE).
-7. Which A1 tester session showed questions that were too hard (language, date)? Should beginners be able to say "Je débute" before the test? (AF-01, AF-05)
-8. Score callback: it is built but not activated, pointing at https://www.elao-test.com/callback. What is the real receiving URL? Are the payload fields OK? HMAC signature or bearer token? Do you need your own user reference on the test link? (AG-01)
-9. ~~Satisfaction form~~ — built (3 ratings + comment, 2026-10-05); confirm the wording with the client. (AH-01)
+5. ~~"Paliers de 5" meaning~~ — decided 2026-10-01: axes in half points (AE).
+6. Which A1 tester session showed questions that were too hard (language, date)? Should beginners be able to say "Je débute" before the test? (AF-01, AF-05)
+7. Score callback: it is built but not activated, pointing at https://www.elao-test.com/callback. What is the real receiving URL? Are the payload fields OK? HMAC signature or bearer token? Do you need your own user reference on the test link? (AG-01)
+8. ~~Satisfaction form~~ — built (3 ratings + comment, 2026-10-05); confirm the wording with the client. (AH-01)
 
 ## Files touched (this round)
 
