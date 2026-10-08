@@ -65,6 +65,13 @@ const BRACKET_MIN_REVERSALS = 2;
 const PLATEAU_RUN = 3;
 /** Ceiling / floor: this many consecutive "well" at C2, or non-"well" at A1. */
 const EDGE_RUN = 2;
+/**
+ * Floor, second form: this many consecutive steps at A1 that never climbed.
+ * Leaving A1 needs a "strong" answer, so a true beginner answering easy A1
+ * questions "well" stays there — the non-"well" form alone kept missing them
+ * (live ES session f2566bf0: 12 answers at A1, floor fired then broke on two "well"s).
+ */
+const FLOOR_STUCK_RUN = 5;
 /** Evidence gate: never stop on fewer judged answers than this. */
 export const MIN_ANSWERS = 5;
 /** Evidence gate for an estimate ≥ B2: at least one answer this long at or above the estimate. */
@@ -84,6 +91,10 @@ function detect(steps: LadderStep[]): { reason: StopReason; level: CefrRung } | 
   if (edge.length === EDGE_RUN) {
     if (edge.every((s) => s.rung === "C2" && s.verdict === "well")) return { reason: "ceiling", level: "C2" };
     if (edge.every((s) => s.rung === "A1" && s.verdict !== "well")) return { reason: "floor", level: "A1" };
+  }
+  const stuck = last(FLOOR_STUCK_RUN);
+  if (stuck.length === FLOOR_STUCK_RUN && stuck.every((s) => s.rung === "A1" && s.nextRung === "A1")) {
+    return { reason: "floor", level: "A1" };
   }
 
   const plateau = last(PLATEAU_RUN);

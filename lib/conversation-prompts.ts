@@ -139,6 +139,8 @@ export interface PromptOpts {
   switchToDomain?: TopicDomain;
   /** The speaker didn't understand the last question — rephrase it more simply (see lib/comprehension.ts). */
   clarify?: boolean;
+  /** The speaker still didn't understand after the simpler re-ask — drop that question and move on (see CLARIFY_GIVE_UP_ATTEMPT). */
+  dropQuestion?: boolean;
   /** Pre-written easier version of the question being clarified (C1/C2 bank questions only). */
   simplerQuestion?: string;
   /** How the `bank` text passed to getSystemPrompt is to be read:
@@ -180,7 +182,7 @@ function buildCommonRules(
   const bridges = BRIDGE_PHRASES[language];
   const followups = FOLLOWUP_PROMPTS[language];
   const closing = CLOSING_EXAMPLES[language];
-  const { avoidDomain, switchToDomain, clarify, simplerQuestion } = opts;
+  const { avoidDomain, switchToDomain, clarify, dropQuestion, simplerQuestion } = opts;
   const bankMode = opts.bankMode ?? "slice";
   // Foundation (A1/A2) and Mastery (C2) get small, additive deltas on top of
   // the shared rules below instead of separate prompts — see
@@ -257,7 +259,15 @@ ${
   clarify
     ? `\n[INTERNAL DIRECTION — never say, quote or translate this note aloud; it is not part of the conversation] The speaker did not understand your last question. Do NOT move on and do NOT change topic: ask the SAME question again, made much simpler — at most 8 words, the most common everyday words, present tense, no idioms. When it helps, turn it into an easy choice ("X or Y?") or a yes/no question: right now being understood matters more than the "avoid yes/no questions" rule above. No pivot word, no bridge, no comment on their difficulty, no apology — just the simpler question, in ${languageName}.${
         simplerQuestion ? ` Use this pre-written simpler version (as is, or shortened further): "${simplerQuestion}".` : ""
-      } If your last question was ALREADY a simplified re-ask and they still did not understand, drop that subject and ask a different, very easy question about something concrete and familiar (food, family, the weather) instead.`
+      } It must be worded clearly differently from your last question, not the same words again.`
+    : ""
+}${
+  dropQuestion
+    ? `\n[INTERNAL DIRECTION — never say, quote or translate this note aloud; it is not part of the conversation] The speaker still did not understand your question, even after you made it simpler. Drop it for good: do NOT ask it again in any form, and do not ask anything else about that subject. No pivot word, no bridge, no comment on their difficulty, no apology.${
+        bankMode === "picked"
+          ? " Ask the question chosen for you below."
+          : ` Ask a new, very easy question about something concrete and familiar (food, family, the weather) — at most 8 words, the most common everyday words, present tense — in ${languageName}.`
+      }`
     : ""
 }
 

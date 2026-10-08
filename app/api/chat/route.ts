@@ -37,6 +37,8 @@ interface ChatRequest {
   /** The speaker didn't understand the last question — "Je ne comprends pas"
    *  button or a detected phrase (lib/comprehension.ts). Rephrase it simpler. */
   clarify?: boolean;
+  /** Consecutive "didn't understand" on this question, this one included — from CLARIFY_GIVE_UP_ATTEMPT the question is dropped instead (lib/examiner-prompt.ts). */
+  clarifyAttempt?: number;
 }
 
 // Speaking-rate presets. The conversation opens slow so low-level listeners
@@ -71,16 +73,16 @@ const NORMAL_RATE = "-3%";
  *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage, turnLogId, rung, usedQuestions, bankState, isStart, avoidDomain, switchToDomain, clarify } =
+  const { language, history, userMessage, turnLogId, rung, usedQuestions, bankState, isStart, avoidDomain, switchToDomain, clarify, clarifyAttempt } =
     (await req.json()) as ChatRequest;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
   const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
-    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify,
+    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt,
   });
   const requestReceivedAt = Date.now();
   logServerEvent("chat_request_received", {
-    turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true } : {}),
+    turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true, clarifyAttempt: clarifyAttempt ?? 1 } : {}),
     ...(updatedBankState.currentId ? { bankQuestionId: updatedBankState.currentId, bankFollowUp: updatedBankState.followUpDone === true } : {}),
   });
   const encoder = new TextEncoder();

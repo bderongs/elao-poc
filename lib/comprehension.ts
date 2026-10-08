@@ -16,6 +16,15 @@
  * Pure string helpers only — safe to import from both client and server code.
  */
 
+/**
+ * The Nth consecutive "didn't understand" on the same question (button or
+ * detected phrase) stops re-asking it: the examiner drops the subject and
+ * moves on. Only the first gets the simpler re-ask — left to the model, the
+ * "already re-asked → move on" judgement never fired (live ES session
+ * f2566bf0: seven near-identical re-asks of one question).
+ */
+export const CLARIFY_GIVE_UP_ATTEMPT = 2;
+
 /** Longer answers that merely CONTAIN a phrase ("no entiendo por qué la gente…") are real content, not a request for help. */
 const MAX_WORDS = 14;
 

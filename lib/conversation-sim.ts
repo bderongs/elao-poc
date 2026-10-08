@@ -31,7 +31,7 @@ import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralComplete } from "@/lib/mistral";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { classifyTopicDomain } from "@/lib/topic-tracking";
-import { isNonComprehension } from "@/lib/comprehension";
+import { CLARIFY_GIVE_UP_ATTEMPT, isNonComprehension } from "@/lib/comprehension";
 import { pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import type { LlmProvider } from "@/lib/llm/types";
@@ -256,12 +256,15 @@ export async function* runConversationSimulation(
   let domainStreak = 0;
   const visitedDomains: TopicDomain[] = [];
 
-  /** One examiner turn — same inputs app/page.tsx sends to /api/chat. */
-  const examinerTurn = async (turn: number, requestHistory: Msg[], userMessage: string, isStart: boolean, clarify = false) => {
+  let clarifyAttempts = 0;
+
+  /** One examiner turn — same inputs app/page.tsx sends to /api/chat; clarifyAttempt counted as there (0 = not a clarify turn). */
+  const examinerTurn = async (turn: number, requestHistory: Msg[], userMessage: string, isStart: boolean, clarifyAttempt = 0) => {
+    const clarify = clarifyAttempt > 0;
     const avoidDomain = !isStart && !clarify && domainStreak >= MAX_DOMAIN_STREAK ? currentDomain ?? undefined : undefined;
     const switchToDomain = avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomains) : undefined;
     const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
-      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify,
+      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt: clarify ? clarifyAttempt : undefined,
     });
     const text = await mistralComplete({
       model: mistralChatModel(),
@@ -339,7 +342,10 @@ export async function* runConversationSimulation(
       // Live (app/page.tsx): a spoken "je ne comprends pas"-style answer makes the examiner
       // re-ask the same question more simply instead of moving on (lib/comprehension.ts).
       const clarify = !isLast && isNonComprehension(answer);
-      const reply = await examinerTurn(turn, newHistory, isLast ? "__END__" : answer, false, clarify);
+      const clarifyAttempt = clarify ? clarifyAttempts + 1 : 0;
+      const dropQuestion = clarifyAttempt >= CLARIFY_GIVE_UP_ATTEMPT;
+      clarifyAttempts = dropQuestion ? 0 : clarifyAttempt;
+      const reply = await examinerTurn(turn, newHistory, isLast ? "__END__" : answer, false, clarifyAttempt);
       history.push({ role: "user", content: answer }, { role: "assistant", content: reply.text });
       yield {
         type: "examiner",
@@ -350,8 +356,8 @@ export async function* runConversationSimulation(
         ...(reply.avoidDomain ? { avoidDomain: reply.avoidDomain } : {}),
         ...(reply.switchToDomain ? { switchToDomain: reply.switchToDomain } : {}),
       };
-      // A clarify re-ask is the same question again — not classified, like live.
-      if (!isLast && !clarify) {
+      // A clarify re-ask is the same question again — not classified, like live (a dropped question is new).
+      if (!isLast && (!clarify || dropQuestion)) {
         const recentExchange = newHistory.slice(-2).map((m) => `${m.role}: ${m.content}`).join("\n");
         yield await classify(turn, reply.text, recentExchange);
       }

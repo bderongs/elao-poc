@@ -338,7 +338,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **Risks:** (1) ET is generous (took Baptiste B1 → C2 in 3 answers), so the rule inherits its bias → evidence gates + calibration; (2) variable length breaks the countdown and the client-approved "Votre niveau en 3 minutes" copy (Track U) → client sign-off before going live; (3) shorter sessions give the final evaluator less evidence → the 3-min floor.
 
-**Stop rule** (`lib/session-length.ts`, pure, thresholds as constants at the top): settled when the last ET results show **bracketed** (last 4 within two adjacent rungs, ≥ 2 up/down reversals → estimate = highest rung answered "well"), **plateau** (3 × "adequate" at one rung), **ceiling** (2 × "well" at C2) or **floor** (2 × not-"well" at A1). Gates: ≥ 5 judged answers; estimate ≥ B2 needs one answer ≥ 25 words at or above it.
+**Stop rule** (`lib/session-length.ts`, pure, thresholds as constants at the top): settled when the last ET results show **bracketed** (last 4 within two adjacent rungs, ≥ 2 up/down reversals → estimate = highest rung answered "well"), **plateau** (3 × "adequate" at one rung), **ceiling** (2 × "well" at C2) or **floor** (2 × not-"well" at A1, or 5 answers in a row at A1 without climbing — added 2026-10-08 after ES session `f2566bf0`, where a true beginner's "well" answers to easy A1 questions kept breaking the first form). Gates: ≥ 5 judged answers; estimate ≥ B2 needs one answer ≥ 25 words at or above it.
 
 **Done (2026-09-30, uncommitted)**
 - [x] **AC-01** `lib/session-length.ts`: `evaluateStop`, `shouldCloseSession`, `LadderRecord`; checked on hand-made ladders (bracketed, plateau, ceiling, floor, too few answers, C2 without a long answer, still climbing) and the time bounds.

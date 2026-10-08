@@ -11,11 +11,11 @@ import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder, pickRecorderMimeType } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import { logClientEvent } from "@/lib/client-log";
-import { guardStepUp, isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
+import { CEFR_LADDER, guardStepUp, isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
 import { isTopicDomain, pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import type { BankState } from "@/lib/examiner-prompt";
 import { chatProcessLabel, assessProcessLabel } from "@/lib/turn-labels";
-import { isNonComprehension } from "@/lib/comprehension";
+import { CLARIFY_GIVE_UP_ATTEMPT, isNonComprehension } from "@/lib/comprehension";
 import { EvaluatingScreen } from "@/components/EvaluatingScreen";
 import { SessionResultsScreen } from "@/components/SessionResultsScreen";
 import { AuthNavLink } from "@/components/AuthNavLink";
@@ -297,6 +297,8 @@ export default function Home() {
    * mode, it's what "shadow" mode exists to collect.
    */
   const ladderStepsRef = useRef<LadderStep[]>([]);
+  /** Consecutive "didn't understand" (button or detected) on the current question — reset by a real answer or once the question is dropped. */
+  const clarifyAttemptRef = useRef(0);
   const [answersCount, setAnswersCount] = useState(0);
   const ladderDecisionRef = useRef<StopDecision>({ converged: false, estimatedLevel: null, reason: "not_converged" });
   const wouldStopAtRef = useRef<{ at: number; estimatedLevel: LadderRecord["estimatedLevel"]; reason: LadderRecord["reason"] } | null>(null);
@@ -1102,6 +1104,7 @@ export default function Home() {
     startedAtRef.current = Date.now();
     closeRequestedRef.current = false;
     ladderStepsRef.current = [];
+    clarifyAttemptRef.current = 0;
     setAnswersCount(0);
     ladderDecisionRef.current = { converged: false, estimatedLevel: null, reason: "not_converged" };
     wouldStopAtRef.current = null;
@@ -1537,6 +1540,27 @@ export default function Home() {
     // evaluated) but get the same simpler re-ask instead of a new question.
     const clarifyButton = opts?.clarifyRequest === true;
     const clarify = clarifyButton || (!isStart && !isEnd && isNonComprehension(userText));
+    // The first "didn't understand" gets a simpler re-ask; the next one drops
+    // the question (lib/examiner-prompt.ts) and starts a fresh count.
+    const clarifyAttempt = clarify ? clarifyAttemptRef.current + 1 : 0;
+    const dropQuestion = clarifyAttempt >= CLARIFY_GIVE_UP_ATTEMPT;
+    clarifyAttemptRef.current = dropQuestion ? 0 : clarifyAttempt;
+    // A question dropped by button clicks is evidence ET never sees (button
+    // clicks aren't answers, a spoken "no entiendo" is judged already):
+    // record it as "struggled" so the ladder and stop rule count it, and step
+    // down like ET would — before `rung` below, so the new question uses it.
+    if (dropQuestion && clarifyButton) {
+      const from = currentRungRef.current;
+      const down = CEFR_LADDER[Math.max(CEFR_LADDER.indexOf(from) - conversationSettingsRef.current.stepSize, 0)];
+      ladderStepsRef.current = [
+        ...ladderStepsRef.current,
+        { atSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0, rung: from, verdict: "struggled", nextRung: down, words: 0 },
+      ];
+      ladderDecisionRef.current = evaluateStop(ladderStepsRef.current);
+      setAnswersCount(ladderStepsRef.current.length);
+      currentRungRef.current = down;
+      vadRef.current?.setExtendedPauseTolerance(down === "C2");
+    }
     // H-01 latency instrumentation id — falls back to a synthetic one for the
     // opening/closing turns, which don't come from onFinal.
     const logId = turnLogId ?? (isStart ? "start" : isEnd ? "end" : "unknown");
@@ -1560,7 +1584,7 @@ export default function Home() {
         : [...historyRef.current, { role: "user", content: userText, pronunciation }];
 
       if (!isStart && !isEnd && !clarifyButton) setHistory(newHistory);
-      if (clarify) logClientEvent("clarify_requested", { turnLogId: logId, source: clarifyButton ? "button" : "detected" });
+      if (clarify) logClientEvent("clarify_requested", { turnLogId: logId, source: clarifyButton ? "button" : "detected", attempt: clarifyAttempt, dropQuestion });
       setStreamingAssistant("");
       clearPendingReveals();
 
@@ -1598,6 +1622,7 @@ export default function Home() {
           avoidDomain: avoidDomain ?? undefined,
           switchToDomain: avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomainsRef.current) : undefined,
           clarify: clarify || undefined,
+          clarifyAttempt: clarify ? clarifyAttempt : undefined,
         }),
         signal: abortController.signal,
       });
@@ -1683,8 +1708,9 @@ export default function Home() {
               // "the lifestyle you just described" that the bare question
               // text can't be classified from on its own.
               // Skipped for a clarify re-ask too: it's the same question
-              // again, and counting it would inflate the same-domain streak.
-              if (!isEnd && !clarify) {
+              // again, and counting it would inflate the same-domain streak
+              // (a dropped question is a new one, so it IS classified).
+              if (!isEnd && (!clarify || dropQuestion)) {
                 const recentExchange = newHistory
                   .slice(-2)
                   .map((m) => `${m.role}: ${m.content}`)

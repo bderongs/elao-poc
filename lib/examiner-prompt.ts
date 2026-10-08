@@ -2,6 +2,7 @@ import { getSystemPrompt, buildQuestionBank, buildPickedQuestionText, type ConvL
 import { isCefrRung, zoneForRung, type CefrRung } from "@/lib/cefr-rung";
 import { isTopicDomain } from "@/lib/topic-domain";
 import { isCodePickedRung, pickBankQuestion, questionById } from "@/lib/question-bank";
+import { CLARIFY_GIVE_UP_ATTEMPT } from "@/lib/comprehension";
 
 /**
  * A1/C1/C2 question-bank state, round-tripped with the client like usedQuestions.
@@ -25,6 +26,10 @@ export interface BankState {
  *   A1, C1/C2 the code picks: bank question → ONE pre-written follow-up →
  *             next bank question (in a new domain), and so on. A forced topic
  *             switch (avoidDomain) always moves on to a new bank question.
+ *
+ * "Didn't understand" (clarify): the first one re-asks the same question
+ * simpler; from CLARIFY_GIVE_UP_ATTEMPT on, the question is dropped and the
+ * turn picks a new one as above (dropQuestion).
  */
 export function buildExaminerPrompt(params: {
   language: ConvLang;
@@ -38,14 +43,20 @@ export function buildExaminerPrompt(params: {
   switchToDomain?: string;
   /** The speaker didn't understand the last question (button or detected phrase, see lib/comprehension.ts) — rephrase it more simply instead of moving on. */
   clarify?: boolean;
+  /** How many "didn't understand" in a row on this question, this one included (default 1). From CLARIFY_GIVE_UP_ATTEMPT on, the question is dropped instead of re-asked. */
+  clarifyAttempt?: number;
 }): { system: string; targetRung: CefrRung; updatedUsedQuestions: string[]; bankState: BankState } {
-  const { language, rung, isStart, isEnd, clarify } = params;
+  const { language, rung, isStart, isEnd } = params;
+  // First "didn't understand": re-ask the same question simpler. Again after
+  // that: drop it and move on (a new question, picked like any other turn).
+  const giveUp = params.clarify === true && (params.clarifyAttempt ?? 1) >= CLARIFY_GIVE_UP_ATTEMPT;
+  const clarify = params.clarify === true && !giveUp;
   const usedQuestions = params.usedQuestions ?? [];
   const bankState = params.bankState ?? {};
   const targetRung: CefrRung = isCefrRung(rung) ? rung : "A2";
   // A clarify turn re-asks the current question, so a topic switch request
   // would contradict it — it wins over avoidDomain/switchToDomain.
-  const avoidDomain = !clarify && isTopicDomain(params.avoidDomain) ? params.avoidDomain : undefined;
+  const avoidDomain = !params.clarify && isTopicDomain(params.avoidDomain) ? params.avoidDomain : undefined;
   const switchToDomain = avoidDomain && isTopicDomain(params.switchToDomain) ? params.switchToDomain : undefined;
   const domainOpts: PromptOpts = { ...(avoidDomain ? { avoidDomain } : {}), ...(switchToDomain ? { switchToDomain } : {}) };
 
@@ -78,7 +89,7 @@ export function buildExaminerPrompt(params: {
     }
     // Only follow up on a question of THIS rung — after a rung change the
     // current question belongs to the other rung, so move on to a fresh one.
-    if (current && current.rung === targetRung && !bankState.followUpDone && !avoidDomain && current.followUps?.length) {
+    if (current && current.rung === targetRung && !bankState.followUpDone && !avoidDomain && !giveUp && current.followUps?.length) {
       const bank = buildPickedQuestionText(targetRung, { kind: "followUp", followUps: current.followUps.map((f) => f[language]) });
       return build(bank, { bankMode: "picked" }, usedQuestions, { currentId: current.id, followUpDone: true });
     }
@@ -89,7 +100,7 @@ export function buildExaminerPrompt(params: {
       avoidDomain: avoidDomain ?? current?.domain,
     });
     const bank = buildPickedQuestionText(targetRung, { kind: "ask", question: question.text[language] });
-    return build(bank, { ...domainOpts, bankMode: "picked" }, updatedUsedIds, { currentId: question.id, followUpDone: false });
+    return build(bank, { ...domainOpts, bankMode: "picked", ...(giveUp ? { dropQuestion: true } : {}) }, updatedUsedIds, { currentId: question.id, followUpDone: false });
   }
 
   // A2–B2: narrow the bank to this turn's target rung and track which ids
@@ -98,7 +109,7 @@ export function buildExaminerPrompt(params: {
   const { bankText, updatedUsedQuestions } = buildQuestionBank(targetRung, usedQuestions, language);
   return build(
     bankText,
-    clarify ? { clarify: true } : domainOpts,
+    clarify ? { clarify: true } : giveUp ? { dropQuestion: true } : domainOpts,
     // A rephrase doesn't consume new bank questions — don't burn this slice.
     clarify ? usedQuestions : updatedUsedQuestions,
     // Leaving A1/C1/C2 ends that question's follow-up cycle.
