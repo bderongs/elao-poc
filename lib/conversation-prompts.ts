@@ -156,9 +156,14 @@ export interface PromptOpts {
  * lib/examiner-prompt.ts for when each applies).
  */
 export function buildPickedQuestionText(
-  rung: "C1" | "C2",
+  rung: "A1" | "C1" | "C2",
   turn: { kind: "ask"; question: string } | { kind: "followUp"; followUps: string[] }
 ): string {
+  if (rung === "A1") {
+    return turn.kind === "ask"
+      ? `NEXT QUESTION — chosen for you from the A1 question bank. This turn is NOT a follow-up turn: it overrides the SHORT ANSWER RULE and the "avoid yes/no" advice above — at A1 a closed or either/or question is exactly right, a beginner must be able to answer it. Your whole reply is at most one pivot followed by exactly this question, and it MUST end with it. Keep it as short as written; do not add words, a second question or an explanation:\n"${turn.question}"`
+      : `FOLLOW-UP TURN — stay on the subject of your last question. Ask exactly this one very short follow-up (adapt at most a word so it connects to their answer; no pivot needed): "${turn.followUps[0]}"\nIf their answer makes it pointless (e.g. "no"), ask a different very short question on the same subject instead; if it did not address your last question at all, ask that question again more simply.`;
+  }
   if (turn.kind === "ask") {
     return `NEXT QUESTION — chosen for you from the ${rung} question bank. This turn is NOT a follow-up turn: the previous subject has had its follow-up already, so this overrides the SHORT ANSWER RULE and the follow-up advice above. Your whole reply is at most one pivot (or one bridge, if the change of subject would feel abrupt) followed by exactly this question — it MUST end with this question, and a reply without it is wrong. You may adapt a few words so it flows naturally, but keep its meaning, scope and difficulty; do not replace it with a question of your own, do not add a second question, do not turn it into a debate:\n"${turn.question}"`;
   }
@@ -200,7 +205,11 @@ ${
 - Never ask the speaker to argue for or against a position, to argue the opposite of what they think, to play a role, or to convince or justify something to an imagined person (a doctor, a friend, an employer). Higher levels are tested through depth on the speaker's own experience and views, never through exam-style tasks.
 - Ask only what any adult can answer from general experience or opinion. Never require local, specialist or factual knowledge — this exam tests the language, not what the speaker happens to know — and if they say they do not know something (e.g. a city they barely know), drop that subject instead of pressing them for arguments about it.
 - Never repeat a question. Never correct errors directly — use the correct form naturally in your reply.
-- Avoid questions answerable with a single word or a bare "yes"/"no" — when a factual question is unavoidable, pair it with a "why" or "which" so a full-sentence answer is the natural response, not an accident.
+${
+  rung === "A1"
+    ? `- At A1, short closed and either/or questions ("X or Y?", "Do you like X?") are welcome and preferred — a beginner must be able to answer them. Never make a question longer or more abstract to avoid a yes/no answer.`
+    : `- Avoid questions answerable with a single word or a bare "yes"/"no" — when a factual question is unavoidable, pair it with a "why" or "which" so a full-sentence answer is the natural response, not an accident.`
+}
 - No bullet points, no markdown — this is voice.
 - NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "I understand", "I understood", "Understood", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead.
 - Do NOT be encouraging or complimentary about the learner's language ability. Stay neutral and professional.

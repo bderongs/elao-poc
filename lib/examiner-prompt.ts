@@ -1,11 +1,11 @@
 import { getSystemPrompt, buildQuestionBank, buildPickedQuestionText, type ConvLang, type PromptOpts } from "@/lib/conversation-prompts";
 import { isCefrRung, zoneForRung, type CefrRung } from "@/lib/cefr-rung";
 import { isTopicDomain } from "@/lib/topic-domain";
-import { isMasteryBankRung, pickBankQuestion, questionById } from "@/lib/question-bank";
+import { isCodePickedRung, pickBankQuestion, questionById } from "@/lib/question-bank";
 
 /**
- * C1/C2 question-bank state, round-tripped with the client like usedQuestions.
- * currentId: the bank question asked most recently at C1/C2.
+ * A1/C1/C2 question-bank state, round-tripped with the client like usedQuestions.
+ * currentId: the bank question asked most recently at A1/C1/C2.
  * followUpDone: whether its one follow-up turn has already happened.
  */
 export interface BankState {
@@ -21,8 +21,8 @@ export interface BankState {
  *
  * Which question gets asked (Track AA, lib/question-bank/):
  *   opening   a warm-up bank question, whatever the starting rung.
- *   A1–B2     the model picks from a slice of the rung's bank.
- *   C1/C2     the code picks: bank question → ONE pre-written follow-up →
+ *   A2–B2     the model picks from a slice of the rung's bank.
+ *   A1, C1/C2 the code picks: bank question → ONE pre-written follow-up →
  *             next bank question (in a new domain), and so on. A forced topic
  *             switch (avoidDomain) always moves on to a new bank question.
  */
@@ -69,7 +69,7 @@ export function buildExaminerPrompt(params: {
     return build("", { bankMode: "none" }, usedQuestions, bankState);
   }
 
-  if (isMasteryBankRung(targetRung)) {
+  if (isCodePickedRung(targetRung)) {
     const current = questionById(bankState.currentId);
     if (clarify) {
       // Re-ask the current question — no new pick, state unchanged.
@@ -92,7 +92,7 @@ export function buildExaminerPrompt(params: {
     return build(bank, { ...domainOpts, bankMode: "picked" }, updatedUsedIds, { currentId: question.id, followUpDone: false });
   }
 
-  // A1–B2: narrow the bank to this turn's target rung and track which ids
+  // A2–B2: narrow the bank to this turn's target rung and track which ids
   // have been offered this session — Track I-03. Called once, here, so the
   // updatedUsedQuestions echoed back matches exactly what the LLM was shown.
   const { bankText, updatedUsedQuestions } = buildQuestionBank(targetRung, usedQuestions, language);
@@ -101,7 +101,7 @@ export function buildExaminerPrompt(params: {
     clarify ? { clarify: true } : domainOpts,
     // A rephrase doesn't consume new bank questions — don't burn this slice.
     clarify ? usedQuestions : updatedUsedQuestions,
-    // Leaving C1/C2 ends that question's follow-up cycle.
+    // Leaving A1/C1/C2 ends that question's follow-up cycle.
     {}
   );
 }

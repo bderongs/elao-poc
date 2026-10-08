@@ -5,9 +5,11 @@
  *
  * How each rung uses it (see lib/examiner-prompt.ts):
  *   warmup  the opening question of every session, whatever the starting rung.
- *   A1–B2   a slice of the rung's bank is shown to the examiner, which picks
+ *   A2–B2   a slice of the rung's bank is shown to the examiner, which picks
  *           from it (and may ask its own follow-ups) — see buildQuestionBank
  *           in lib/conversation-prompts.ts.
+ *   A1      the code picks the question and its one fixed short follow-up
+ *           (Track AF-03): short closed/choice questions a beginner can catch.
  *   C1/C2   the code picks the question (pickBankQuestion) and the examiner
  *           asks it, then ONE follow-up from its pre-written followUps, then
  *           the next bank question. Free-writing at these rungs produced
@@ -89,6 +91,7 @@ export function pickBankQuestion(params: {
   return { question, updatedUsedIds: [...used, question.id] };
 }
 
-export function isMasteryBankRung(rung: CefrRung): rung is "C1" | "C2" {
-  return rung === "C1" || rung === "C2";
+/** Rungs where the code, not the examiner, picks the question: A1 (so the model can't make a beginner's question harder) and C1/C2 (no DELF/DALF-style free writing). */
+export function isCodePickedRung(rung: CefrRung): rung is "A1" | "C1" | "C2" {
+  return rung === "A1" || rung === "C1" || rung === "C2";
 }

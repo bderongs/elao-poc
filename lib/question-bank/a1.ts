@@ -6,7 +6,9 @@ import type { BankEntry } from "@/lib/question-bank/types";
 // question still needs a short clause to answer truthfully, not a single word
 // (see doc/assessment_process.md on close-ended A1/A2 questions). Kept short
 // on purpose: the wording is what a beginner hears, so it is written per
-// language here rather than translated by the model.
+// language here rather than translated by the model. Each entry carries one
+// fixed, very short follow-up (also written per language): the code picks the
+// question and the follow-up at A1 (lib/examiner-prompt.ts, Track AF-03).
 export const A1: BankEntry[] = [
   {
     id: "a1-home-01",
@@ -19,6 +21,16 @@ export const A1: BankEntry[] = [
       it: "Dove abita?",
       de: "Wo wohnen Sie?",
     },
+    followUps: [
+      {
+        en: "Do you like it?",
+        fr: "Vous aimez cet endroit ?",
+        "nl-BE": "Vindt u het daar leuk?",
+        es: "¿Le gusta ese lugar?",
+        it: "Le piace quel posto?",
+        de: "Gefällt es Ihnen dort?",
+      },
+    ],
   },
   {
     id: "a1-home-02",
@@ -31,18 +43,38 @@ export const A1: BankEntry[] = [
       it: "Abita in una casa o in un appartamento?",
       de: "Wohnen Sie in einem Haus oder in einer Wohnung?",
     },
+    followUps: [
+      {
+        en: "Is it big or small?",
+        fr: "C'est grand ou petit ?",
+        "nl-BE": "Is het groot of klein?",
+        es: "¿Es grande o pequeño?",
+        it: "È grande o piccolo?",
+        de: "Ist es groß oder klein?",
+      },
+    ],
   },
   {
     id: "a1-family-01",
     domain: "family",
     text: {
-      en: "Tell me about your brothers or sisters.",
-      fr: "Parlez-moi de vos frères ou de vos sœurs.",
-      "nl-BE": "Vertel eens over uw broers of zussen.",
-      es: "Hábleme de sus hermanos o hermanas.",
-      it: "Mi parli dei suoi fratelli o delle sue sorelle.",
-      de: "Erzählen Sie mir von Ihren Geschwistern.",
+      en: "Do you have brothers or sisters?",
+      fr: "Vous avez des frères ou des sœurs ?",
+      "nl-BE": "Hebt u broers of zussen?",
+      es: "¿Tiene hermanos o hermanas?",
+      it: "Ha fratelli o sorelle?",
+      de: "Haben Sie Geschwister?",
     },
+    followUps: [
+      {
+        en: "What is his or her name?",
+        fr: "Comment s'appelle-t-il ou elle ?",
+        "nl-BE": "Hoe heet hij of zij?",
+        es: "¿Cómo se llama?",
+        it: "Come si chiama?",
+        de: "Wie heißt er oder sie?",
+      },
+    ],
   },
   {
     id: "a1-family-02",
@@ -55,6 +87,16 @@ export const A1: BankEntry[] = [
       it: "Con chi abita?",
       de: "Mit wem wohnen Sie zusammen?",
     },
+    followUps: [
+      {
+        en: "Do you like that?",
+        fr: "Vous aimez ça ?",
+        "nl-BE": "Vindt u dat leuk?",
+        es: "¿Le gusta?",
+        it: "Le piace?",
+        de: "Gefällt Ihnen das?",
+      },
+    ],
   },
   {
     id: "a1-work-01",
@@ -67,6 +109,16 @@ export const A1: BankEntry[] = [
       it: "Lavora o studia?",
       de: "Arbeiten Sie oder studieren Sie?",
     },
+    followUps: [
+      {
+        en: "What do you do?",
+        fr: "Qu'est-ce que vous faites ?",
+        "nl-BE": "Wat doet u?",
+        es: "¿Qué hace?",
+        it: "Che cosa fa?",
+        de: "Was machen Sie?",
+      },
+    ],
   },
   {
     id: "a1-hobbies-01",
@@ -79,6 +131,16 @@ export const A1: BankEntry[] = [
       it: "Quale sport le piace?",
       de: "Welchen Sport mögen Sie?",
     },
+    followUps: [
+      {
+        en: "When do you do it?",
+        fr: "Quand est-ce que vous en faites ?",
+        "nl-BE": "Wanneer doet u dat?",
+        es: "¿Cuándo lo hace?",
+        it: "Quando lo fa?",
+        de: "Wann machen Sie das?",
+      },
+    ],
   },
   {
     id: "a1-hobbies-02",
@@ -91,6 +153,16 @@ export const A1: BankEntry[] = [
       it: "Ha un animale?",
       de: "Haben Sie ein Haustier?",
     },
+    followUps: [
+      {
+        en: "What is its name?",
+        fr: "Comment s'appelle-t-il ?",
+        "nl-BE": "Hoe heet het?",
+        es: "¿Cómo se llama?",
+        it: "Come si chiama?",
+        de: "Wie heißt es?",
+      },
+    ],
   },
   {
     id: "a1-food-01",
@@ -103,6 +175,16 @@ export const A1: BankEntry[] = [
       it: "Che cosa le piace mangiare?",
       de: "Was essen Sie gern?",
     },
+    followUps: [
+      {
+        en: "Why do you like it?",
+        fr: "Pourquoi vous aimez ça ?",
+        "nl-BE": "Waarom vindt u dat lekker?",
+        es: "¿Por qué le gusta?",
+        it: "Perché le piace?",
+        de: "Warum mögen Sie das?",
+      },
+    ],
   },
   {
     id: "a1-food-02",
@@ -115,6 +197,16 @@ export const A1: BankEntry[] = [
       it: "Che cosa mangia la mattina?",
       de: "Was essen Sie am Morgen?",
     },
+    followUps: [
+      {
+        en: "Do you drink coffee or tea?",
+        fr: "Vous buvez du café ou du thé ?",
+        "nl-BE": "Drinkt u koffie of thee?",
+        es: "¿Bebe café o té?",
+        it: "Beve caffè o tè?",
+        de: "Trinken Sie Kaffee oder Tee?",
+      },
+    ],
   },
   {
     id: "a1-food-03",
@@ -127,6 +219,16 @@ export const A1: BankEntry[] = [
       it: "Qual è il suo piatto preferito?",
       de: "Was ist Ihr Lieblingsessen?",
     },
+    followUps: [
+      {
+        en: "Who makes it?",
+        fr: "Qui le prépare ?",
+        "nl-BE": "Wie maakt het klaar?",
+        es: "¿Quién lo prepara?",
+        it: "Chi lo prepara?",
+        de: "Wer macht es?",
+      },
+    ],
   },
   {
     id: "a1-food-04",
@@ -139,6 +241,16 @@ export const A1: BankEntry[] = [
       it: "A che ora si alza?",
       de: "Wann stehen Sie auf?",
     },
+    followUps: [
+      {
+        en: "Do you go to bed late or early?",
+        fr: "Vous vous couchez tard ou tôt ?",
+        "nl-BE": "Gaat u laat of vroeg slapen?",
+        es: "¿Se acuesta tarde o temprano?",
+        it: "Va a letto tardi o presto?",
+        de: "Gehen Sie spät oder früh ins Bett?",
+      },
+    ],
   },
   {
     id: "a1-other-01",
@@ -151,6 +263,16 @@ export const A1: BankEntry[] = [
       it: "Qual è il suo giorno preferito della settimana?",
       de: "Was ist Ihr Lieblingstag in der Woche?",
     },
+    followUps: [
+      {
+        en: "Why?",
+        fr: "Pourquoi ?",
+        "nl-BE": "Waarom?",
+        es: "¿Por qué?",
+        it: "Perché?",
+        de: "Warum?",
+      },
+    ],
   },
   {
     id: "a1-other-02",
@@ -163,6 +285,16 @@ export const A1: BankEntry[] = [
       it: "Quali lingue parla?",
       de: "Welche Sprachen sprechen Sie?",
     },
+    followUps: [
+      {
+        en: "Where do you speak them?",
+        fr: "Où est-ce que vous les parlez ?",
+        "nl-BE": "Waar spreekt u ze?",
+        es: "¿Dónde los habla?",
+        it: "Dove li parla?",
+        de: "Wo sprechen Sie sie?",
+      },
+    ],
   },
   {
     id: "a1-travel-01",
@@ -175,6 +307,16 @@ export const A1: BankEntry[] = [
       it: "Le piace viaggiare?",
       de: "Reisen Sie gern?",
     },
+    followUps: [
+      {
+        en: "Which country do you like?",
+        fr: "Quel pays vous aimez ?",
+        "nl-BE": "Welk land vindt u mooi?",
+        es: "¿Qué país le gusta?",
+        it: "Quale paese le piace?",
+        de: "Welches Land mögen Sie?",
+      },
+    ],
   },
   {
     id: "a1-tech-01",
@@ -187,5 +329,15 @@ export const A1: BankEntry[] = [
       it: "Che cosa fa con il telefono tutti i giorni?",
       de: "Was machen Sie jeden Tag mit Ihrem Handy?",
     },
+    followUps: [
+      {
+        en: "Do you call or send messages?",
+        fr: "Vous appelez ou vous écrivez ?",
+        "nl-BE": "Belt u of stuurt u berichten?",
+        es: "¿Llama o escribe mensajes?",
+        it: "Chiama o scrive messaggi?",
+        de: "Rufen Sie an oder schreiben Sie Nachrichten?",
+      },
+    ],
   },
 ];
