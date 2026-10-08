@@ -105,16 +105,19 @@ export default function ScoringGuidePage() {
 
       <ExplainerCard id="score-global" accent={accentGlobal} title="Global score (the headline number)">
         <p style={label}>
-          Global score = one overall judgement from an AI, covering <a href="#score-pronunciation" style={linkStyle}>Pronunciation</a>,{" "}
+          Global score = the average of the four scores below (<a href="#score-pronunciation" style={linkStyle}>Pronunciation</a>,{" "}
           <a href="#score-fluency" style={linkStyle}>Fluency</a>, <a href="#score-vocab" style={linkStyle}>Vocab &amp; Gram.</a>, and{" "}
-          <a href="#score-communication" style={linkStyle}>Communication</a> — expressed as one score (0-100) and one
-          level (like B2 or C1), not four separate numbers averaged together.
+          <a href="#score-communication" style={linkStyle}>Communication</a>), on a 0-100 scale, converted to a level
+          (like B2 or C1) in 5-point steps. Before 2026-10-08 it was the AI&apos;s own overall judgement instead of the
+          average.
         </p>
         <p style={{ ...label, marginBottom: 0 }}>
-          Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). On top of that
-          judgement, one fixed rule applies afterwards: if two of those four hit 9/10 or more (8.5 doesn&apos;t count), the score
-          gets a flat +5% (capped at 100) and the level is recalculated. Example above: 82 → 86, since Pronunciation
-          (9) and Fluency (9) both qualify — C1 becomes C1+.
+          Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). Two rules apply on top
+          of the average. <strong>Bonus:</strong> if two of the four hit 9/10 or more (8.5 doesn&apos;t count), the score
+          gets a flat +5% (capped at 100). Example above: average 85, Pronunciation (9) and Fluency (9) both qualify →
+          89, C1+. <strong>C2 floor:</strong> a clearly excellent session — at least 3 of the 4 at 9 or more, none
+          below 8, at least 5 answers averaging 20+ words — is lifted to 90 (C2). The floor only applies to sessions
+          evaluated since 2026-10-08.
         </p>
       </ExplainerCard>
 
@@ -178,6 +181,22 @@ export default function ScoringGuidePage() {
       <ExplainerCard title="Speechace">
         <p style={{ ...label, marginBottom: 0 }}>
           Import their scores + audio. Run ours on the same recordings. Closest-first Δ comparison.
+        </p>
+      </ExplainerCard>
+
+      <ExplainerCard title="Changing the scoring? Replay it first">
+        <p style={label}>
+          Before shipping a change to the formula (bonus, level thresholds, a floor for natives…), replay it on the
+          sessions already stored to see which ones would change level. It is a developer tool: nothing is changed
+          in the database and no AI is called.
+        </p>
+        <p style={label}>
+          Run <code>npm run analysis:scoring -- --scenario &lt;name&gt;</code> from the project (
+          <code>--list</code> shows the available scenarios). Reports list each session&apos;s level before and after.
+        </p>
+        <p style={{ ...label, marginBottom: 0 }}>
+          How to read the report, add your own scenario and ship a change: <code>analysis/README.md</code> in the
+          repository.
         </p>
       </ExplainerCard>
 

@@ -36,7 +36,7 @@ import { pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import type { LlmProvider } from "@/lib/llm/types";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
-import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation } from "@/lib/cefr-prompt";
+import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore, type CompositeCefrScore } from "@/lib/cefr-score";
 
 /** Mirrors app/page.tsx's MAX_DOMAIN_STREAK. */
@@ -374,7 +374,7 @@ export async function* runConversationSimulation(
       json: true,
       context: `${runId}:cefr-eval`,
     });
-    const result = parseCefrEvaluation(raw);
+    const result = withAnswerEvidence(parseCefrEvaluation(raw), userTurns);
     yield { type: "evaluation", result, composite: computeCompositeCefrScore(result, null) };
   } catch (e) {
     yield { type: "error", stage: "evaluation", message: String(e) };

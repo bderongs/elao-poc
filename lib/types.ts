@@ -21,6 +21,9 @@ export interface CefrResult {
   areas_for_improvement: string[];
   notable_errors: string[];
   summary: string;
+  /** Number of candidate answers and their mean length in words — stamped at evaluation time (withAnswerEvidence in lib/cefr-prompt.ts) for the C2-floor rule. Absent on sessions evaluated before 2026-10-08. */
+  answer_count?: number;
+  words_per_answer?: number;
 }
 
 export interface PronunciationAvg {

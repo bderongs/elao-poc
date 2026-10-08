@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "sim:batch": "tsx scripts/sim-batch.ts"
+    "sim:batch": "tsx scripts/sim-batch.ts",
+    "analysis:scoring": "tsx analysis/scoring-replay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

@@ -1,3 +1,4 @@
+import { FLUENCY_WPM_BANDS } from "@/lib/cefr-prompt";
 import type { CefrResult, PronunciationAvg, SpeechaceScores } from "@/lib/types";
 
 /** Derive CEFR level from composite score (5-point bands). */
@@ -22,30 +23,126 @@ export interface CompositeCefrScore {
 }
 
 /**
- * "Our" global score for a session: the CEFR evaluator's holistic
- * score_percent, with a +5% excellence bonus when at least 2 of the 4
- * dimensions (pronunciation from our own audio engine, fluency/
- * vocabulary_grammar/communication from the LLM) reach 9/10 — 8.5 does not
- * count now that the LLM axes are in half points (Track AE) — two standout
- * dimensions signal a stronger candidate than a flat profile at the same
- * average. Single source of truth for "our global score", shared by the
- * live CefrPanel display and the Speechace comparison — anywhere the app
- * needs to say "here is our one overall number" it should call this rather
- * than reading `result.score_percent` directly, which is the LLM's number
- * alone and doesn't account for our own measured pronunciation.
+ * The scoring rules as data. `SCORING_RULES` is what the app runs;
+ * analysis/ (npm run analysis:scoring) re-scores stored sessions with
+ * alternative rule sets through the SAME `scoreWithRules`, so a what-if can
+ * never drift from the live formula. See analysis/README.md.
+ */
+export interface ScoringRules {
+  /** "llm" = the evaluator's holistic score_percent. "axis-mean" = mean of the available axes (pronunciation, fluency, vocabulary/grammar, communication) × 10. */
+  baseScore: "llm" | "axis-mean";
+  /** Clamp the LLM's fluency axis into the band the speaking rate dictates (FLUENCY_WPM_BANDS). */
+  fluencyFromWpm: boolean;
+  /** Excellence bonus: `pct` % on top of the base score when `minAxes` of the axes reach `axisThreshold` (0–10 scale; 8.5 does not count at 9). */
+  bonus: { minAxes: number; axisThreshold: number; pct: number };
+  /** A floor that lifts a clearly excellent session to `floor`. null = off. Needs the answer evidence stamped on the evaluation (answer_count, words_per_answer); sessions without it never get the floor. */
+  c2Floor: null | {
+    floor: number;
+    minAxesHigh: number;
+    axisHigh: number;
+    noAxisBelow: number;
+    minAnswers: number;
+    minWordsPerAnswer: number;
+  };
+}
+
+/** Activated 2026-10-08 (Baptiste): axis mean as the base, and the Track V C2 floor. */
+export const SCORING_RULES: ScoringRules = {
+  baseScore: "axis-mean",
+  fluencyFromWpm: false,
+  bonus: { minAxes: 2, axisThreshold: 9, pct: 5 },
+  c2Floor: { floor: 90, minAxesHigh: 3, axisHigh: 9, noAxisBelow: 8, minAnswers: 5, minWordsPerAnswer: 20 },
+};
+
+export interface ScoreEvidence {
+  answers: number | null;
+  wordsPerAnswer: number | null;
+}
+
+export interface ScoreOutcome extends CompositeCefrScore {
+  /** Short human-readable list of the rules that moved the number (replay reports). */
+  notes: string[];
+}
+
+interface WpmBand { min: number; max: number; fluencyLo: number; fluencyHi: number }
+
+/** Parses FLUENCY_WPM_BANDS ("< 35", "35-44", "≥ 145" / "4-5", "8-8.5", "10") so the table stays defined in one place. */
+function wpmBands(): WpmBand[] {
+  return FLUENCY_WPM_BANDS.map((b) => {
+    const r = b.range.trim();
+    let min: number, max: number;
+    if (r.startsWith("<")) { min = 0; max = Number(r.slice(1)) - 1; }
+    else if (r.startsWith("≥")) { min = Number(r.slice(1)); max = Infinity; }
+    else { const [a, z] = r.split("-").map(Number); min = a; max = z; }
+    const [lo, hi] = b.fluency.includes("-") ? b.fluency.split("-").map(Number) : [Number(b.fluency), Number(b.fluency)];
+    return { min, max, fluencyLo: lo, fluencyHi: hi };
+  });
+}
+
+function clampFluencyToWpm(fluency: number, wpm: number): number {
+  const bands = wpmBands();
+  // Last band whose lower bound the rate reaches (handles rates like 34.6 that fall between two integer-bounded bands).
+  const b = [...bands].reverse().find((x) => wpm >= x.min) ?? bands[0];
+  return Math.min(b.fluencyHi, Math.max(b.fluencyLo, fluency));
+}
+
+export function scoreWithRules(
+  result: CefrResult,
+  pronunciationAvg: PronunciationAvg | null,
+  rules: ScoringRules,
+  evidence: ScoreEvidence = { answers: result.answer_count ?? null, wordsPerAnswer: result.words_per_answer ?? null },
+): ScoreOutcome {
+  const notes: string[] = [];
+  const pronScore = pronunciationAvg ? pronunciationAvg.pronunciation / 10 : null;
+
+  let fluency = result.dimensions.fluency;
+  if (rules.fluencyFromWpm && fluency !== null && pronunciationAvg && pronunciationAvg.wpm > 0) {
+    const clamped = clampFluencyToWpm(fluency, pronunciationAvg.wpm);
+    if (clamped !== fluency) notes.push(`fluency ${fluency}→${clamped} (${Math.round(pronunciationAvg.wpm)} wpm)`);
+    fluency = clamped;
+  }
+  const present = [pronScore, fluency, result.dimensions.vocabulary_grammar, result.dimensions.communication].filter(
+    (v): v is number => v !== null,
+  );
+
+  let baseScore = result.score_percent;
+  if (rules.baseScore === "axis-mean" && present.length) {
+    baseScore = Math.round((present.reduce((a, b) => a + b, 0) / present.length) * 10);
+    if (baseScore !== result.score_percent) notes.push(`base ${result.score_percent}→${baseScore} (axis mean)`);
+  }
+
+  const highCount = present.filter((v) => v >= rules.bonus.axisThreshold).length;
+  let score = highCount >= rules.bonus.minAxes ? Math.min(100, Math.round(baseScore * (1 + rules.bonus.pct / 100))) : baseScore;
+  if (score !== baseScore) notes.push(`+${rules.bonus.pct}% bonus`);
+
+  const f = rules.c2Floor;
+  if (f && score < f.floor && evidence.answers !== null && evidence.wordsPerAnswer !== null) {
+    const strong = present.filter((v) => v >= f.axisHigh).length >= f.minAxesHigh;
+    const noWeak = present.every((v) => v >= f.noAxisBelow);
+    if (strong && noWeak && evidence.answers >= f.minAnswers && evidence.wordsPerAnswer >= f.minWordsPerAnswer) {
+      score = f.floor;
+      notes.push(`C2 floor ${f.floor}`);
+    }
+  }
+
+  // The evaluator's own level label is kept only when nothing moved its number.
+  const level = score === result.score_percent ? (result.level ?? scoreToLevel(score)) : scoreToLevel(score);
+  return { score, level, notes };
+}
+
+/**
+ * "Our" global score for a session: the evaluator's four dimensions
+ * (pronunciation from our own audio engine, fluency/vocabulary_grammar/
+ * communication from the LLM, the last three in half points) combined by
+ * `SCORING_RULES` — mean of the axes, +5 % when ≥ 2 axes reach 9 (8.5 does
+ * not count), and a C2 floor for clearly excellent sessions. Single source of
+ * truth for "our global score", shared by the live CefrPanel display and the
+ * Speechace comparison — anywhere the app needs to say "here is our one
+ * overall number" it should call this rather than reading
+ * `result.score_percent` directly, which is the LLM's holistic number alone.
  */
 export function computeCompositeCefrScore(result: CefrResult, pronunciationAvg: PronunciationAvg | null): CompositeCefrScore {
-  const pronScore = pronunciationAvg ? pronunciationAvg.pronunciation / 10 : null;
-  const fluency = result.dimensions.fluency;
-  const vocabGram = result.dimensions.vocabulary_grammar;
-  const comm = result.dimensions.communication;
-
-  const baseScore = result.score_percent;
-  const highCount = [pronScore, fluency, vocabGram, comm].filter(
-    (v): v is number => v !== null && v >= 9,
-  ).length;
-  const score = highCount >= 2 ? Math.min(100, Math.round(baseScore * 1.05)) : baseScore;
-  const level = score !== baseScore ? scoreToLevel(score) : (result.level ?? scoreToLevel(score));
+  const { score, level } = scoreWithRules(result, pronunciationAvg, SCORING_RULES);
   return { score, level };
 }
 

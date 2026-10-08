@@ -266,3 +266,13 @@ export function parseCefrEvaluation(raw: string): CefrResult {
   if (typeof result.score_percent === "number") result.score_percent = Math.round(result.score_percent);
   return result;
 }
+
+/** Stamps the answer count and mean answer length onto a parsed evaluation — the evidence the C2 floor (lib/cefr-score.ts) needs. */
+export function withAnswerEvidence(result: CefrResult, userTurns: string[]): CefrResult {
+  const words = userTurns.map((t) => t.trim().split(/\s+/).filter(Boolean).length);
+  return {
+    ...result,
+    answer_count: words.length,
+    words_per_answer: words.length ? Math.round((words.reduce((a, b) => a + b, 0) / words.length) * 10) / 10 : 0,
+  };
+}

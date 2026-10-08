@@ -3,6 +3,7 @@ import {
   CEFR_SYSTEM_PROMPT,
   buildEvaluationUserMessage,
   parseCefrEvaluation,
+  withAnswerEvidence,
 } from "@/lib/cefr-prompt";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import { getProvider } from "@/lib/llm/registry";
@@ -49,7 +50,7 @@ export async function POST(req: Request) {
     });
 
     // Strips markdown fences, normalises dimensions to half points (Track AE)
-    const evaluation = parseCefrEvaluation(text);
+    const evaluation = withAnswerEvidence(parseCefrEvaluation(text), userTurns);
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
     return NextResponse.json(evaluation);

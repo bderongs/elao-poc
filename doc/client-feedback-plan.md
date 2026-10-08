@@ -143,6 +143,7 @@ The topic-switch *enforcement* (why the rule didn't actually change topics) is i
 - Show the "+5 % excellence bonus" in `CefrPanel` / admin breakdown so the client can see it.
 - Build an **offline replay script** that runs every stored session through the old and new formulas and lists which sessions change level — required before shipping (no B1–C1 regression).
 - [ ] Baptiste to record 3–4 more French sessions (incl. concise answers) and the client to supply one strong **non-native** control, then calibrate.
+- ✅ **Activated 2026-10-08 (Baptiste's call): axis-mean base + C2 floor.** `lib/cefr-score.ts` now holds the rules as data (`SCORING_RULES`) and the engine (`scoreWithRules`); `computeCompositeCefrScore` runs it, and the analysis replay (AB-03) runs the same engine. Score = mean of the 4 axes ×10 → +5 % if ≥ 2 axes ≥ 9 → **C2 floor 90** if ≥ 3 axes ≥ 9, none < 8, ≥ 5 answers, ≥ 20 words/answer. Answer count and mean length are stamped on each new evaluation (`answer_count`, `words_per_answer`), so **the floor only applies to sessions evaluated from now on**. **Heads-up:** the score is computed on read, so axis-mean changes how every stored session is *displayed* (replay vs the old base: 42 of 59 move, 41 up, 9 by more than two steps — mostly weaker candidates rising, as finding 4 predicted). Stored `cefr_level` / `global_score` columns and callbacks already sent keep the old values. Watch the first beta sessions; revert with `baseScore: "llm"` in `SCORING_RULES`. `/admin/scoring` text updated.
 
 ### Decisions taken on related ideas
 - **Send the questions / rung path to the evaluator: not now.** The questions *are* stored (`session_turns`, assistant rows) but only user turns are sent to the evaluator; the **rung per turn is not stored anywhere** (only in local log files `et_result_received` and the debug panel). Feeding the pacing judge's verdicts into the final score could pass on its generosity (three "well" verdicts took Baptiste from B1 to C2); if wanted later, send only the question next to each answer and store the rung purely for auditing.
@@ -205,11 +206,11 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 | AA | Questions too hard / DELF-DALF-like, no warm-up, for/against arguments | 🟡 question bank built (6 languages); simulator + live check and client review to do |
 | AB | Levels compressed around B2 (72/100), C1/C2 hard to reach, "2-step" scoring felt harsher | ⬜ to investigate once sessions are saved again |
 | AC | *(Baptiste's idea)* Adaptive session length: stop early when the level is clear, run longer when it isn't | 🟡 built in **shadow mode** (records only); calibrate, then switch on |
-| AD | "Jokers": don't penalise answers when the error looks like a speech-to-text error | ⬜ to do — design proposed |
+| AD | "Jokers": don't penalise answers when the error looks like a speech-to-text error | 🟡 simple forgiveness rule built (pronunciation + evaluator v4, commit 4e1bb7c); admin display + level replay to do |
 | AE | Score in steps of 5 instead of steps of 10 | ✅ built — axes in half points (prompt v3); replay over stored sessions to do |
-| AF | Questions still too hard for an A1 speaker | ⬜ to do |
+| AF | Questions still too hard for an A1 speaker | 🟡 A1 bank simplified (afd3376); code-picked A1, A1 warm-up, starting rung still open; sim re-run in progress |
 | AG | Configurable "callback" when a score is available, visible in admin | 🟡 built, **not activated** (default URL https://www.elao-test.com/callback), shown on `/admin/system-config`; receiving side to agree with the client |
-| AH | Satisfaction form at the end of the test (beta period) | ⬜ to do |
+| AH | Satisfaction form at the end of the test (beta period) | ✅ built differently from the proposal (commit 6334f69, migration 0012) — admin list column/summary to check |
 
 **Order (2026-10-01 additions):** AE and AG done first (Baptiste's call, 2026-10-01) → AF and AH (small, directly visible to beta testers, and AH starts collecting data right away) → AD (overlaps AB-06 / Z-03, do them together).
 
@@ -321,7 +322,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 **To do**
 - [ ] **AB-01** After X ships: collect new tester sessions and inspect stored evaluations (axes, raw LLM score, bonus, fallback path) — especially any repeated 72.
 - [ ] **AB-02** Ask the client what "2 temps" means (live difficulty ladder + final evaluation? the new pronunciation system?) and which earlier behaviour they preferred.
-- [ ] **AB-03** Offline replay script (already planned in Track V): run stored sessions through old vs new scoring, list which change level.
+- [x] **AB-03** (2026-10-08, uncommitted) Scoring replay built in the new `analysis/` folder: `npm run analysis:scoring -- --scenario <name[,name]>` (`--list`, `--lang`, `--since`, `--source`). Scoring rules are data (`analysis/lib/rules.ts`, checked against the live `computeCompositeCefrScore` on every run — 59/59 today), scenarios in `analysis/scenarios.ts` (now overrides of the live rules: `llm-base`, `no-floor`, `floor-looser`, `wpm-fluency`, `bonus-8.5`, `bonus-3-axes`, `no-bonus`). Full guide in `analysis/README.md`; admin mention on `/admin/scoring`. Reports go to `analysis/reports/` (git-ignored). **First results (59 stored live sessions):** `c2-floor` moves 5 C1+ → C2 and nothing else; `wpm-fluency` alone moves nothing (axes only matter through the +5 % bonus; fluency 9 → 10 changes no level); `axis-mean` moves 42 of 59 up, 9 by more than two steps — confirms Track V finding 4 (averaging the axes inflates weaker candidates), do not ship. Note: the DB column `cefr_level` is the evaluator's level *before* the bonus; users see the composite.
 - [ ] **AB-04** Faster promotion when no starting level is given (Track V "level-promotion detection": jump ≥ 2 rungs on a clearly stronger answer, guarded by evidence).
 - [ ] **AB-05** Low levels (NL/DE A2 → A1): re-check after Z-05 — bad transcripts at low levels probably pulled scores down.
 
@@ -433,13 +434,15 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **To do**
 - [ ] **AF-01** Get the A1 tester's session (language, date) and read the questions actually asked and the rung per turn (`ladder_json`, Track AC).
-- [ ] **AF-02** Rewrite the A1 bank (short closed/choice questions + fixed follow-ups), 6 languages.
-- [ ] **AF-03** Code-picked questions at A1 (reuse the C1/C2 `bankState` flow in `lib/examiner-prompt.ts`); lift the yes/no rule at A1.
-- [ ] **AF-04** A1-style warm-up and one-sentence intro when the starting rung is A1/A2.
+- [~] **AF-02** (afd3376, 2026-10-05) A1 bank rewritten: one short question per entry, no compound "X, and why?". Closed/choice style and fixed follow-ups not confirmed.
+- [x] **AF-03** (2026-10-07, uncommitted: A1 added to the code-picked rungs via `isCodePickedRung`, one fixed follow-up per A1 entry in 6 languages — native review needed; yes/no rule lifted at A1; family-01 made closed) Code-picked questions at A1 (reuse the C1/C2 `bankState` flow in `lib/examiner-prompt.ts`); lift the yes/no rule at A1.
+- [x] **AF-04** (already in the code before this round: `easyOpening` + A1-bank opener for foundation starts) A1-style warm-up and one-sentence intro when the starting rung is A1/A2.
 - [ ] **AF-05** Decide the starting rung / "Je débute" option with the client.
 - [x] **AF-06a** Batch tool: `npm run sim:batch -- --level A1 --lang fr --runs 10` (`scripts/sim-batch.ts`) plays N simulated sessions through the real examiner/ET/evaluator, computes per-turn metrics (understanding, question length, rung path, ET verdicts, final level vs simulated level) and writes `sim-runs/<date>-<level>/report.md` + an LLM analyst reading. Mistral is paced to ~26 req/min, so 10 sessions ≈ 15 min. Also works for A2/C1/C2 (`--level C1 --start C1`). The simulator now mirrors live's "I didn't understand" re-ask (it didn't before).
 - **Baseline, 2026-10-01 (FR, learner A1, examiner starting at A2, 10 sessions, *before* the clarify fix above):** final level A1 ×6 / A1+ ×4 (calibration fine). But: the opening line (intro + warm-up, 20–29 words) was **never** fully understood by the simulated A1 learner; only ~3-word questions ("Où habitez-vous ?") were understood in full; 80 % of sessions had at least one question not understood at all; ET judged short fragments ("Liège. Grande ville.") "well" (avg 9.8 words for "well" vs 9.4 for "struggled") so the ladder yo-yoed A1↔A2 and reached B1 in 4/10 sessions.
-- [ ] **AF-06b** Re-run the baseline with the clarify fix, then after each AF change (AF-02…AF-04) with the same command, and compare `summary.json`.
+- [~] **AF-06b** Re-run the baseline with the clarify fix, then after each AF change (AF-02…AF-04) with the same command, and compare `summary.json`.
+  - **2026-10-07 re-run after `afd3376`** (10 sessions, `sim-runs/2026-10-07T08-58-23-A1/`) vs 10-05 run (5 sessions, before afd3376): fully understood 40 % (was 43), not understood 20 % (17), first question not fully understood 50 % (60), sessions with ≥ 1 question not understood 80 % (80); question length 8.3 words (8.3), > 12 words 4 % (9); ET verdicts well 56 / struggled 37 (46 / 40); sessions reaching 2 rungs above level 20 % (0); final level exact 70 % (60), A1 ×7 / A1+ ×3. **Conclusion: shorter, single-part questions did not improve comprehension** (~54 % of A1-rung questions still not fully understood); the ladder drifts up more (5/10 sessions went above A2, B1 questions 100 % not understood) because ET says "well" to fragments. Remaining levers: AF-03 (closed/choice questions, code-picked), AF-04 (one-sentence intro), ET strictness at A1.
+  - **2026-10-07 re-run after AF-03** (code-picked A1 questions + fixed follow-ups, 10 sessions, `sim-runs/2026-10-07T16-28-57-A1/`): fully understood **49 %** (40), not understood **9 %** (20), first question not fully understood **30 %** (50), sessions with ≥ 1 question not understood **60 %** (80); question length 8.8 words (8.3); ET struggled 29 / well 60; **ladder no longer climbs past A2** (0 sessions two rungs above level, no B1/B2 questions); final level exact 50 % (70): A1 ×5 / A1+ ×4 / A2 ×1 — the A2 and A1+ are an evaluator over-estimate to look at. Clear gain on comprehension and ladder drift; still ~47 % of A1 questions only partly understood (the simulated learner is strict). Not committed yet.
 
 ---
 
@@ -467,7 +470,11 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 ---
 
-## Track AH — Satisfaction form at the end of the test (beta) ⬜
+## Track AH — Satisfaction form at the end of the test (beta) ✅
+
+**Built (commit 6334f69 "Add survey", 2026-10-05) — differs from the proposal below.** Modal (`components/SatisfactionModal.tsx`, shown from `SessionResultsScreen`) with **three 1–10 ratings** (experience, question relevance, grade relevance) + optional comment, behind `NEXT_PUBLIC_SATISFACTION_MODAL=1`. Public route `POST /api/feedback` (`lib/feedback-service.ts`); table `session_feedback` (migration `0012_session_feedback.sql`, one row per session, resubmitting overwrites). Admin: answers on the session detail page, settings and system-config entries. **To check:** admin list column / filter / summary (old AH-04); migration applied; flag set in Vercel.
+
+*Original proposal (superseded):*
 
 **Feedback (2026-10-01):** add a satisfaction form at the end of the test, for the beta period.
 
@@ -483,10 +490,10 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - **Admin**: answers shown on the session detail page, a column/filter in the list (e.g. "level felt too low"), and a small summary (average rating, % "level about right").
 
 **To do**
-- [ ] **AH-01** Agree on the questions with the client (and whether the form is FR-only or in all 6 languages).
-- [ ] **AH-02** Migration + public route (`POST /api/sessions/feedback`).
-- [ ] **AH-03** Form on the results screen behind `BETA_FEEDBACK_ENABLED`.
-- [ ] **AH-04** Admin: answers on the session detail + list column + summary.
+- [~] **AH-01** (superseded by the built 3-rating version) Agree on the questions with the client (and whether the form is FR-only or in all 6 languages).
+- [x] **AH-02** Migration 0012 + public route (`POST /api/feedback`).
+- [x] **AH-03** Modal on the results screen behind `NEXT_PUBLIC_SATISFACTION_MODAL`.
+- [~] **AH-04** Admin: answers on the session detail done; list column + summary not verified.
 
 ---
 
@@ -499,7 +506,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 6. ~~"Paliers de 5" meaning~~ — decided 2026-10-01: axes in half points (AE).
 7. Which A1 tester session showed questions that were too hard (language, date)? Should beginners be able to say "Je débute" before the test? (AF-01, AF-05)
 8. Score callback: it is built but not activated, pointing at https://www.elao-test.com/callback. What is the real receiving URL? Are the payload fields OK? HMAC signature or bearer token? Do you need your own user reference on the test link? (AG-01)
-9. Satisfaction form: OK with the 5 proposed questions? FR only or all 6 languages? (AH-01)
+9. ~~Satisfaction form~~ — built (3 ratings + comment, 2026-10-05); confirm the wording with the client. (AH-01)
 
 ## Files touched (this round)
 
