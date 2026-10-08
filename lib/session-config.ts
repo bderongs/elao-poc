@@ -16,9 +16,13 @@ export const SESSION_DURATION_SECONDS = SESSION_DURATION_MINUTES * 60;
  * stopped. "adaptive": the session ends once the level has settled, between
  * SESSION_MIN_SECONDS and SESSION_MAX_SECONDS. "fixed": rule off.
  */
-export const SESSION_LENGTH_MODE: SessionLengthMode = "shadow";
+export const SESSION_LENGTH_MODE: SessionLengthMode = "adaptive";
 export const SESSION_MIN_SECONDS = 3 * 60;
 export const SESSION_MAX_SECONDS = 7 * 60;
+
+/** Length wording for the French landing screen: "quelques minutes" when the length adapts, otherwise "N minutes". */
+export const SESSION_LENGTH_LABEL_FR =
+  SESSION_LENGTH_MODE === "adaptive" ? "quelques minutes" : `${SESSION_DURATION_MINUTES} minutes`;
 
 /** The examiner's first name — every language's avatar introduces itself with it. */
 export const AVATAR_NAME = "Léa";

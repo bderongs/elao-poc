@@ -23,7 +23,7 @@ import { CandidateTopBar as TopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
 import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
-import { SESSION_DURATION_MINUTES, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
+import { SESSION_DURATION_MINUTES, SESSION_LENGTH_LABEL_FR, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
@@ -2023,7 +2023,7 @@ export default function Home() {
                 allons-nous parler&nbsp;?
               </h2>
               <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.55 }}>
-                Une conversation de {SESSION_DURATION_MINUTES} minutes avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
+                Une conversation de {SESSION_LENGTH_LABEL_FR} avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
               </p>
             </div>
             <div className={styles.langGrid}>
@@ -2077,7 +2077,7 @@ export default function Home() {
             <div className={styles.instructionsIntro} style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-                  Votre niveau en {SESSION_DURATION_MINUTES} minutes
+                  Votre niveau en {SESSION_LENGTH_LABEL_FR}
                 </h2>
                 <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.6, maxWidth: 460 }}>
                   Léa vous posera des questions simples sur votre quotidien. Répondez à voix haute, comme dans une
