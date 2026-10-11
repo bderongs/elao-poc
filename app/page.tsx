@@ -885,7 +885,7 @@ export default function Home() {
           ]);
         }
         currentRungRef.current = guardedRung;
-        vadRef.current?.setExtendedPauseTolerance(guardedRung === "C2");
+        vadRef.current?.setPauseZone(zoneForRung(guardedRung));
       }
     } catch (e) {
       logClientEvent("et_failed", { turnLogId, process: etProcess, error: String(e) });
@@ -1117,7 +1117,10 @@ export default function Home() {
     // replacement of the admin mechanism (stepSize below still comes from
     // the fetch either way).
     const levelOverride = getLevelOverrideFromUrl();
-    const effectiveOverride = levelOverride ?? storedPreference?.rung ?? null;
+    // The remembered rung belongs to the remembered LANGUAGE: a level reached in
+    // French must not carry over to a Spanish session.
+    const rememberedRung = storedPreference && storedPreference.language === language ? storedPreference.rung : null;
+    const effectiveOverride = levelOverride ?? rememberedRung;
     if (effectiveOverride) {
       conversationSettingsRef.current = { ...conversationSettingsRef.current, startingRung: effectiveOverride };
     }
@@ -1148,7 +1151,7 @@ export default function Home() {
           // produced its first real update (which needs the opening turn to
           // finish playing, the user to answer, and STT to finalize first).
           currentRungRef.current = conversationSettingsRef.current.startingRung;
-          vadRef.current?.setExtendedPauseTolerance(conversationSettingsRef.current.startingRung === "C2");
+          vadRef.current?.setPauseZone(zoneForRung(conversationSettingsRef.current.startingRung));
         }
       })
       .catch(() => {});
@@ -1485,7 +1488,7 @@ export default function Home() {
       // targets A1 (see the isStart branch in handleUserTurn) unless the
       // starting-level URL override applies, so this is only ever non-default
       // when that override or an already-resolved admin setting put it there.
-      vadRef.current.setExtendedPauseTolerance(currentRungRef.current === "C2");
+      vadRef.current.setPauseZone(zoneForRung(currentRungRef.current));
       startTurnRecording(); // begin recording the first user turn
 
       // The streaming client mints its own token per turn internally
@@ -1559,7 +1562,7 @@ export default function Home() {
       ladderDecisionRef.current = evaluateStop(ladderStepsRef.current);
       setAnswersCount(ladderStepsRef.current.length);
       currentRungRef.current = down;
-      vadRef.current?.setExtendedPauseTolerance(down === "C2");
+      vadRef.current?.setPauseZone(zoneForRung(down));
     }
     // H-01 latency instrumentation id — falls back to a synthetic one for the
     // opening/closing turns, which don't come from onFinal.

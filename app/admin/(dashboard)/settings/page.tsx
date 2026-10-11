@@ -81,7 +81,7 @@ export default async function ConversationSettingsPage() {
               <li>Overrides both the opening (turn 1) question&apos;s difficulty and every turn after.</li>
               <li>
                 Highest priority in the precedence chain: <code>?level=</code> URL param &gt; a
-                signed-in user&apos;s remembered rung (<code>profiles.last_rung</code>) &gt; the
+                signed-in user&apos;s remembered rung (<code>profiles.last_rung</code>, only when the session is in the language it was reached in) &gt; the
                 per-language default set above &gt; hardcoded fallback (A2).
               </li>
               <li>

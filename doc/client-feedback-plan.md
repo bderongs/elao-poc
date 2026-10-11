@@ -1,6 +1,6 @@
 # Client feedback round — dev plan (2026-09-21)
 
-Status (end of 2026-09-21): **P, Q, S, U, T done; two extra fixes found while testing (W) done; V and R analysed but not built; R deliberately parked.** Everything is in the working tree, **uncommitted**, type-checks, and has had only light testing (see §What still needs doing).
+Status (updated 2026-10-11): **P, Q, S, U, T, W done and committed (d1b561b, 2026-09-21); V partly built (axis-mean base + C2 floor live since 2026-10-08, validated by Baptiste 2026-10-11); R deliberately parked.** Live checks P-05 and T done 2026-10-05; native review of S still open.
 
 Source: the client's 7 remarks after testing the app. Task IDs use tracks **P–W** (Track O was the last one in `DEV-PLAN.md`). Fold them into `DEV-PLAN.md` §M8 or a new milestone once prioritised.
 
@@ -10,13 +10,13 @@ Items marked **⚠ finding** contain something the client's remark doesn't say b
 
 | Track | Client remark | Status |
 |-------|---------------|--------|
-| P | Every avatar should be called Léa | ✅ done (spoken smoke test per language still open) |
+| P | Every avatar should be called Léa | ✅ done (spoken smoke test done 2026-10-05) |
 | Q | Show the end-of-session feedback in admin session reports | ✅ done |
 | R | Filter background noise / coughs | ⏸ analysed, **parked by decision** — nothing built |
 | S | More natural acknowledgements / transitions (no English "topic switch required now") | ✅ done (+ topic-switch enforcement, see W) — native review of the lists open |
 | T | All sessions visible in admin | ✅ done — sessions now saved incrementally, unfinished ones shown (migration applied — single Supabase project) |
 | U | "Votre niveau en 3 minutes" instead of "Trois questions" | ✅ done |
-| V | Let a native reach C2 | 🔎 analysed with real data; proposal written, **not built** |
+| V | Let a native reach C2 | 🟡 axis-mean base + C2 floor **live** (2026-10-08, validated 2026-10-11); faster promotion (AB-04) and evaluator tightening (Z-03) still open |
 | W | Bugs found in the 2026-09-21 native test session | ✅ pronunciation-average bug fixed; ✅ topic-switch enforcement rebuilt |
 
 ---
@@ -118,11 +118,11 @@ The topic-switch *enforcement* (why the rule didn't actually change topics) is i
 - [x] **U-03** `doc/new_design/README.md` updated (`SCOPE.md` needed no change).
 - [ ] **U-04** Non-FR UI copy: not checked (landing copy appears FR-only).
 
-**Heads-up for the 5-minute version:** `lib/session-cost.ts` (`AVG_SESSION` turns/words), the topic-diversity thresholds (Track I) and the cost estimates still assume ~3 minutes and should read from the same constant. `doc/new_design/ELAO Speaking 1a.dc.html` (design source) still contains the old wording.
+**Superseded (2026-10-08):** the 5-minute version never shipped — adaptive length (Track AC-10, 3–7 min) replaced it, and the landing now says "Votre niveau en quelques minutes". Still true: `lib/session-cost.ts` (`AVG_SESSION`) and the cost estimates assume ~3 minutes; `doc/new_design/ELAO Speaking 1a.dc.html` (design source) still has the old wording.
 
 ---
 
-## Track V — Let a native speaker reach C2 🔎 analysed, not built
+## Track V — Let a native speaker reach C2 🟡 scoring change live
 
 **Ask:** "See how to obtain a C2 for a native: introduce a complementary metric such as the average number of words per answer, which would influence fluency (or be an extra axis) + award a bonus if 2 of the 4 axes are ≥ 9."
 
@@ -136,14 +136,14 @@ The topic-switch *enforcement* (why the rule didn't actually change topics) is i
 6. **Vocabulary/grammar is capped at 8 for a native**: the evaluator flags likely recognition errors ("s'allader", "un suite", "de bons buts") as speaker errors although its own prompt says to dismiss them.
 7. **Confidence** (`high/medium/low` from the evaluator, tracks session length: high ≈ 192 s / 8 answers, low ≈ 62 s / 2 answers) is only a label — **it is not used in scoring**, and 30–60 s sessions with 2–3 answers still get a level such as B2+. Decision: **set aside for now**.
 
-### Proposal (not built — to do after more test sessions)
+### Proposal (written 2026-09-21 — the scoring part is now built, see the ✅ line at the end of this list)
 - **C2 floor of 90** when **≥ 3 of 4 axes are ≥ 9, no axis < 8, ≥ 5 answers and ≥ ~20 words per answer**. On the four French sessions checked: both of Baptiste's best sessions become C2; the other two don't move; B1–C1 outcomes otherwise unchanged. (Calibrated on only two sessions — needs more.)
 - Needs `answer count` and `average words per answer` stored with the evaluation (or derived from `session_turns`).
-- Tighten the evaluator: enforce the "recognition errors" rule for fluent, high-pronunciation speakers (don't list phonetic-looking errors, don't score vocabulary/grammar below 9 for them); fix the stale "all five dimensions" wording in the C2 description; bump `CEFR_PROMPT_VERSION` if the prompt changes.
-- Show the "+5 % excellence bonus" in `CefrPanel` / admin breakdown so the client can see it.
-- Build an **offline replay script** that runs every stored session through the old and new formulas and lists which sessions change level — required before shipping (no B1–C1 regression).
+- Tighten the evaluator: enforce the "recognition errors" rule for fluent, high-pronunciation speakers (don't list phonetic-looking errors, don't score vocabulary/grammar below 9 for them) — partly done by the Track AD allowance (v4), rest is Z-03. ✅ The stale "all five dimensions" wording in the C2 description is fixed (2026-10-11, now "on every dimension", `CEFR_PROMPT_VERSION` → **v5**).
+- Show the "+5 % excellence bonus" in `CefrPanel` / admin breakdown so the client can see it. ✅ Admin side done 2026-10-11: the session detail's Global score card lists the rules that moved that session's score (axis mean, WPM→fluency, +5 %, C2 floor). The candidate's `CefrPanel` still shows only the final score.
+- ✅ **Offline replay script** built (AB-03, `npm run analysis:scoring`).
 - [ ] Baptiste to record 3–4 more French sessions (incl. concise answers) and the client to supply one strong **non-native** control, then calibrate.
-- ✅ **Activated 2026-10-08 (Baptiste's call): axis-mean base + C2 floor.** `lib/cefr-score.ts` now holds the rules as data (`SCORING_RULES`) and the engine (`scoreWithRules`); `computeCompositeCefrScore` runs it, and the analysis replay (AB-03) runs the same engine. Score = mean of the 4 axes ×10 → +5 % if ≥ 2 axes ≥ 9 → **C2 floor 90** if ≥ 3 axes ≥ 9, none < 8, ≥ 5 answers, ≥ 20 words/answer. Answer count and mean length are stamped on each new evaluation (`answer_count`, `words_per_answer`), so **the floor only applies to sessions evaluated from now on**. **Heads-up:** the score is computed on read, so axis-mean changes how every stored session is *displayed* (replay vs the old base: 42 of 59 move, 41 up, 9 by more than two steps — mostly weaker candidates rising, as finding 4 predicted). Stored `cefr_level` / `global_score` columns and callbacks already sent keep the old values. Watch the first beta sessions; revert with `baseScore: "llm"` in `SCORING_RULES`. `/admin/scoring` text updated.
+- ✅ **Activated 2026-10-08 (Baptiste's call): axis-mean base + C2 floor.** `lib/cefr-score.ts` now holds the rules as data (`SCORING_RULES`) and the engine (`scoreWithRules`); `computeCompositeCefrScore` runs it, and the analysis replay (AB-03) runs the same engine. Score = mean of the 4 axes ×10 → +5 % if ≥ 2 axes ≥ 9 → **C2 floor 90** if ≥ 3 axes ≥ 9, none < 8, ≥ 5 answers, ≥ 20 words/answer. Answer count and mean length are stamped on each new evaluation (`answer_count`, `words_per_answer`), so **the floor only applies to sessions evaluated from now on**. **Heads-up:** the score is computed on read, so axis-mean changes how every stored session is *displayed* (replay vs the old base: 42 of 59 move, 41 up, 9 by more than two steps — mostly weaker candidates rising, as finding 4 predicted). Stored `cefr_level` / `global_score` columns and callbacks already sent keep the old values. Watch the first beta sessions; revert with `baseScore: "llm"` in `SCORING_RULES`. `/admin/scoring` text updated. **Axis-mean validated by Baptiste 2026-10-11**, knowing it lifts weaker candidates. Admin made consistent the same day: the session detail header and the ladder panel now show the composite level (as the list and `CefrPanel` already did) instead of the stored `cefr_level` column, and the breakdown's Global card describes the average instead of "one holistic AI judgment, not an average".
 
 ### Decisions taken on related ideas
 - **Send the questions / rung path to the evaluator: not now.** The questions *are* stored (`session_turns`, assistant rows) but only user turns are sent to the evaluator; the **rung per turn is not stored anywhere** (only in local log files `et_result_received` and the debug panel). Feeding the pacing judge's verdicts into the final score could pass on its generosity (three "well" verdicts took Baptiste from B1 to C2); if wanted later, send only the question next to each answer and store the rung purely for auditing.
@@ -178,10 +178,10 @@ Baptiste ran a French session, reached C2 in the debug panel for 3 answers, but 
 
 ## What still needs doing
 
-1. **Commit** the working tree (nothing is committed yet).
+1. ~~Commit the working tree~~ — committed in d1b561b (2026-09-21).
 2. ~~Run migration 0010 on production~~ — not needed: single Supabase project for dev and prod, already applied.
-3. Live checks: unfinished-session flow (Track T), spoken "Léa" in each language (P-05), native review of pivot/bridge lists (Track S).
-4. **Track V** when ready: more native sessions + a non-native control → offline replay script → C2 floor rule, evaluator tightening, promotion-detection change.
+3. Live checks: ~~unfinished-session flow (Track T)~~, ~~spoken "Léa" in each language (P-05)~~ (both done 2026-10-05); native review of pivot/bridge lists (Track S) still open.
+4. **Track V**: ~~offline replay script~~, ~~C2 floor rule~~ (both done 2026-10-08) — still open: more native sessions + a non-native control to check the floor, evaluator tightening (Z-03), promotion-detection change (AB-04).
 5. **Track R** stays parked until a concrete cough/noise case shows up.
 6. Client questions still open: end-of-session feedback meaning (Q), missing-session sample to confirm the cause (T), native review (S), words-per-answer as gate vs axis and whether they know the +5 % bonus exists (V), go-live date of the 5-minute version (U).
 
@@ -201,14 +201,14 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 | Track | Feedback | Status |
 |-------|----------|--------|
 | X | Finished sessions shown as "not finished" (and results missing) | ✅ fixed — root cause found (upload size limit), live check on Vercel pending |
-| Y | Léa doesn't notice the end of an answer, freezes, cuts testers off, stays stuck on a question | 🟡 partly done (freeze + "Je ne comprends pas"); silence timing still to do |
+| Y | Léa doesn't notice the end of an answer, freezes, cuts testers off, stays stuck on a question | 🟡 freeze, "Je ne comprends pas" and question drop done; silence timing / quiet-mic VAD built (Y-04…Y-07, 2026-10-11), live check to do |
 | Z | Transcription wrong in DE/NL/FR, place names not recognised | 🟡 VAD audio fix done; Gradium tried and dropped on accuracy; now Mistral realtime for all languages (batch one switch away) — live check at low levels to do |
 | AA | Questions too hard / DELF-DALF-like, no warm-up, for/against arguments | 🟡 question bank built (6 languages); simulator + live check and client review to do |
-| AB | Levels compressed around B2 (72/100), C1/C2 hard to reach, "2-step" scoring felt harsher | ⬜ to investigate once sessions are saved again |
-| AC | *(Baptiste's idea)* Adaptive session length: stop early when the level is clear, run longer when it isn't | 🟡 **switched on by default 2026-10-08** (3–7 min); calibration (AC-08/09) and landing-copy sign-off still open |
-| AD | "Jokers": don't penalise answers when the error looks like a speech-to-text error | 🟡 simple forgiveness rule built (pronunciation + evaluator v4, commit 4e1bb7c); admin display + level replay to do |
+| AB | Levels compressed around B2 (72/100), C1/C2 hard to reach, "2-step" scoring felt harsher | 🟡 replay built, WPM→fluency enforced, axis-mean + C2 floor live (validated 2026-10-11); stored beta sessions still to inspect (AB-01) |
+| AC | *(Baptiste's idea)* Adaptive session length: stop early when the level is clear, run longer when it isn't | 🟡 **on by default since 2026-10-08** (3–7 min); calibration (AC-08) and client sign-off on the landing copy still open |
+| AD | "Jokers": don't penalise answers when the error looks like a speech-to-text error | 🟡 forgiveness rule built (4e1bb7c), admin display done (268a3ad); level replay (AD-06) to do |
 | AE | Score in steps of 5 instead of steps of 10 | ✅ built — axes in half points (prompt v3); replay over stored sessions to do |
-| AF | Questions still too hard for an A1 speaker | 🟡 A1 bank simplified (afd3376); code-picked A1, A1 warm-up, starting rung still open; sim re-run in progress |
+| AF | Questions still too hard for an A1 speaker | 🟡 A1 bank simplified (afd3376), code-picked A1 with fixed follow-ups (d76f6b4), A1 warm-up in place; starting rung and closed/choice style still open |
 | AG | Configurable "callback" when a score is available, visible in admin | 🟡 built, **not activated** (default URL https://www.elao-test.com/callback), shown on `/admin/system-config`; receiving side to agree with the client |
 | AH | Satisfaction form at the end of the test (beta period) | ✅ built differently from the proposal (commit 6334f69, migration 0012) — admin list column/summary to check |
 
@@ -241,11 +241,19 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **Feedback:** NL/DE: "Léa didn't seem to understand when I stopped talking, it froze several times" (NL test restarted 3×). ES test 1: "I said *no comprendo*, she didn't rephrase, I was stuck on question 2." ES test 2: "she didn't give me time to answer, the next question sometimes came as if I had answered; I answered 'what's your brother's name' but she stayed stuck on it."
 
-**Done (uncommitted)**
+**Done (a8f3baf, 2026-09-28)**
 - [x] **Y-01** Deaf-session bug: an empty or failed transcription returned while still holding the turn lock, so every later answer was buffered and never processed. `abandonTurn` releases it and shows "Je n'ai pas bien entendu — pouvez-vous répéter ?".
-- [x] **Y-02** "Je ne comprends pas" button + detection of non-comprehension phrases in all 6 languages (`lib/comprehension.ts`) → Léa re-asks the same question more simply; a second failure switches to an easy concrete topic.
+- [x] **Y-02** "Je ne comprends pas" button + detection of non-comprehension phrases in all 6 languages (`lib/comprehension.ts`) → Léa re-asks the same question more simply.
+- [x] **Y-03** (8e2dabc, 2026-10-08) **Drop the question after a second "didn't understand"**: in ES beginner session `f2566bf0`, repeated clicks got ~7 near-identical re-asks of one question (moving on was left to the model, which never did). The first clarify re-asks, and must reword. From the second in a row (`CLARIFY_GIVE_UP_ATTEMPT = 2`) the question is dropped: at A1/C1/C2 the code picks a new bank question, at A2–B2 the examiner gets a "drop the subject" direction. A question dropped via the button records a "struggled" step on the ladder and steps the rung down (ET never sees button clicks). The simulator mirrors the counter.
+
+**Built (committed 2026-10-11)**
+- [x] **Y-04** **Quiet mic: answers never ended** (`lib/turn-vad.ts`). The fixed speech threshold (RMS 0.008) failed on a quiet mic. AGC is off, the candidate's voice came in at ~0.01, frames flickered around the threshold, and every answer was dropped as sub-400 ms bursts (replayed offline, ES session of 2026-10-08). Now the threshold is **4 × a learned noise floor**, clamped to 0.003–0.02. The floor falls fast and rises slowly (~20 s), so a fan switching on is learned but pauses inside an answer don't move it. Short bursts close together are now **merged** into one turn (kept open up to 2.5 s of silence) instead of each being discarded.
+- [x] **Y-05** **Beginners cut off mid-answer**: in DE session `8512818e`, three answers in a row were cut at a ~1.7 s thinking pause ("Et ce… [pause] …und Butter"). The fragment went as the answer and the rest was buffered as the answer to the *next* question. `setExtendedPauseTolerance(bool)` became `setPauseZone(zone)`: Foundation (A1/A2) no longer gets the 1.2 s short-reply budget, only 2.5 s; Mastery (C2) keeps 4 s; B1–C1 unchanged. `doc/adaptive-levels-plan.md` §3.4 updated.
+- [x] **Y-06** **"Listening" came ~1 s late after a short question** (`lib/audio-player.ts`): TTS clips end in 0.7–1.1 s of padding silence (Gradium), and the avatar was reported done only at the end of the buffer. A quick answer landed while the app wasn't ready yet and the echo guard was still up. The player now reports done when the **voice** ends (last sample above −40 dBFS + 80 ms + output latency); end-of-buffer is kept as a fallback.
+- [x] **Y-07** **Starting level leaked across languages**: a signed-in user's remembered rung (`profiles.last_rung`) was applied whatever the session language, so a level reached in French started a Spanish session there. Now it only applies when the language matches (`app/page.tsx`), and a session with no level no longer overwrites `last_language` alone (`upsertProfilePreference` in `lib/sessions-service.ts`). The admin settings page copy says so.
 
 **To do**
+- [ ] **Y-08** Live check: one quiet-mic session, one A1/A2 session with hesitant answers (no mid-answer cut), and one session answering fast after a short question. Watch for the opposite failure: noise-floor adaptation letting room noise trigger turns.
 
 ---
 
@@ -294,7 +302,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **Design (Baptiste, 2026-09-30):** code picks the question at C1/C2 only; A1–B2 keep "the model picks from a slice"; every entry written in all 6 languages; bank kept in code with a read-only admin page for review.
 
-**Done (uncommitted)**
+**Done (f613f60, 2026-09-30)**
 - [x] **AA-01** Warm-up: the opening question comes from a warm-up bank (10 easy everyday questions), whatever the starting rung. It counts as a normal answer (client question 1 still open). Only the first question is a warm-up; a second one wasn't added.
 - [x] **AA-02** New examiner rule: never ask to argue for/against, argue the opposite, play a role or convince/justify to an imagined person. C1/C2 ladder descriptions rewritten around personal experience and reflection. The C1/C2 debate examples and the abstract switch seeds are deleted.
 - [x] **AA-03** Bank in `lib/question-bank/` (115 entries: warm-up 10, A1 15, A2 17, B1 17, B2 24, C1 16, C2 16), each in fr/en/nl-BE/es/it/de. A1–B2 ported from the old English lists and tagged by topic ("What is your name?" / "How old are you?" dropped as one-word answers). C1/C2 are new: 2 per topic, each with a simpler version and 2 follow-ups. FR + EN drafted first, the other 4 languages translated in the same pass → **needs native review**.
@@ -309,7 +317,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 ---
 
-## Track AB — Level results ⬜ (kept in plan)
+## Track AB — Level results 🟡
 
 **Feedback:** EN C2 → B2 (72), ES C1 → B2 (72), IT B1 → B2 (72), NL A2 → A1+, DE A2 → A1, DE A1 → A2; another tester EN B1 → B2 ("maybe overrated"), NL A2 → A2. Client: "without a starting level it's harder to reach C1/C2"; "not sure the new 2-step way is right — the previous model seemed better, the new one is harsher".
 
@@ -317,12 +325,12 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **To do**
 - [ ] **AB-01** After X ships: collect new tester sessions and inspect stored evaluations (axes, raw LLM score, bonus, fallback path) — especially any repeated 72.
-- [x] **AB-03** (2026-10-08, uncommitted) Scoring replay built in the new `analysis/` folder: `npm run analysis:scoring -- --scenario <name[,name]>` (`--list`, `--lang`, `--since`, `--source`). Scoring rules are data (`analysis/lib/rules.ts`, checked against the live `computeCompositeCefrScore` on every run — 59/59 today), scenarios in `analysis/scenarios.ts` (now overrides of the live rules: `llm-base`, `no-floor`, `floor-looser`, `no-wpm-fluency`, `bonus-8.5`, `bonus-3-axes`, `no-bonus`). Full guide in `analysis/README.md`; admin mention on `/admin/scoring`. Reports go to `analysis/reports/` (git-ignored). **First results (59 stored live sessions):** `c2-floor` moves 5 C1+ → C2 and nothing else; `wpm-fluency` alone moves nothing (axes only matter through the +5 % bonus; fluency 9 → 10 changes no level); `axis-mean` moves 42 of 59 up, 9 by more than two steps — confirms Track V finding 4 (averaging the axes inflates weaker candidates), do not ship. Note: the DB column `cefr_level` is the evaluator's level *before* the bonus; users see the composite.
+- [x] **AB-03** (59a8391, 2026-10-08) Scoring replay built in the new `analysis/` folder: `npm run analysis:scoring -- --scenario <name[,name]>` (`--list`, `--lang`, `--since`, `--source`). Scoring rules are data (`analysis/lib/rules.ts`, checked against the live `computeCompositeCefrScore` on every run — 59/59 today), scenarios in `analysis/scenarios.ts` (now overrides of the live rules: `llm-base`, `no-floor`, `floor-looser`, `no-wpm-fluency`, `bonus-8.5`, `bonus-3-axes`, `no-bonus`). Full guide in `analysis/README.md`; admin mention on `/admin/scoring`. Reports go to `analysis/reports/` (git-ignored). **First results (59 stored live sessions):** `c2-floor` moves 5 C1+ → C2 and nothing else; `wpm-fluency` alone moves nothing (axes only matter through the +5 % bonus; fluency 9 → 10 changes no level); `axis-mean` moves 42 of 59 up, 9 by more than two steps — confirms Track V finding 4 (averaging the axes inflates weaker candidates). **Activated anyway on 2026-10-08 and validated by Baptiste 2026-10-11** (see Track V); the scenario is now `llm-base` (the old formula) since axis-mean is the live rule. Note: the DB columns `cefr_level` / `global_score` keep the evaluator's own level and score from save time. Every screen (candidate, admin list, admin detail) shows the composite computed on read.
 - [ ] **AB-04** Faster promotion when no starting level is given (Track V "level-promotion detection": jump ≥ 2 rungs on a clearly stronger answer, guarded by evidence).
 - [ ] **AB-05** Low levels (NL/DE A2 → A1): re-check after Z-05 — bad transcripts at low levels probably pulled scores down.
 
 **⚠ finding (Baptiste's EN session `e96e95b8…`, 2026-09-30, B2+ 78 — should likely be C1):** axes fluency 9 / vocab-grammar 8 / communication 8, pronunciation 83.6 → only 1 axis ≥ 9, so no +5 % bonus (78 × 1.05 = 82 = C1). Causes, all on the system side:
-- [ ] **AB-06** **Pronunciation is penalised for recognition errors**: every correctly heard word scored 96, the misheard ones 16–42 (the assessment is run against the wrong reference text). Without them the average is ~90+ → bonus → C1. Ignore or down-weight words the recogniser was unsure of, or assess against a better transcript.
+- [x] **AB-06** (fixed by AD-02, 2026-10-05) **Pronunciation is penalised for recognition errors**: every correctly heard word scored 96, the misheard ones 16–42 (the assessment is run against the wrong reference text). Without them the average is ~90+ → bonus → C1. Ignore or down-weight words the recogniser was unsure of, or assess against a better transcript.
 - [x] **AB-07** (2026-10-08, rule enforced; the evaluator prompt is unchanged) **Judge ignores its own rubric**: 161 WPM (table says ≥ 145 → fluency 10) got 9; its summary ("near-native fluency… no significant weaknesses") matches the prompt's "→ C1, not B2" anchor yet it chose B2+. Enforce the WPM → fluency mapping in code rather than trusting the LLM; consider deriving the level from the axes instead of the LLM's `score_percent` (see Track V finding 5).
   - **Built:** `fluencyFromWpm` in `lib/cefr-score.ts` (`SCORING_RULES.fluencyFromWpm = true`) forces the fluency axis into the band `FLUENCY_WPM_BANDS` dictates (≥ 145 wpm → 10). **Guard (`WPM_RELIABLE`):** only with ≥ 3 answers, ≥ 100 words in total and a rate ≤ 220 wpm — without it a 7-word answer measured at 341 wpm would jump an A1 session to C1 once the axis feeds the base score. Needs the answer evidence, so new evaluations only; `/api/evaluate` also stores the enforced value, so the fluency bar matches the score. Backtest on all sessions: `npm run analysis:scoring -- --scenario no-wpm-fluency --evidence turns` (10 of 60 move: 9 up — strong speakers at ≥ 145 wpm — 1 down: a 125-wpm session the LLM had at 9 where the table says 8–8.5).
 - [ ] **AB-08** **Last answer had no pronunciation data**: the longest answer (100 words) came back from the fallback EO path with `words: []`, score 0 — correctly excluded from the average (count 5 of 6), but the best evidence was lost. Check why EO fell back on that turn.
@@ -330,7 +338,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 ---
 
-## Track AC — Adaptive session length 🟡 (shadow mode)
+## Track AC — Adaptive session length 🟡 (on by default since 2026-10-08)
 
 **Idea (Baptiste, 2026-09-30):** instead of a fixed length, keep asking while the level is uncertain and stop once it has settled — **min 3 min, max 7 min**. Addresses AB-09 (not enough room to show C1/C2), Track V (natives can't reach C2) and needlessly long sessions for clear-cut beginners.
 
@@ -340,9 +348,9 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **Stop rule** (`lib/session-length.ts`, pure, thresholds as constants at the top): settled when the last ET results show **bracketed** (last 4 within two adjacent rungs, ≥ 2 up/down reversals → estimate = highest rung answered "well"), **plateau** (3 × "adequate" at one rung), **ceiling** (2 × "well" at C2) or **floor** (2 × not-"well" at A1, or 5 answers in a row at A1 without climbing — added 2026-10-08 after ES session `f2566bf0`, where a true beginner's "well" answers to easy A1 questions kept breaking the first form). Gates: ≥ 5 judged answers; estimate ≥ B2 needs one answer ≥ 25 words at or above it.
 
-**Done (2026-09-30, uncommitted)**
+**Done (f613f60, 2026-09-30)**
 - [x] **AC-01** `lib/session-length.ts`: `evaluateStop`, `shouldCloseSession`, `LadderRecord`; checked on hand-made ladders (bracketed, plateau, ceiling, floor, too few answers, C2 without a long answer, still climbing) and the time bounds.
-- [x] **AC-02** `lib/session-config.ts`: `SESSION_LENGTH_MODE` (`"fixed"` | `"shadow"` | `"adaptive"`, now `"shadow"`), `SESSION_MIN_SECONDS` = 180, `SESSION_MAX_SECONDS` = 420. `?minutes=N` URL override (1–15) for fixed/shadow length, so testers can run 7-min calibration sessions.
+- [x] **AC-02** `lib/session-config.ts`: `SESSION_LENGTH_MODE` (`"fixed"` | `"shadow"` | `"adaptive"`, `"shadow"` at first, `"adaptive"` since AC-10), `SESSION_MIN_SECONDS` = 180, `SESSION_MAX_SECONDS` = 420. `?minutes=N` URL override (1–15) for fixed/shadow length, so testers can run 7-min calibration sessions.
 - [x] **AC-03** `app/page.tsx`: every ET result appended to the ladder (rung, verdict, next rung, words, time) — **the rung per turn is now stored**, a gap noted in Track V. The close effect uses `shouldCloseSession` (same graceful `__END__` path); `session_length_decision` client log event when an adaptive session would have closed. Adaptive mode counts down to the max.
 - [x] **AC-04** Storage: migration `0011_session_ladder.sql` (`sessions.ladder_json`), sent by the live save and the final save. Written by a separate best-effort update (`saveLadder`) and read separately in `getSessionDetail`, so an environment **without 0011 still saves and shows sessions** (ladder just missing, warning logged).
 - [x] **AC-05** Admin detail: "Difficulty ladder & session length" section (`components/LadderPanel.tsx`) — per-answer rung/verdict and "would stop at m:ss · level (reason)" vs actual length and final level.
@@ -353,11 +361,12 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 - [ ] **AC-08** Collect ~15–20 shadow sessions, including several `?minutes=7` runs at different levels.
   - **#1 (Baptiste, EN, 2026-09-30, `0d381874…`, 7:16, 8 answers, Mistral realtime):** final C1 82 → **C1+ 86** with bonus (axes 9/9/8, pron 90 — vs 84 on Gradium this morning, supports AB-06). Rule: **would stop at 4:42, "ceiling", estimate C2**. Final evaluator re-run on the first 5 answers only (×2) = **identical C1+ 86** → nothing lost by stopping early. Notes: ET said "well" to all 8 answers (C2 by 1:53), so the ladder estimate (C2) ≠ final level (C1+) — use it for the stop decision only, never as a score; strong speakers will mostly stop on "ceiling"; the binding constraint was the 5-answer gate (ceiling reached at 3:49 on answer 4), not the 3-min floor — long answers make 5 answers ≈ 5 min.
 - [x] **AC-10** (2026-10-08) **Adaptive length is now the default:** `SESSION_LENGTH_MODE = "adaptive"` in `lib/session-config.ts` (3–7 min; the session ends once the ladder has settled past 3:00, always at 7:00). The progress UI already showed answers given rather than a countdown; the examiner intro says "a few minutes" (6 languages); the French landing now reads "Votre niveau en quelques minutes" / "Une conversation de quelques minutes" (`SESSION_LENGTH_LABEL_FR`), replacing the client-approved "3 minutes" wording — wording confirmed by Baptiste 2026-10-08. `lib/session-cost.ts` `AVG_SESSION` deliberately left at its old values for now. The stop-rule thresholds were calibrated on one session only (a stored-ladder replay was considered and dropped). Revert = `"shadow"`.
-- Known quirk in shadow `?minutes=7` runs: Léa still announces "about 3 minutes".
+- Known quirk, only if the mode goes back to `"shadow"`: `?minutes=7` runs still announce "about 3 minutes".
+- Ladder steps also come from a question dropped via the "didn't understand" button (Y-03, recorded as "struggled"), so a beginner who keeps clicking can trigger the floor stop.
 
 ---
 
-## Track AD — "Jokers" for likely speech-to-text errors ⬜
+## Track AD — "Jokers" for likely speech-to-text errors 🟡
 
 **Feedback (2026-10-01):** study "jokers" so that some answers are not penalised when the error seems to come from the speech-to-text, not the speaker.
 
@@ -396,20 +405,20 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **Decision (Baptiste, 2026-10-01):** axes in **half points** (0, 0.5 … 10 = steps of 5 on 100).
 
-**Done (2026-10-01, uncommitted)**
-- [x] **AE-02** `lib/cefr-prompt.ts`: "HALF POINTS" rule in the dimension guide (a .5 when the speaker sits between two descriptors, no other decimals), schema comments, WPM → fluency bands 8–8.5 / 9–9.5 at the top. `CEFR_PROMPT_VERSION` bumped to **v3** (eval-lab rows stay distinguishable from v2).
+**Done (c3f46b8, 2026-10-05)**
+- [x] **AE-02** `lib/cefr-prompt.ts`: "HALF POINTS" rule in the dimension guide (a .5 when the speaker sits between two descriptors, no other decimals), schema comments, WPM → fluency bands 8–8.5 / 9–9.5 at the top. `CEFR_PROMPT_VERSION` bumped to **v3** (eval-lab rows stay distinguishable from v2; now v5, see Track V).
 - [x] New `parseCefrEvaluation()` (same file), used by all three callers (live `/api/evaluate`, eval lab `lib/cefr-eval.ts`, simulator): clamps each axis to 0–10 and rounds it to the nearest 0.5 whatever the model returns (8.7 → 8.5, "8.2" → 8, 11 → 10); `score_percent` rounded to an integer.
 - [x] **AE-03** Bonus rule unchanged: an axis must be **≥ 9** to count; **8.5 does not count** (comment in `lib/cefr-score.ts`, copy on `/admin/scoring`). To revisit with the Track V C2-floor rule.
 - [x] **AE-04** Display: `Bar` (`components/ScoreDisplay.tsx`) showed `Math.round(value)`, which would have turned 8.5 into 9. 0–10 bars now show one decimal ("8.5", "9", pronunciation /10 e.g. "9.1"). The admin score breakdown already shows axes ×10, so 8.5 appears as 85 there. `/admin/scoring` copy updated.
 - Existing sessions keep their whole-number axes; nothing is migrated.
 
 **To do**
-- [ ] **AE-05** Replay over stored sessions (AB-03 script): level changes old vs new, and check that the model actually uses half points (not only whole numbers).
+- [ ] **AE-05** Replay over stored sessions (AB-03 script, now available): level changes old vs new, and check that the model actually uses half points (not only whole numbers).
 - [x] **AE-06** (checked 2026-10-05) One live session to check the results screen and admin panel show the half points.
 
 ---
 
-## Track AF — Questions still too hard for A1 ⬜
+## Track AF — Questions still too hard for A1 🟡
 
 **Feedback (2026-10-01):** "Les questions posées à un user A1 sont encore trop dures, il faudrait vraiment simplifier."
 
@@ -430,13 +439,13 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 **To do**
 - [ ] **AF-01** Get the A1 tester's session (language, date) and read the questions actually asked and the rung per turn (`ladder_json`, Track AC).
 - [~] **AF-02** (afd3376, 2026-10-05) A1 bank rewritten: one short question per entry, no compound "X, and why?". Closed/choice style and fixed follow-ups not confirmed.
-- [x] **AF-03** (2026-10-07, uncommitted: A1 added to the code-picked rungs via `isCodePickedRung`, one fixed follow-up per A1 entry in 6 languages — native review needed; yes/no rule lifted at A1; family-01 made closed) Code-picked questions at A1 (reuse the C1/C2 `bankState` flow in `lib/examiner-prompt.ts`); lift the yes/no rule at A1.
+- [x] **AF-03** (d76f6b4, 2026-10-08: A1 added to the code-picked rungs via `isCodePickedRung`, one fixed follow-up per A1 entry in 6 languages — native review needed; yes/no rule lifted at A1; family-01 made closed) Code-picked questions at A1 (reuse the C1/C2 `bankState` flow in `lib/examiner-prompt.ts`); lift the yes/no rule at A1.
 - [x] **AF-04** (already in the code before this round: `easyOpening` + A1-bank opener for foundation starts) A1-style warm-up and one-sentence intro when the starting rung is A1/A2.
 - [x] **AF-06a** Batch tool: `npm run sim:batch -- --level A1 --lang fr --runs 10` (`scripts/sim-batch.ts`) plays N simulated sessions through the real examiner/ET/evaluator, computes per-turn metrics (understanding, question length, rung path, ET verdicts, final level vs simulated level) and writes `sim-runs/<date>-<level>/report.md` + an LLM analyst reading. Mistral is paced to ~26 req/min, so 10 sessions ≈ 15 min. Also works for A2/C1/C2 (`--level C1 --start C1`). The simulator now mirrors live's "I didn't understand" re-ask (it didn't before).
 - **Baseline, 2026-10-01 (FR, learner A1, examiner starting at A2, 10 sessions, *before* the clarify fix above):** final level A1 ×6 / A1+ ×4 (calibration fine). But: the opening line (intro + warm-up, 20–29 words) was **never** fully understood by the simulated A1 learner; only ~3-word questions ("Où habitez-vous ?") were understood in full; 80 % of sessions had at least one question not understood at all; ET judged short fragments ("Liège. Grande ville.") "well" (avg 9.8 words for "well" vs 9.4 for "struggled") so the ladder yo-yoed A1↔A2 and reached B1 in 4/10 sessions.
 - [~] **AF-06b** Re-run the baseline with the clarify fix, then after each AF change (AF-02…AF-04) with the same command, and compare `summary.json`.
   - **2026-10-07 re-run after `afd3376`** (10 sessions, `sim-runs/2026-10-07T08-58-23-A1/`) vs 10-05 run (5 sessions, before afd3376): fully understood 40 % (was 43), not understood 20 % (17), first question not fully understood 50 % (60), sessions with ≥ 1 question not understood 80 % (80); question length 8.3 words (8.3), > 12 words 4 % (9); ET verdicts well 56 / struggled 37 (46 / 40); sessions reaching 2 rungs above level 20 % (0); final level exact 70 % (60), A1 ×7 / A1+ ×3. **Conclusion: shorter, single-part questions did not improve comprehension** (~54 % of A1-rung questions still not fully understood); the ladder drifts up more (5/10 sessions went above A2, B1 questions 100 % not understood) because ET says "well" to fragments. Remaining levers: AF-03 (closed/choice questions, code-picked), AF-04 (one-sentence intro), ET strictness at A1.
-  - **2026-10-07 re-run after AF-03** (code-picked A1 questions + fixed follow-ups, 10 sessions, `sim-runs/2026-10-07T16-28-57-A1/`): fully understood **49 %** (40), not understood **9 %** (20), first question not fully understood **30 %** (50), sessions with ≥ 1 question not understood **60 %** (80); question length 8.8 words (8.3); ET struggled 29 / well 60; **ladder no longer climbs past A2** (0 sessions two rungs above level, no B1/B2 questions); final level exact 50 % (70): A1 ×5 / A1+ ×4 / A2 ×1 — the A2 and A1+ are an evaluator over-estimate to look at. Clear gain on comprehension and ladder drift; still ~47 % of A1 questions only partly understood (the simulated learner is strict). Not committed yet.
+  - **2026-10-07 re-run after AF-03** (code-picked A1 questions + fixed follow-ups, 10 sessions, `sim-runs/2026-10-07T16-28-57-A1/`): fully understood **49 %** (40), not understood **9 %** (20), first question not fully understood **30 %** (50), sessions with ≥ 1 question not understood **60 %** (80); question length 8.8 words (8.3); ET struggled 29 / well 60; **ladder no longer climbs past A2** (0 sessions two rungs above level, no B1/B2 questions); final level exact 50 % (70): A1 ×5 / A1+ ×4 / A2 ×1 — the A2 and A1+ are an evaluator over-estimate to look at. Clear gain on comprehension and ladder drift; still ~47 % of A1 questions only partly understood (the simulated learner is strict). Committed in d76f6b4.
 
 ---
 
@@ -446,7 +455,7 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 
 **Decision (Baptiste, 2026-10-01):** default URL `https://www.elao-test.com/callback`, **not activated**, but shown in the admin.
 
-**Done (2026-10-01, uncommitted)**
+**Done (c3f46b8, 2026-10-05)**
 - [x] **AG-02** `lib/score-callback.ts`: `SCORE_CALLBACK = { enabled: false, url, events: ["session.completed"], timeoutMs: 5000, maxAttempts: 3, signatureHeader: "X-Elao-Signature" }`. The URL defaults to `https://www.elao-test.com/callback`, overridable per environment with `SCORE_CALLBACK_URL`. The body is signed with HMAC-SHA256 (`sha256=<hex>`) when `SCORE_CALLBACK_SECRET` is set (both documented in `.env.example`). Delivery: POST, retries with backoff (1 s, 2 s) on network errors and 5xx, no retry on 4xx. Never throws.
 - [x] **Payload**: `event`, `session_id`, `user_id`, `language`, `duration_seconds`, `completed_at`, `level` + `score` (our headline composite score, bonus included, i.e. what the user sees), `confidence`, `axes` (pronunciation, fluency, vocabulary_grammar, communication, all 0–100), `report_url` (admin session page).
 - [x] **AG-03** Fired server-side from `POST /api/sessions` after the final save, via `next/server`'s `after()` (runs after the response, never delays or fails the save). It reloads the saved row (`getSessionForScoreCallback` in `lib/sessions-service.ts`). Skipped when disabled or when the session has no evaluation.
@@ -503,3 +512,5 @@ Source: the client's beta-tester feedback (EN/ES/IT/NL/DE/FR tests of 2026-09-24
 ## Files touched (this round)
 
 `lib/score-callback.ts` (new) · `app/api/sessions/route.ts` · `app/admin/(dashboard)/system-config/page.tsx` · `lib/cefr-prompt.ts` · `lib/cefr-eval.ts` · `app/api/evaluate/route.ts` · `components/ScoreDisplay.tsx` · `lib/cefr-score.ts` · `app/admin/(dashboard)/scoring/page.tsx` · `lib/question-bank/*` (new) · `app/admin/(dashboard)/question-bank/page.tsx` (new) · `components/AdminSidebar.tsx` · `lib/topic-domain.ts` · `lib/conversation-sim.ts` · `lib/session-length.ts` (new) · `components/LadderPanel.tsx` (new) · `supabase/migrations/0011_session_ladder.sql` (new) · `lib/session-config.ts` · `app/admin/(dashboard)/[id]/page.tsx` · `app/api/sessions/live/route.ts` · `lib/types.ts` · `app/api/sessions/audio-urls/route.ts` (new) · `app/api/gradium-token/route.ts` (new) · `lib/realtime-stt-gradium.ts` (new) · `lib/realtime-stt-config.ts` · `lib/realtime-stt.ts` · `lib/turn-vad.ts` · `lib/comprehension.ts` (new) · `lib/tts/providers/gradium.ts` (new) · `lib/sessions-service.ts` · `app/page.tsx` · `middleware.ts` · `lib/supabase-browser.ts` · `app/api/chat/route.ts` · `lib/conversation-prompts.ts` · `lib/examiner-prompt.ts` · `lib/tts/registry.ts` · `lib/turn-labels.ts` · `.env.example`
+
+Added since (Y-03…Y-07, AB, AD-05, V admin view): `lib/audio-player.ts` · `lib/comprehension.ts` · `lib/cefr-prompt.ts` (v5) · `lib/cefr-score.ts` · `analysis/*` (new) · `components/ScoreBreakdownPanel.tsx` · `app/admin/(dashboard)/settings/page.tsx` · `app/admin/(dashboard)/[id]/page.tsx` · `doc/adaptive-levels-plan.md`

@@ -27,6 +27,8 @@
  * recording, so there's no need for a second one.
  */
 
+import type { CefrZone } from "@/lib/cefr-rung";
+
 export interface TurnVadCallbacks {
   onSpeechStart?: () => void;
   /** spokenMs excludes the trailing silence wait — see lastVoiceMs in finalize(). */
@@ -41,13 +43,29 @@ export interface TurnVadCallbacks {
 }
 
 /**
- * RMS below this level is considered silence. Carried over from
- * whisper-stt.ts, which tuned it against a stream with noiseSuppression ON.
- * app/page.tsx's micStreamRef has noiseSuppression/AGC deliberately OFF (for
- * pronunciation-assessment fidelity), so this may need re-tuning against
- * real background noise once tested live.
+ * RMS below this level is considered silence — the starting value, before
+ * the noise floor (below) has been learned, and the base for the echo guard.
+ * Carried over from whisper-stt.ts, which tuned it against a stream with
+ * noiseSuppression ON.
  */
 const SILENCE_THRESHOLD = 0.008;
+/**
+ * Adaptive threshold: speech = NOISE_FLOOR_MULTIPLIER x the learned noise
+ * floor, clamped to [MIN_SPEECH_THRESHOLD, MAX_SPEECH_THRESHOLD]. A fixed
+ * 0.008 failed on a quiet mic: app/page.tsx's micStreamRef has AGC off, a
+ * candidate's voice came in at ~0.01 RMS, frames flickered around the
+ * threshold, and every answer was dropped as sub-MIN_SPEECH_MS bursts — the
+ * turn never ended until they spoke up (replayed offline, es session
+ * 2026-10-08). Their room sat at ~0.0001, so a floor-relative threshold has
+ * plenty of margin. The floor drops fast to quiet frames and rises slowly
+ * (time constant ~20 s), so pauses between words keep it pinned to the room
+ * even mid-answer, while a fan switching on still gets learned.
+ */
+const NOISE_FLOOR_MULTIPLIER = 4;
+const MIN_SPEECH_THRESHOLD = 0.003;
+const MAX_SPEECH_THRESHOLD = 0.02;
+const NOISE_FLOOR_FALL = 0.3;
+const NOISE_FLOOR_RISE = 0.005;
 /**
  * While the avatar's own TTS is playing, browser echoCancellation is the
  * only thing keeping its voice out of this mic stream, and it isn't perfect
@@ -76,7 +94,7 @@ const SILENCE_MS_SHORT = 1200;
 const SILENCE_MS_LONG = 2500;
 /**
  * Same role as SILENCE_MS_LONG, but used instead of it when the caller has
- * flagged (via setExtendedPauseTolerance) that the current question is at
+ * flagged (via setPauseZone) that the current question is at
  * the Mastery (C2) difficulty zone — see doc/adaptive-levels-plan.md §3.4.
  * A hard C2 question is designed to require real mid-answer thinking, not
  * just retrieval, so a speaker trailing off mid-sentence there deserves more
@@ -85,10 +103,24 @@ const SILENCE_MS_LONG = 2500;
  * tuning against real recordings, not a considered constant yet.
  */
 const SILENCE_MS_LONG_EXTENDED = 4000;
+/*
+ * Foundation zone (A1/A2): no SILENCE_MS_SHORT — a short utterance there is
+ * as often a hesitant start ("Et ce… [thinking] …und Butter") as a complete
+ * "Ja.", and cutting it at 1.2 s sent the fragment as the answer while the
+ * rest of it was buffered as the answer to the NEXT question (live DE session
+ * 8512818e: three answers in a row cut this way, ~1.7 s pauses).
+ */
 /** Speech below this duration is treated as a short reply for SILENCE_MS purposes (ms). */
 const SHORT_UTTERANCE_MS = 1500;
 /** Ignore audio bursts shorter than this — likely background noise/breath (ms). */
 const MIN_SPEECH_MS = 400;
+/**
+ * A segment still under MIN_SPEECH_MS when its silence timer runs out is kept
+ * open until this much silence (ms) instead of being dropped, so a run of
+ * short bursts close together (quiet or hesitant speech) adds up to one turn
+ * rather than each being discarded on its own.
+ */
+const BURST_MERGE_MS = SILENCE_MS_LONG;
 /**
  * How long the user must keep talking over the avatar before onBargeIn
  * fires (ms). Longer than MIN_SPEECH_MS: a barge-in stops the avatar
@@ -122,8 +154,10 @@ export class TurnVad {
   private avatarGuardTailTimer: ReturnType<typeof setTimeout> | null = null;
   private bargeInTimer: ReturnType<typeof setTimeout> | null = null;
   private bargeInFired = false;
-  /** Set by setExtendedPauseTolerance — true while the current question is at the Mastery (C2) difficulty zone. */
-  private extendedPauseTolerance = false;
+  /** Set by setPauseZone — the difficulty zone of the current question, which picks the silence budgets. */
+  private pauseZone: CefrZone = "core";
+  /** Learned background level (RMS) — see NOISE_FLOOR_MULTIPLIER. Seeded so the initial threshold is SILENCE_THRESHOLD. */
+  private noiseFloor = SILENCE_THRESHOLD / NOISE_FLOOR_MULTIPLIER;
   /** Last PRE_ROLL_FRAMES sub-threshold frames while not speaking (copies — the browser reuses its buffers). */
   private preRoll: Float32Array[] = [];
 
@@ -149,11 +183,11 @@ export class TurnVad {
     silentGain.connect(this.audioContext.destination);
   }
 
-  /** Tell the VAD whether the current question is at the Mastery (C2) difficulty
-   *  zone, so mid-answer thinking pauses get a longer silence budget before the
-   *  turn is considered finished — see SILENCE_MS_LONG_EXTENDED above. */
-  setExtendedPauseTolerance(enabled: boolean) {
-    this.extendedPauseTolerance = enabled;
+  /** Tell the VAD the difficulty zone of the current question: Mastery (C2)
+   *  gets a longer budget for mid-answer thinking pauses (SILENCE_MS_LONG_EXTENDED),
+   *  Foundation (A1/A2) never uses the short-reply budget (see above). */
+  setPauseZone(zone: CefrZone) {
+    this.pauseZone = zone;
   }
 
   /** Tell the VAD whether the avatar's TTS is currently audible, so it can raise its threshold against echo/bleed-through. */
@@ -174,7 +208,15 @@ export class TurnVad {
 
   private handleAudio(float32: Float32Array) {
     const rms = Math.sqrt(float32.reduce((s, v) => s + v * v, 0) / float32.length);
-    const threshold = this.avatarSpeaking ? ECHO_GUARD_THRESHOLD : SILENCE_THRESHOLD;
+    // Echo guard stays absolute: leaked avatar voice isn't room noise, and
+    // learning the floor from it would raise the threshold for no reason.
+    if (!this.avatarSpeaking) {
+      const rate = rms < this.noiseFloor ? NOISE_FLOOR_FALL : NOISE_FLOOR_RISE;
+      this.noiseFloor += (rms - this.noiseFloor) * rate;
+    }
+    const threshold = this.avatarSpeaking
+      ? ECHO_GUARD_THRESHOLD
+      : Math.min(MAX_SPEECH_THRESHOLD, Math.max(MIN_SPEECH_THRESHOLD, this.noiseFloor * NOISE_FLOOR_MULTIPLIER));
 
     if (rms > threshold) {
       this.lastVoiceMs = Date.now();
@@ -211,14 +253,27 @@ export class TurnVad {
       this.cb.onAudioFrame?.(float32);
       if (this.silenceTimer === null) {
         const spokenMs = Date.now() - this.speechStartMs;
-        const longBudget = this.extendedPauseTolerance ? SILENCE_MS_LONG_EXTENDED : SILENCE_MS_LONG;
-        const silenceMs = spokenMs < SHORT_UTTERANCE_MS ? SILENCE_MS_SHORT : longBudget;
-        this.silenceTimer = setTimeout(() => this.finalize(), silenceMs);
+        const longBudget = this.pauseZone === "mastery" ? SILENCE_MS_LONG_EXTENDED : SILENCE_MS_LONG;
+        const silenceMs = spokenMs < SHORT_UTTERANCE_MS && this.pauseZone !== "foundation" ? SILENCE_MS_SHORT : longBudget;
+        this.silenceTimer = setTimeout(() => this.onSilenceTimeout(), silenceMs);
       }
     } else {
       this.preRoll.push(float32.slice());
       if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
     }
+  }
+
+  /** Silence budget ran out — finalize, unless the segment is still too short
+   *  to count, in which case wait out BURST_MERGE_MS for more speech first. */
+  private onSilenceTimeout() {
+    this.silenceTimer = null;
+    const spokenMs = this.lastVoiceMs - this.speechStartMs;
+    const quietMs = Date.now() - this.lastVoiceMs;
+    if (spokenMs < MIN_SPEECH_MS && quietMs < BURST_MERGE_MS) {
+      this.silenceTimer = setTimeout(() => this.finalize(), BURST_MERGE_MS - quietMs);
+      return;
+    }
+    this.finalize();
   }
 
   private finalize() {

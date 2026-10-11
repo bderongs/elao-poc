@@ -156,14 +156,15 @@ comment, today's thresholds were carried over from an unrelated retired
 experiment and never re-tuned) — flagged as a validation step, not a
 one-shot constant change.
 
-**Implemented:** `TurnVad.setExtendedPauseTolerance(enabled)` (kept
-CEFR-agnostic on purpose — it takes a bool, not a rung, so `lib/turn-vad.ts`
-doesn't need to know what C2 is); `app/page.tsx` calls it wherever
-`currentRungRef`/`conversationSettingsRef` changes (ET result, settings
-fetch, session reset, VAD creation) with `rung === "C2"`. When enabled, the
-long-silence budget becomes `SILENCE_MS_LONG_EXTENDED = 4000` (vs. 2500
-default) — a starting guess, not yet validated against real recordings (see
-§8). B1/B2/C1 timing is untouched.
+**Implemented:** `TurnVad.setPauseZone(zone)` (takes the zone, not a rung);
+`app/page.tsx` calls it wherever `currentRungRef`/`conversationSettingsRef`
+changes (ET result, settings fetch, session reset, VAD creation, dropped
+question). Mastery: the long-silence budget becomes `SILENCE_MS_LONG_EXTENDED
+= 4000` (vs. 2500 default) — a starting guess, not yet validated against real
+recordings (see §8). Foundation (added 2026-10-08): short utterances no
+longer get the 1.2 s short-reply budget, only the 2.5 s one — a beginner's
+"Et ce…" followed by a thinking pause was being sent as the whole answer
+(DE session `8512818e`). B1/B2/C1 timing is untouched.
 
 ## 4. Direct starting-level mode (URL parameter)
 
@@ -225,7 +226,7 @@ otherwise.
    replay check as (1); `CEFR_PROMPT_VERSION` was bumped to `v2` so replay
    results are distinguishable from pre-change scoring.
 3. ✅ VAD pause-awareness (3.4) — code in place
-   (`setExtendedPauseTolerance`). **Still to do:** needs live test sessions
+   (`setPauseZone`). **Still to do:** needs live test sessions
    at C2, not just replay (VAD is a live timing behaviour the transcript
    replay tooling doesn't exercise). Record a handful of real C2-target
    sessions before/after and listen for premature cutoffs; tune

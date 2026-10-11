@@ -23,10 +23,13 @@ function currentScoreOf(category: ScoreCategory): number | null {
 export function ScoreBreakdownPanel({
   breakdown,
   speechace,
+  scoreNotes = [],
   runControls,
 }: {
   breakdown: ScoreBreakdown;
   speechace: SpeechaceScores | null;
+  /** Which scoring rules moved the current global score (scoreWithRules notes) — shown under the explanation. */
+  scoreNotes?: string[];
   /** RunEvaluationGear, when this session can run batch evaluations — rendered at the top-right of the panel. */
   runControls?: React.ReactNode;
 }) {
@@ -60,9 +63,12 @@ export function ScoreBreakdownPanel({
         title={<CategoryTitle anchor="score-global" label="Global score" />}
       >
         <p style={cardCopy}>
-          One holistic AI judgment across the four dimensions below, not an average — plus a flat +5% bonus if two of
-          them hit 9-10/10.
+          The average of the four dimensions below (×10), plus a flat +5% if two of them reach 9/10, and lifted to 90
+          (C2) for a clearly excellent session — see the scoring page.
         </p>
+        {scoreNotes.length > 0 && (
+          <p style={{ ...cardCopy, color: adminColors.faint }}>This session: {scoreNotes.join(" · ")}</p>
+        )}
         <ComparisonTable
           metrics={[
             {

@@ -529,11 +529,13 @@ function normalizeToRung(level: string | null): import("@/lib/cefr-rung").CefrRu
 async function upsertProfilePreference(userId: string, language: string, cefrLevel: string | null): Promise<void> {
   const rung = normalizeToRung(cefrLevel);
   const supabase = getSupabaseServer();
+  // Language and rung are one pair: a session with no level (e.g. abandoned
+  // after a few seconds, no evaluation) must not overwrite the language and
+  // leave it attached to a rung reached in another language.
   const { error } = await supabase
     .from("profiles")
     .update({
-      last_language: language,
-      ...(rung ? { last_rung: rung } : {}),
+      ...(rung ? { last_language: language, last_rung: rung } : {}),
       last_used_at: new Date().toISOString(),
     })
     .eq("id", userId);

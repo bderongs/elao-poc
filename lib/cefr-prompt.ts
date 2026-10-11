@@ -11,7 +11,7 @@ import { buildEvaluatorForgivenessNote } from "@/lib/recognition-forgiveness";
 // Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
 // every session_evaluations row with it, so scoring drift across prompt
 // edits stays distinguishable from drift across models.
-export const CEFR_PROMPT_VERSION = "v4"; // v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
+export const CEFR_PROMPT_VERSION = "v5"; // v5: C2 description no longer says "five dimensions"; v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
 
 // Single source of truth for the WPM → fluency mapping baked into
 // CEFR_SYSTEM_PROMPT below — also read by the admin system-config page to
@@ -120,7 +120,7 @@ B2: Developed, relevant answers; good comprehension; some complex structures eve
 B2-C1: Natural delivery, idiomatic range, rare errors, handles abstract topics well.
 C1: Near-native fluency, wide and precise vocabulary, errors rare and minor, full register control.
     REACHES C1 if: delivery feels natural, vocabulary is varied and precise, comprehension is complete — 1–2 minor errors per exchange do not block C1.
-C2: Indistinguishable from an educated native speaker across all five dimensions.
+C2: Indistinguishable from an educated native speaker on every dimension.
 
 LEVEL-APPROPRIATE EXPECTATIONS — read this before scoring:
 - Judge a candidate against what their apparent level actually requires, not against a fixed idea of "good answers". Do NOT penalise an A1/A2-range transcript for lacking vocabulary range, complex structures, or elaboration it was never asked to produce — a run of short, correct, on-topic answers at that level is strong evidence for that band, not a ceiling that caps the score below it.

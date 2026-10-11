@@ -24,6 +24,7 @@ import { latestEvaluationResult, isEvalProviderPending, LIVE_CONVERSATION_MODEL_
 import { sessionDisplayStatus } from "@/lib/session-status";
 import { RECOGNITION_FORGIVENESS, evaluatorAllowance } from "@/lib/recognition-forgiveness";
 import { formatDateTime } from "@/lib/format-date";
+import { computeSessionMainScore, scoreWithRules, SCORING_RULES } from "@/lib/cefr-score";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,13 @@ export default async function AdminSessionDetailPage({
   // run so "our own CEFR assessment" still has something to show.
   const cefrResult =
     session.evaluation_json ?? evaluations.find((e) => !e.error && e.result_json)?.result_json ?? null;
+
+  // The level shown in the header and the ladder panel is the same composite
+  // the CefrPanel and the session list show (computed on read with today's
+  // SCORING_RULES) — not the stored cefr_level column, which is the
+  // evaluator's own label from when the session was saved.
+  const mainScore = computeSessionMainScore({ ...session, latest_eval_json: cefrResult });
+  const scoreNotes = cefrResult ? scoreWithRules(cefrResult, session.pronunciation_scores, SCORING_RULES).notes : [];
 
   const breakdown = buildScoreBreakdown({
     session,
@@ -142,9 +150,9 @@ export default async function AdminSessionDetailPage({
         <h1 className={styles.pageTitle} style={{ marginBottom: 0 }}>
           {session.language ?? "—"} · {formatDateTime(session.created_at)}
         </h1>
-        {session.cefr_level && (
-          <span className={styles.badge} style={{ background: wordColor(session.global_score ?? 0) }}>
-            {session.cefr_level}
+        {mainScore && (
+          <span className={styles.badge} style={{ background: wordColor(mainScore.score) }}>
+            {mainScore.level}
           </span>
         )}
       </div>
@@ -193,6 +201,7 @@ export default async function AdminSessionDetailPage({
       <ScoreBreakdownPanel
         breakdown={breakdown}
         speechace={session.speechace_scores}
+        scoreNotes={scoreNotes}
         runControls={
           canRunBatchEvaluation ? (
             <RunEvaluationGear
@@ -228,7 +237,7 @@ export default async function AdminSessionDetailPage({
       {session.ladder_json && (
         <div style={{ marginTop: 24 }}>
           <CollapsibleSection title="Difficulty ladder & session length">
-            <LadderPanel ladder={session.ladder_json} durationSeconds={session.duration_seconds} finalLevel={session.cefr_level} />
+            <LadderPanel ladder={session.ladder_json} durationSeconds={session.duration_seconds} finalLevel={mainScore?.level ?? null} />
           </CollapsibleSection>
         </div>
       )}

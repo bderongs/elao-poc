@@ -18,6 +18,11 @@
  * and taps the real signal directly).
  */
 
+/** A TTS sample below this (abs, -40 dBFS) is padding silence, not voice. */
+const VOICE_END_LEVEL = 0.01;
+/** Margin after the last voiced sample before reporting the avatar done (s) — covers a word's soft release. */
+const VOICE_END_PAD_S = 0.08;
+
 export class StreamingAudioPlayer {
   private audioContext: AudioContext | null = null;
   /** Receives both TTS chunks and mic audio for the session recording. */
@@ -28,7 +33,7 @@ export class StreamingAudioPlayer {
   private isPlaying = false;
   private onAmplitudeChange?: (amp: number) => void;
   private onSentenceStart?: (text: string, durationMs: number) => void;
-  /** setTimeout ids for pending onSentenceStart callbacks — cancelled on stop() so
+  /** setTimeout ids for pending onSentenceStart and voice-end callbacks — cancelled on stop() so
    *  nothing fires after the player (and the AudioContext it timed against) is gone. */
   private pendingSentenceTimeouts: ReturnType<typeof setTimeout>[] = [];
   /** Sources currently scheduled/playing, so interrupt() can cut them off immediately. */
@@ -150,6 +155,11 @@ export class StreamingAudioPlayer {
       float32[float32.length - 1 - i] *= i / ramp;
     }
 
+    // TTS clips end in padding silence (Gradium: 0.7–1.1 s measured on short
+    // questions) — find where the voice actually stops, see voiceEndAt below.
+    let lastVoiced = float32.length - 1;
+    while (lastVoiced > 0 && Math.abs(float32[lastVoiced]) < VOICE_END_LEVEL) lastVoiced--;
+
     // RMS pour piloter l'amplitude de la bouche de l'avatar
     const rms = Math.sqrt(sumSq / int16.length);
     this.onAmplitudeChange?.(Math.min(1, rms * 4));
@@ -176,6 +186,24 @@ export class StreamingAudioPlayer {
     this.isPlaying = true;
     this.activeSources.push(source);
 
+    // Report "done" (amp 0) when the last chunk's VOICE ends, not when its
+    // buffer does: waiting out the padding left the user staring at a silent
+    // avatar for ~1 s before app/page.tsx showed "listening" and dropped
+    // lib/turn-vad.ts's echo guard, so a quick answer to a short question
+    // landed while the app wasn't ready. outputLatency: the voice reaches
+    // the speakers that much after the engine plays it.
+    const chunkEnd = this.nextStartTime;
+    const outputLatency = ctx.outputLatency || ctx.baseLatency || 0;
+    const voiceEndAt = Math.min(chunkEnd, startAt + (lastVoiced + 1) / 24000 + VOICE_END_PAD_S + outputLatency);
+    const voiceEndTimeout = setTimeout(() => {
+      // Still the last chunk queued? (another sentence may have arrived since)
+      if (this.isPlaying && this.nextStartTime === chunkEnd) {
+        this.isPlaying = false;
+        this.onAmplitudeChange?.(0);
+      }
+    }, Math.max(0, (voiceEndAt - now) * 1000));
+    this.pendingSentenceTimeouts.push(voiceEndTimeout);
+
     if (text && this.onSentenceStart) {
       const delayMs = Math.max(0, (startAt - now) * 1000);
       const durationMs = buffer.duration * 1000;
@@ -187,7 +215,8 @@ export class StreamingAudioPlayer {
 
     source.onended = () => {
       this.activeSources = this.activeSources.filter((s) => s !== source);
-      if (ctx.currentTime >= this.nextStartTime - 0.05) {
+      // Fallback only — voiceEndTimeout above normally fires first.
+      if (this.isPlaying && ctx.currentTime >= this.nextStartTime - 0.05) {
         this.isPlaying = false;
         this.onAmplitudeChange?.(0);
       }
