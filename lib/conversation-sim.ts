@@ -14,8 +14,11 @@
  * - ET and TT are awaited before the next examiner turn, so the rung and
  *   topic state are never stale (live they're best-effort/non-blocking).
  * - No audio: no pronunciation or WPM, so the evaluation runs without
- *   pronunciationContext — the fluency dimension is judged from text alone.
- * - Session length is a fixed number of learner answers, not a 3-min timer.
+ *   pronunciationContext — the fluency dimension is judged from text alone —
+ *   unless `audioProxy` supplies synthetic figures (lib/sim-audio-proxy.ts).
+ * - Session length is a number of learner answers, not a timer: fixed
+ *   (`answers`), or "adaptive" — the live stop rule (evaluateStop) on the
+ *   answer count, between MIN_ANSWERS and `maxAnswers`.
  *
  * At A1/A2 the learner never reads the examiner's text directly: a separate
  * "listening" call first reduces each examiner turn to what a learner of that
@@ -29,6 +32,7 @@ import { guardStepUp, type CefrRung } from "@/lib/cefr-rung";
 import type { CefrResult } from "@/lib/types";
 import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralComplete } from "@/lib/mistral";
+import { repairExaminerReply, unspokenTail } from "@/lib/examiner-guard";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { classifyTopicDomain } from "@/lib/topic-tracking";
 import { CLARIFY_GIVE_UP_ATTEMPT, isNonComprehension } from "@/lib/comprehension";
@@ -37,7 +41,9 @@ import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import type { LlmProvider } from "@/lib/llm/types";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
 import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence } from "@/lib/cefr-prompt";
-import { computeCompositeCefrScore, type CompositeCefrScore } from "@/lib/cefr-score";
+import { computeCompositeCefrScore, fluencyFromWpm, type CompositeCefrScore } from "@/lib/cefr-score";
+import { countWords, evaluateStop, type LadderStep, type StopDecision } from "@/lib/session-length";
+import { audioProxyAverage, type SimAudioProxy } from "@/lib/sim-audio-proxy";
 
 /** Mirrors app/page.tsx's MAX_DOMAIN_STREAK. */
 const MAX_DOMAIN_STREAK = 2;
@@ -71,6 +77,14 @@ export interface SimConfig {
    *  Anthropic gives a learner from a different vendor than the Mistral
    *  examiner/scorer, so it doesn't share their blind spots. */
   learnerProvider: "anthropic" | "mistral";
+  /** "fixed" (default): exactly `answers` answers. "adaptive": stop once the
+   *  live stop rule converges (lib/session-length.ts), at most `maxAnswers`. */
+  lengthMode?: "fixed" | "adaptive";
+  /** Cap for "adaptive" (default 12). */
+  maxAnswers?: number;
+  /** Synthetic pronunciation/WPM handed to the evaluator as if from audio, so the
+   *  live 4-axis score and the WPM→fluency clamp run. Absent = text only. */
+  audioProxy?: SimAudioProxy;
 }
 
 export type SimEvent =
@@ -87,7 +101,14 @@ export type SimEvent =
   | { type: "topic"; turn: number; domain: TopicDomain | null; streak: number }
   | { type: "learner"; turn: number; text: string; heard?: string; understanding?: Understanding }
   | { type: "et"; turn: number; verdict: string; previousRung: CefrRung; nextRung: CefrRung }
-  | { type: "evaluation"; result: CefrResult; composite: CompositeCefrScore }
+  | { type: "stop"; turn: number; decision: StopDecision; capped: boolean }
+  | {
+      type: "evaluation";
+      result: CefrResult;
+      composite: CompositeCefrScore;
+      /** With an audioProxy: a second evaluation of the same answers without it (text only, 3 axes, no WPM clamp). */
+      textOnly?: { result: CefrResult; composite: CompositeCefrScore };
+    }
   | { type: "error"; stage: string; message: string }
   | { type: "done"; durationMs: number };
 
@@ -234,7 +255,10 @@ export async function* runConversationSimulation(
   signal?: AbortSignal,
 ): AsyncGenerator<SimEvent> {
   const startedAt = Date.now();
-  const { language, learnerLevel, stepSize, answers } = config;
+  const { language, learnerLevel, stepSize } = config;
+  const adaptive = config.lengthMode === "adaptive";
+  const answers = adaptive ? config.maxAnswers ?? 12 : config.answers;
+  const steps: LadderStep[] = [];
   const persona = pickPersona(language);
   const learner = getLlmProvider(config.learnerProvider);
   const learnerSystem = learnerSystemPrompt(language, learnerLevel, persona);
@@ -266,13 +290,20 @@ export async function* runConversationSimulation(
     const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
       language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt: clarify ? clarifyAttempt : undefined,
     });
-    const text = await mistralComplete({
-      model: mistralChatModel(),
-      system,
-      messages: [...requestHistory, { role: "user", content: userMessage }],
-      maxTokens: 300,
-      context: `${runId}:examiner-${turn}`,
-    });
+    const messages: Msg[] = [...requestHistory, { role: "user", content: userMessage }];
+    let text = await mistralComplete({ model: mistralChatModel(), system, messages, maxTokens: 300, context: `${runId}:examiner-${turn}` });
+    // Same post-check as app/api/chat/route.ts (no question / same question again).
+    if (userMessage !== "__END__") {
+      const repaired = await repairExaminerReply({
+        language,
+        fullText: text,
+        pending: unspokenTail(text),
+        previousExaminerTurns: requestHistory.filter((m) => m.role === "assistant").map((m) => m.content),
+        regenerate: (direction) =>
+          mistralComplete({ model: mistralChatModel(), system: system + direction, messages, maxTokens: 300, context: `${runId}:examiner-${turn}:repair` }),
+      });
+      if (repaired) text = repaired.fullText;
+    }
     usedQuestions = updatedUsedQuestions;
     bankState = updatedBankState;
     return { text: text.trim(), targetRung, avoidDomain, switchToDomain };
@@ -335,10 +366,21 @@ export async function* runConversationSimulation(
       }
       yield { type: "et", turn, verdict: et?.verdict ?? "unavailable", previousRung, nextRung: rung };
 
+      // Adaptive length — the live stop rule on the ladder so far (clock = answer count).
+      let stopNow = turn === answers;
+      if (adaptive) {
+        if (et) steps.push({ atSeconds: turn, rung: previousRung, verdict: et.verdict, nextRung: rung, words: countWords(answer) });
+        const decision = evaluateStop(steps);
+        if (decision.converged || stopNow) {
+          stopNow = true;
+          yield { type: "stop", turn, decision, capped: !decision.converged };
+        }
+      }
+
       // app/page.tsx sends the answer both inside `history` and as
       // `userMessage` — mirrored as-is so the examiner sees what it sees live.
       const newHistory: Msg[] = [...history, { role: "user", content: answer }];
-      const isLast = turn === answers;
+      const isLast = stopNow;
       // Live (app/page.tsx): a spoken "je ne comprends pas"-style answer makes the examiner
       // re-ask the same question more simply instead of moving on (lib/comprehension.ts).
       const clarify = !isLast && isNonComprehension(answer);
@@ -361,6 +403,7 @@ export async function* runConversationSimulation(
         const recentExchange = newHistory.slice(-2).map((m) => `${m.role}: ${m.content}`).join("\n");
         yield await classify(turn, reply.text, recentExchange);
       }
+      if (isLast) break;
     }
   } catch (e) {
     yield { type: "error", stage: "conversation", message: String(e) };
@@ -368,20 +411,30 @@ export async function* runConversationSimulation(
     return;
   }
 
-  // End-of-session CEFR evaluation — same call as app/api/evaluate/route.ts, text only.
+  // End-of-session CEFR evaluation — same call as app/api/evaluate/route.ts.
   try {
     const userTurns = history.filter((m) => m.role === "user").map((m) => m.content);
     const provider = getLlmProvider(LIVE_CONVERSATION_MODEL_ID);
-    const raw = await provider.complete({
-      model: provider.modelLabel,
-      system: CEFR_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: buildEvaluationUserMessage(language, userTurns) }],
-      maxTokens: 1500,
-      json: true,
-      context: `${runId}:cefr-eval`,
-    });
-    const result = withAnswerEvidence(parseCefrEvaluation(raw), userTurns);
-    yield { type: "evaluation", result, composite: computeCompositeCefrScore(result, null) };
+    const evaluate = async (audio: SimAudioProxy | undefined, tag: string) => {
+      const proxy = audio ? audioProxyAverage(audio, userTurns) : undefined;
+      const raw = await provider.complete({
+        model: provider.modelLabel,
+        system: CEFR_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: buildEvaluationUserMessage(language, userTurns, proxy) }],
+        maxTokens: 1500,
+        json: true,
+        context: `${runId}:${tag}`,
+      });
+      const result = withAnswerEvidence(parseCefrEvaluation(raw), userTurns);
+      // AB-07, as app/api/evaluate/route.ts: the speaking rate dictates the fluency band.
+      if (proxy && result.dimensions.fluency !== null) {
+        result.dimensions.fluency = fluencyFromWpm(result.dimensions.fluency, proxy.wpm, result.answer_count ?? null, result.words_per_answer ?? null);
+      }
+      return { result, composite: computeCompositeCefrScore(result, proxy ?? null) };
+    };
+    const main = await evaluate(config.audioProxy, "cefr-eval");
+    const textOnly = config.audioProxy ? await evaluate(undefined, "cefr-eval-text") : undefined;
+    yield { type: "evaluation", ...main, ...(textOnly ? { textOnly } : {}) };
   } catch (e) {
     yield { type: "error", stage: "evaluation", message: String(e) };
   }

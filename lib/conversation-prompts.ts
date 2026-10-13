@@ -99,7 +99,7 @@ export function buildQuestionBank(
 // on-the-fly translation step (and the room for creative reinterpretation)
 // entirely. Formal register (vous/Sie/usted/Lei/u) matches the register the
 // exam persona already uses in practice for each language.
-const PIVOT_WORDS: Record<ConvLang, string> = {
+export const PIVOT_WORDS: Record<ConvLang, string> = {
   fr: `"D'accord." / "Je vois." / "Entendu." / "Très bien." / "Bien sûr." / "En effet." / "Effectivement." / "Je comprends." / "Voilà."`,
   "nl-BE": `"Juist." / "Inderdaad." / "Ik snap het." / "Uiteraard." / "Oké." / "Duidelijk." / "Goed zo." / "Zeker."`,
   es: `"Ya veo." / "De acuerdo." / "Entendido." / "Por supuesto." / "En efecto." / "Claro." / "Muy bien." / "Comprendo."`,
@@ -107,13 +107,22 @@ const PIVOT_WORDS: Record<ConvLang, string> = {
   de: `"Verstehe." / "In Ordnung." / "Klar." / "Genau." / "Gut." / "Ach so." / "Natürlich."`,
   en: `"Right." / "Fair enough." / "I see." / "All right." / "Of course." / "Indeed." / "Understood." / "Got it." / "Okay, then."`,
 };
-const BRIDGE_PHRASES: Record<ConvLang, string> = {
+export const BRIDGE_PHRASES: Record<ConvLang, string> = {
   fr: `"Passons à autre chose." / "Autre chose :" / "Parlons d'autre chose." / "Et sinon," / "Dites-moi," / "Changeons un peu de sujet."`,
   "nl-BE": `"Laten we iets anders bespreken." / "Iets anders:" / "En verder," / "Vertel eens," / "Even iets anders:"`,
   es: `"Pasemos a otra cosa." / "Otra cosa:" / "Hablemos de otra cosa." / "Y por otro lado," / "Cuénteme,"`,
   it: `"Passiamo ad altro." / "Un'altra cosa:" / "Parliamo d'altro." / "E invece," / "Mi dica,"`,
-  de: `"Kommen wir zu etwas anderem." / "Etwas anderes:" / "Sprechen wir über etwas anderes." / "Und sonst," / "Sagen Sie mir,"`,
+  de: `"Kommen wir zu etwas anderem." / "Etwas anderes:" / "Sprechen wir über etwas anderes." / "Und sonst," / "Sagen Sie mal,"`,
   en: `"Let's move on." / "On a different note," / "Tell me about something else." / "Moving on," / "Now, tell me,"`,
+};
+/** Formal address the examiner keeps throughout (none to enforce in English). */
+const FORMAL_ADDRESS: Record<ConvLang, string> = {
+  fr: `"vous", never "tu"`,
+  "nl-BE": `"u", never "je"/"jij"`,
+  es: `"usted", never "tú"`,
+  it: `"Lei", never "tu"`,
+  de: `"Sie", never "du"`,
+  en: "",
 };
 const FOLLOWUP_PROMPTS: Record<ConvLang, string> = {
   fr: `"Pourquoi cela ?" / "Donnez-moi un exemple." / "Pouvez-vous en dire plus ?"`,
@@ -202,7 +211,7 @@ Strict rules:
 ${
   isFoundation
     ? `- When changing topics, do NOT use any bridge phrase or announcement — a beginner loses the question behind the extra words. Go straight to the new question (after a pivot word, or none).`
-    : `When changing topics, you may (not every time — often a question that naturally shifts subject needs no announcement) use ONE of these ready-made bridges verbatim, varied each turn: ${bridges}. Keep it to those few words — do not over-explain the transition, and do not combine a bridge with a recap of the previous answer.`
+    : `When changing topics, you may (not every time — often a question that naturally shifts subject needs no announcement) use ONE of these ready-made bridges verbatim, varied each turn: ${bridges}. Keep it to those few words — do not over-explain the transition, and do not combine a bridge with a recap of the previous answer. A bridge ending in a comma runs straight into the question as one sentence: carry on in lower case, and never follow it with a second instruction of the same kind (not "Tell me, tell me about…" — use one or the other).`
 }
 - Never ask the speaker to argue for or against a position, to argue the opposite of what they think, to play a role, or to convince or justify something to an imagined person (a doctor, a friend, an employer). Higher levels are tested through depth on the speaker's own experience and views, never through exam-style tasks.
 - Ask only what any adult can answer from general experience or opinion. Never require local, specialist or factual knowledge — this exam tests the language, not what the speaker happens to know — and if they say they do not know something (e.g. a city they barely know), drop that subject instead of pressing them for arguments about it.
@@ -212,8 +221,11 @@ ${
     ? `- At A1, short closed and either/or questions ("X or Y?", "Do you like X?") are welcome and preferred — a beginner must be able to answer them. Never make a question longer or more abstract to avoid a yes/no answer.`
     : `- Avoid questions answerable with a single word or a bare "yes"/"no" — when a factual question is unavoidable, pair it with a "why" or "which" so a full-sentence answer is the natural response, not an accident.`
 }
-- No bullet points, no markdown — this is voice.
-- NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "I understand", "I understood", "Understood", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead.
+- No bullet points, no markdown — this is voice.${
+  FORMAL_ADDRESS[language] ? `\n- Always address the speaker formally (${FORMAL_ADDRESS[language]}) in every turn, follow-ups and rephrasings included — never switch to the informal form.` : ""
+}
+- Never tack "yes or no?" (in any language) onto the end of a question — an either/or question already gives the choice, and a yes/no question needs no label.
+- NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead — every pivot in that list is allowed, even where it resembles a word here.
 - Do NOT be encouraging or complimentary about the learner's language ability. Stay neutral and professional.
 - COMPREHENSION: if the speaker says they did not understand, cannot answer in ${languageName}, find the question too hard, or asks you to repeat — in any language — do NOT acknowledge it with a pivot and move to a new question. Ask the SAME question again in simpler words — shorter, the most common everyday words, or as an easy choice ("X or Y?"), with no pivot word before it.
 ${

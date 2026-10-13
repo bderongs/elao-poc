@@ -122,6 +122,8 @@ export function ConversationSimulator() {
         };
       case "evaluation":
         return { ...state, evaluation: { result: e.result, composite: e.composite } };
+      case "stop":
+        return state; // adaptive length is a batch-script option; the admin simulator runs fixed-length
       case "error":
         return { ...state, errors: [...state.errors, `${e.stage}: ${e.message}`] };
       case "done":

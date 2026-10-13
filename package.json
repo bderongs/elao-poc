@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "sim:batch": "tsx scripts/sim-batch.ts",
+    "sim:matrix": "tsx scripts/sim-matrix.ts",
     "analysis:scoring": "tsx analysis/scoring-replay.ts"
   },
   "dependencies": {

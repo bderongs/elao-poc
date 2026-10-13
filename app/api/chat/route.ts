@@ -1,6 +1,7 @@
 import type { ConvLang } from "@/lib/conversation-prompts";
 import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
-import { mistralChatModel, mistralStreamText } from "@/lib/mistral";
+import { mistralChatModel, mistralComplete, mistralStreamText } from "@/lib/mistral";
+import { repairExaminerReply, SPOKEN_SENTENCE_RE } from "@/lib/examiner-guard";
 import { logServerEvent } from "@/lib/server-log";
 import type { CefrRung } from "@/lib/cefr-rung";
 import { chatProcessLabel } from "@/lib/turn-labels";
@@ -137,7 +138,7 @@ export async function POST(req: Request) {
         // with no meaningful caption to show for it (the caption is the
         // fragment's own text, e.g. "1.", easy to miss entirely).
         let m;
-        while ((m = pending.match(/^([\s\S]*?[A-Za-zÀ-ÖØ-öø-ÿ]{2}[\s\S]*?[.!?…])\s/))) {
+        while ((m = pending.match(SPOKEN_SENTENCE_RE))) {
           if (!loggedFirstTtsFired) {
             loggedFirstTtsFired = true;
             logServerEvent("chat_first_tts_fired", { turnLogId: logId, process });
@@ -165,6 +166,31 @@ export async function POST(req: Request) {
             logServerEvent("chat_first_llm_token", { turnLogId: logId, process });
           }
           emit(piece);
+        }
+
+        // The last sentence (normally the question) is still unspoken here: a reply with
+        // no question, or the same question again, gets one corrective regeneration
+        // before it is spoken (lib/examiner-guard.ts).
+        if (userMessage !== "__END__") {
+          const repaired = await repairExaminerReply({
+            language,
+            fullText,
+            pending,
+            previousExaminerTurns: history.filter((m) => m.role === "assistant").map((m) => m.content),
+            regenerate: (direction) =>
+              mistralComplete({
+                model: mistralChatModel(),
+                system: system + direction,
+                messages: [...history.map(({ role, content }) => ({ role, content })), { role: "user", content: userMessage }],
+                maxTokens: 300,
+                context: `${process}:repair`,
+              }),
+          });
+          if (repaired) {
+            logServerEvent("chat_reply_repaired", { turnLogId: logId, process, problem: repaired.problem, before: fullText, after: repaired.fullText });
+            fullText = repaired.fullText;
+            pending = repaired.pending;
+          }
         }
 
         if (pending.trim()) {

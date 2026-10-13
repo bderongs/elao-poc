@@ -61,6 +61,7 @@ export function buildSimulationRecord(
   let cefrLevel: string | null = null;
   let globalScore: number | null = null;
   let durationMs = 0;
+  let stop: Extract<SimEvent, { type: "stop" }> | null = null;
   let pendingRung = start.config.startingRung as string;
   let lastAnswerWords = 0;
   // Simulated session clock: no timer exists, so steps are just ordered.
@@ -97,6 +98,9 @@ export function buildSimulationRecord(
         cefrLevel = e.composite.level;
         globalScore = Math.round(e.composite.score);
         break;
+      case "stop":
+        stop = e;
+        break;
       case "error":
         errors.push(`${e.stage}: ${e.message}`);
         break;
@@ -113,7 +117,15 @@ export function buildSimulationRecord(
     evaluation,
     cefrLevel,
     globalScore,
-    ladder: { mode: "fixed", minSeconds: 0, maxSeconds: 0, steps, wouldStopAt: null, estimatedLevel: null, reason: null },
+    ladder: {
+      mode: start.config.lengthMode === "adaptive" ? "adaptive" : "fixed",
+      minSeconds: 0,
+      maxSeconds: 0,
+      steps,
+      wouldStopAt: stop ? stop.turn : null,
+      estimatedLevel: stop?.decision.estimatedLevel ?? null,
+      reason: stop ? (stop.capped ? "max_reached" : stop.decision.reason) : null,
+    },
     simulation: {
       config: start.config,
       persona: start.persona,

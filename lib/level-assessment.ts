@@ -40,7 +40,7 @@ Given the question asked and the speaker's answer (transcribed by speech recogni
 - "adequate": meaning clear but short, hesitant, simple structures, or a minor comprehension wobble.
 - "struggled": very short or off-topic, errors block meaning, needed the question repeated, fell back to another language, or near-silence.
 
-Return ONLY JSON, no markdown fences: {"verdict": "well"|"adequate"|"struggled"} — at A1/A2 also include "strong": true|false as described below.`;
+Return ONLY JSON, no markdown fences: {"reason": "<one short sentence on how the answer compares with this rung>", "verdict": "well"|"adequate"|"struggled"} — at A1/A2 also include "strong": true|false as described below. Write the reason first and make the verdict follow from it.`;
 
 // Small, rung-conditional addenda to the base judging criteria above — see
 // doc/adaptive-levels-plan.md §3.3. B1/B2/C1 (the tuned, working range) get
@@ -78,7 +78,9 @@ export async function assessTranscript(params: {
           content: `Current rung: ${params.currentRung}\nQuestion asked: "${params.questionAsked}"\nSpeaker's answer: "${params.userAnswer}"`,
         },
       ],
-      maxTokens: 60,
+      // Room for the one-sentence reason: without it the bare verdict flipped between
+      // "struggled" and "well" on the same long answer at A1 (sim-runs/matrix-2026-10-12T15-55-27).
+      maxTokens: 160,
       json: true,
       context: params.process,
     });
