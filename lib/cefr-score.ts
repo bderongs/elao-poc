@@ -29,12 +29,16 @@ export interface CompositeCefrScore {
  * never drift from the live formula. See analysis/README.md.
  */
 export interface ScoringRules {
-  /** "llm" = the evaluator's holistic score_percent. "axis-mean" = mean of the available axes (pronunciation, fluency, vocabulary/grammar, communication) × 10. */
+  /** "llm" = the evaluator's holistic score_percent. "axis-mean" = mean of the available axes (pronunciation, fluency, vocabulary/grammar, communication), mapped to 0–100 by `axisCurve`. */
   baseScore: "llm" | "axis-mean";
-  /** Clamp the LLM's fluency axis into the band the speaking rate dictates (FLUENCY_WPM_BANDS) — only when the rate is trustworthy, see WPM_RELIABLE. Needs the answer evidence; sessions without it are left as the LLM scored them. */
-  fluencyFromWpm: boolean;
-  /** Excellence bonus: `pct` % on top of the base score when `minAxes` of the axes reach `axisThreshold` (0–10 scale; 8.5 does not count at 9). */
-  bonus: { minAxes: number; axisThreshold: number; pct: number };
+  /** Axis mean (0–10) → score (0–100), piecewise linear through these [mean, score] points (ascending). null = mean × 10. */
+  axisCurve: [number, number][] | null;
+  /** Pronunciation engine score (0–100) → pronunciation axis (0–10), piecewise linear through these [score, axis] points. The engines squeeze every level into ~65–82, so a weak speaker gets ~8/10; a curve stretches that range. null = score ÷ 10. */
+  pronunciationCurve: [number, number][] | null;
+  /** Speaking rate vs. the LLM's fluency axis (FLUENCY_WPM_BANDS), only when the rate is trustworthy (WPM_RELIABLE) and the answer evidence is there. "cap" = the rate's band caps fluency, never raises it. "band" = clamped into the band, raised or capped (AB-07, 2026-10-08 → 2026-10-14). "off" = the LLM's value as is. */
+  fluencyFromWpm: "cap" | "band" | "off";
+  /** Excellence bonus: `pct` % on top of the base score when `minAxes` of the axes reach `axisThreshold` (0–10 scale; 8.5 does not count at 9). null = off. */
+  bonus: null | { minAxes: number; axisThreshold: number; pct: number };
   /** A floor that lifts a clearly excellent session to `floor`. null = off. Needs the answer evidence stamped on the evaluation (answer_count, words_per_answer); sessions without it never get the floor. */
   c2Floor: null | {
     floor: number;
@@ -44,19 +48,37 @@ export interface ScoringRules {
     minAnswers: number;
     minWordsPerAnswer: number;
   };
+  /**
+   * C2 needs proof, not just high axes: at most `maxSpeakerErrors` genuine
+   * vocabulary/grammar errors in the whole conversation (the jokers — the
+   * evaluator's speaker_errors) and at least `minC2AnswersWell` answers to
+   * C2-bank questions judged "well" (c2_answers_well, stamped at evaluation
+   * time). A score in the C2 band without both is held at `cap`. Sessions
+   * evaluated before the evidence existed (2026-10-14) never pass. null = off.
+   */
+  c2Gate: null | { maxSpeakerErrors: number; minC2AnswersWell: number; cap: number };
 }
 
-/** Activated 2026-10-08 (Baptiste): axis mean as the base, the Track V C2 floor, and the WPM→fluency table enforced in code (AB-07). */
+/**
+ * Activated 2026-10-14 (Baptiste, after a C1 speaker was rated C2): the axis
+ * mean goes through a curve so the evaluator's C1 band (8–9 per axis) lands
+ * in C1/C1+ instead of C2 (a mean of 9 is 87, C2 needs ~9.5); no +5 % bonus
+ * and no C2 floor (both lifted C1 sessions into C2); the speaking rate only
+ * caps fluency; and C2 needs the evidence gate above.
+ */
 export const SCORING_RULES: ScoringRules = {
   baseScore: "axis-mean",
-  fluencyFromWpm: true,
-  bonus: { minAxes: 2, axisThreshold: 9, pct: 5 },
-  c2Floor: { floor: 90, minAxesHigh: 3, axisHigh: 9, noAxisBelow: 8, minAnswers: 5, minWordsPerAnswer: 20 },
+  axisCurve: [[0, 0], [8, 80], [9.5, 90], [10, 100]],
+  pronunciationCurve: null,
+  fluencyFromWpm: "cap",
+  bonus: null,
+  c2Floor: null,
+  c2Gate: { maxSpeakerErrors: 2, minC2AnswersWell: 2, cap: 89 },
 };
 
 /**
  * A speaking rate measured on a handful of words is noise (one 7-word answer
- * measured at 341 wpm), so the WPM→fluency clamp only applies when there is
+ * measured at 341 wpm), so the WPM→fluency rule only applies when there is
  * enough speech behind the number and the rate is plausible.
  */
 export const WPM_RELIABLE = { minAnswers: 3, minWords: 100, maxWpm: 220 };
@@ -64,6 +86,20 @@ export const WPM_RELIABLE = { minAnswers: 3, minWords: 100, maxWpm: 220 };
 export interface ScoreEvidence {
   answers: number | null;
   wordsPerAnswer: number | null;
+  /** Genuine vocabulary/grammar errors the evaluator counted (speaker_errors.length); null when the evaluation predates the field. */
+  speakerErrors: number | null;
+  /** Answers to C2-bank questions judged "well" (c2_answers_well); null when the evaluation predates the field. */
+  c2AnswersWell: number | null;
+}
+
+/** The evidence stamped on an evaluation — what the live score uses. */
+export function storedEvidence(result: CefrResult): ScoreEvidence {
+  return {
+    answers: result.answer_count ?? null,
+    wordsPerAnswer: result.words_per_answer ?? null,
+    speakerErrors: Array.isArray(result.speaker_errors) ? result.speaker_errors.length : null,
+    c2AnswersWell: result.c2_answers_well ?? null,
+  };
 }
 
 export interface ScoreOutcome extends CompositeCefrScore {
@@ -87,11 +123,18 @@ function wpmBands(): WpmBand[] {
 }
 
 /**
- * The fluency axis forced into the band the speaking rate dictates
- * (FLUENCY_WPM_BANDS) — returned unchanged when the rate is not trustworthy
- * (WPM_RELIABLE) or the answer evidence is missing. Idempotent.
+ * The fluency axis held to the band the speaking rate dictates
+ * (FLUENCY_WPM_BANDS): "cap" (live) only lowers it to the band's top, "band"
+ * also raises it to the band's bottom. Returned unchanged when the rate is
+ * not trustworthy (WPM_RELIABLE) or the answer evidence is missing. Idempotent.
  */
-export function fluencyFromWpm(fluency: number, wpm: number, answers: number | null, wordsPerAnswer: number | null): number {
+export function fluencyFromWpm(
+  fluency: number,
+  wpm: number,
+  answers: number | null,
+  wordsPerAnswer: number | null,
+  mode: "cap" | "band" = "cap",
+): number {
   const reliable =
     wpm > 0 &&
     wpm <= WPM_RELIABLE.maxWpm &&
@@ -103,23 +146,44 @@ export function fluencyFromWpm(fluency: number, wpm: number, answers: number | n
   const bands = wpmBands();
   // Last band whose lower bound the rate reaches (handles rates like 34.6 that fall between two integer-bounded bands).
   const b = [...bands].reverse().find((x) => wpm >= x.min) ?? bands[0];
-  return Math.min(b.fluencyHi, Math.max(b.fluencyLo, fluency));
+  const capped = Math.min(b.fluencyHi, fluency);
+  return mode === "band" ? Math.max(b.fluencyLo, capped) : capped;
+}
+
+/** Piecewise-linear lookup of `x` on `curve` (ascending [x, y] points), clamped at both ends. */
+function onCurve(x: number, curve: [number, number][]): number {
+  if (x <= curve[0][0]) return curve[0][1];
+  for (let i = 1; i < curve.length; i++) {
+    const [x0, y0] = curve[i - 1];
+    const [x1, y1] = curve[i];
+    if (x <= x1) return y0 + ((x - x0) / (x1 - x0)) * (y1 - y0);
+  }
+  return curve[curve.length - 1][1];
+}
+
+/** Piecewise-linear lookup of an axis mean on `curve`; null = × 10. */
+function axisMeanToScore(mean: number, curve: [number, number][] | null): number {
+  return curve ? onCurve(mean, curve) : mean * 10;
 }
 
 export function scoreWithRules(
   result: CefrResult,
   pronunciationAvg: PronunciationAvg | null,
   rules: ScoringRules,
-  evidence: ScoreEvidence = { answers: result.answer_count ?? null, wordsPerAnswer: result.words_per_answer ?? null },
+  evidence: ScoreEvidence = storedEvidence(result),
 ): ScoreOutcome {
   const notes: string[] = [];
-  const pronScore = pronunciationAvg ? pronunciationAvg.pronunciation / 10 : null;
+  const pronScore = pronunciationAvg
+    ? rules.pronunciationCurve
+      ? Math.round(onCurve(pronunciationAvg.pronunciation, rules.pronunciationCurve) * 2) / 2
+      : pronunciationAvg.pronunciation / 10
+    : null;
 
   let fluency = result.dimensions.fluency;
-  if (rules.fluencyFromWpm && fluency !== null && pronunciationAvg) {
-    const clamped = fluencyFromWpm(fluency, pronunciationAvg.wpm, evidence.answers, evidence.wordsPerAnswer);
-    if (clamped !== fluency) notes.push(`fluency ${fluency}→${clamped} (${Math.round(pronunciationAvg.wpm)} wpm)`);
-    fluency = clamped;
+  if (rules.fluencyFromWpm !== "off" && fluency !== null && pronunciationAvg) {
+    const adjusted = fluencyFromWpm(fluency, pronunciationAvg.wpm, evidence.answers, evidence.wordsPerAnswer, rules.fluencyFromWpm);
+    if (adjusted !== fluency) notes.push(`fluency ${fluency}→${adjusted} (${Math.round(pronunciationAvg.wpm)} wpm)`);
+    fluency = adjusted;
   }
   const present = [pronScore, fluency, result.dimensions.vocabulary_grammar, result.dimensions.communication].filter(
     (v): v is number => v !== null,
@@ -127,13 +191,17 @@ export function scoreWithRules(
 
   let baseScore = result.score_percent;
   if (rules.baseScore === "axis-mean" && present.length) {
-    baseScore = Math.round((present.reduce((a, b) => a + b, 0) / present.length) * 10);
-    if (baseScore !== result.score_percent) notes.push(`base ${result.score_percent}→${baseScore} (axis mean)`);
+    const mean = present.reduce((a, b) => a + b, 0) / present.length;
+    baseScore = Math.round(axisMeanToScore(mean, rules.axisCurve));
+    if (baseScore !== result.score_percent) notes.push(`base ${result.score_percent}→${baseScore} (axis mean ${Math.round(mean * 100) / 100})`);
   }
 
-  const highCount = present.filter((v) => v >= rules.bonus.axisThreshold).length;
-  let score = highCount >= rules.bonus.minAxes ? Math.min(100, Math.round(baseScore * (1 + rules.bonus.pct / 100))) : baseScore;
-  if (score !== baseScore) notes.push(`+${rules.bonus.pct}% bonus`);
+  let score = baseScore;
+  const bonus = rules.bonus;
+  if (bonus && present.filter((v) => v >= bonus.axisThreshold).length >= bonus.minAxes) {
+    score = Math.min(100, Math.round(baseScore * (1 + bonus.pct / 100)));
+    if (score !== baseScore) notes.push(`+${bonus.pct}% bonus`);
+  }
 
   const f = rules.c2Floor;
   if (f && score < f.floor && evidence.answers !== null && evidence.wordsPerAnswer !== null) {
@@ -145,8 +213,23 @@ export function scoreWithRules(
     }
   }
 
-  // The evaluator's own level label is kept only when nothing moved its number.
-  const level = score === result.score_percent ? (result.level ?? scoreToLevel(score)) : scoreToLevel(score);
+  const g = rules.c2Gate;
+  if (g && score > g.cap && scoreToLevel(score) === "C2") {
+    const missing: string[] = [];
+    if (evidence.speakerErrors === null) missing.push("no error count");
+    else if (evidence.speakerErrors > g.maxSpeakerErrors) missing.push(`${evidence.speakerErrors} errors > ${g.maxSpeakerErrors}`);
+    if (evidence.c2AnswersWell === null) missing.push("no C2-question evidence");
+    else if (evidence.c2AnswersWell < g.minC2AnswersWell) missing.push(`${evidence.c2AnswersWell} C2 answers "well" < ${g.minC2AnswersWell}`);
+    if (missing.length) {
+      score = g.cap;
+      notes.push(`C2 gate → ${g.cap} (${missing.join(", ")})`);
+    }
+  }
+
+  // The evaluator's own level label is kept only when nothing moved its number
+  // — and never a "C2" label on a score outside the C2 band (the gate's job).
+  const kept = score === result.score_percent ? result.level : undefined;
+  const level = kept && !(kept === "C2" && scoreToLevel(score) !== "C2") ? kept : scoreToLevel(score);
   return { score, level, notes };
 }
 
@@ -154,8 +237,8 @@ export function scoreWithRules(
  * "Our" global score for a session: the evaluator's four dimensions
  * (pronunciation from our own audio engine, fluency/vocabulary_grammar/
  * communication from the LLM, the last three in half points) combined by
- * `SCORING_RULES` — mean of the axes, +5 % when ≥ 2 axes reach 9 (8.5 does
- * not count), and a C2 floor for clearly excellent sessions. Single source of
+ * `SCORING_RULES` — mean of the axes through the axis curve, with C2 held
+ * back unless the evidence gate passes. Single source of
  * truth for "our global score", shared by the live CefrPanel display and the
  * Speechace comparison — anywhere the app needs to say "here is our one
  * overall number" it should call this rather than reading
@@ -211,7 +294,9 @@ export function computeSessionMainScore(session: ScorableSession): SessionMainSc
   }
   if (session.speechace_scores?.overall != null) {
     const score = Math.round(session.speechace_scores.overall);
-    return { score, level: scoreToLevel(score), source: "speechace" };
+    // The level ELAO actually gave (its export, scripts/calibration-set.ts) — our bands put Speechace's 90 at C2 where ELAO says C1.
+    const reference = session.speechace_scores.reference?.oral_level?.replace(/\s*\(.*\)|\.\d+/g, "").trim();
+    return { score, level: reference || scoreToLevel(score), source: "speechace" };
   }
   if (session.pronunciation_scores?.score != null) {
     const score = Math.round(session.pronunciation_scores.score);

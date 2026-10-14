@@ -7,9 +7,8 @@ import styles from "@/components/admin.module.css";
 const label: React.CSSProperties = { fontSize: 13, lineHeight: 1.6, color: adminColors.text };
 const linkStyle: React.CSSProperties = { color: adminColors.ink, textDecoration: "underline dotted" };
 
-// Fake, but complete: every field filled in, and the +5% bonus actually
-// triggers (pronunciation and fluency both >= 9/10), so the card
-// demonstrates the bonus rather than just the base case.
+// Fake, but complete: every field filled in — a typical C1 profile (axes 8–9,
+// mean 8.5), so the card shows the curve keeping it in C1.
 const exampleResult: CefrResult = {
   candidate: "Example",
   language: "English",
@@ -107,17 +106,22 @@ export default function ScoringGuidePage() {
         <p style={label}>
           Global score = the average of the four scores below (<a href="#score-pronunciation" style={linkStyle}>Pronunciation</a>,{" "}
           <a href="#score-fluency" style={linkStyle}>Fluency</a>, <a href="#score-vocab" style={linkStyle}>Vocab &amp; Gram.</a>, and{" "}
-          <a href="#score-communication" style={linkStyle}>Communication</a>), on a 0-100 scale, converted to a level
-          (like B2 or C1) in 5-point steps. Before 2026-10-08 it was the AI&apos;s own overall judgement instead of the
-          average.
+          <a href="#score-communication" style={linkStyle}>Communication</a>), put on a 0-100 scale and converted to a
+          level (like B2 or C1) in 5-point steps. Before 2026-10-08 it was the AI&apos;s own overall judgement instead of
+          the average.
+        </p>
+        <p style={label}>
+          Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). Up to an average of 8
+          the scale is simply × 10 (7 → 70, B2; 8 → 80, C1). Above 8 it is stretched, because the AI scores a C1
+          speaker 8-9 on each dimension: an average of 9 gives 87 (C1+), and C2 (90) needs an average of 9.5. Example
+          above: average 8.5 → {composite.score}, {composite.level}.
         </p>
         <p style={{ ...label, marginBottom: 0 }}>
-          Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). Two rules apply on top
-          of the average. <strong>Bonus:</strong> if two of the four hit 9/10 or more (8.5 doesn&apos;t count), the score
-          gets a flat +5% (capped at 100). Example above: average 85, Pronunciation (9) and Fluency (9) both qualify →
-          89, C1+. <strong>C2 floor:</strong> a clearly excellent session — at least 3 of the 4 at 9 or more, none
-          below 8, at least 5 answers averaging 20+ words — is lifted to 90 (C2). The floor only applies to sessions
-          evaluated since 2026-10-08.
+          <strong>C2 needs proof:</strong> a score in the C2 band is held at 89 (C1+) unless the AI counted at most 2
+          genuine vocabulary/grammar errors in the whole conversation (the two &quot;jokers&quot;) <em>and</em> the
+          candidate answered at least 2 of the C2 questions well. Sessions from before 2026-10-14 don&apos;t have that
+          evidence, so they can&apos;t show C2. From 2026-10-08 to 2026-10-14 a +5% bonus and a &quot;C2 floor&quot;
+          applied on top of the average; both lifted C1 speakers into C2 and were removed.
         </p>
       </ExplainerCard>
 
@@ -156,9 +160,12 @@ export default function ScoringGuidePage() {
 
       <ExplainerCard id="score-fluency" accent={accentFluency} title="Fluency">
         <p style={{ ...label, marginBottom: 0 }}>
-          Scored by the same AI reading the transcript, but anchored to something measurable: how many words were
-          spoken per minute, taken from the recording. A fixed scale converts that speaking rate into the 0-10 score (in half points)
-          — roughly 140 words/min lands at 9-9.5/10. It&apos;s not a free judgment call: the score is forced into the band the rate dictates, as long as there is enough speech to measure it reliably (at least 3 answers and 100 words, and a plausible rate). Applies to sessions evaluated since 2026-10-08.
+          Scored by the same AI reading the transcript, with a measurable limit: how many words were spoken per
+          minute, taken from the recording. A fixed scale gives the most fluency each speaking rate allows (in half
+          points) — e.g. roughly 120 words/min allows at most 8.5/10. The rate can only lower the AI&apos;s score, never
+          raise it: speaking fast doesn&apos;t earn a 10, the AI has to hear native-like delivery (no searching for
+          words, no restarts). Applies when there is enough speech to measure the rate reliably (at least 3 answers
+          and 100 words, and a plausible rate). From 2026-10-08 to 2026-10-14 the rate also raised the score.
         </p>
       </ExplainerCard>
 
@@ -167,7 +174,10 @@ export default function ScoringGuidePage() {
           Scored by the AI reading the transcript: vocabulary range and grammatical accuracy. It also checks the{" "}
           <a href="#score-pronunciation" style={linkStyle}>Pronunciation</a> score: at 60/100 or above, odd or
           wrong-looking words in the transcript are assumed to be mistakes made turning speech into text, not real
-          speaker errors, and aren&apos;t penalized.
+          speaker errors, and aren&apos;t penalized. That benefit of the doubt stops at the top: for 9/10 or more (and
+          for C1+/C2) only 2 errors in the whole conversation are let off as &quot;jokers&quot;, and every further one
+          counts. The AI lists the errors it counted; that list also decides whether C2 is possible (see{" "}
+          <a href="#score-global" style={linkStyle}>Global score</a>).
         </p>
       </ExplainerCard>
 
@@ -186,7 +196,7 @@ export default function ScoringGuidePage() {
 
       <ExplainerCard title="Changing the scoring? Replay it first">
         <p style={label}>
-          Before shipping a change to the formula (bonus, level thresholds, a floor for natives…), replay it on the
+          Before shipping a change to the formula (the curve, level thresholds, the C2 gate…), replay it on the
           sessions already stored to see which ones would change level. It is a developer tool: nothing is changed
           in the database and no AI is called.
         </p>

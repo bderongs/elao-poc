@@ -4,7 +4,9 @@ import {
   buildEvaluationUserMessage,
   parseCefrEvaluation,
   withAnswerEvidence,
+  withC2Evidence,
 } from "@/lib/cefr-prompt";
+import type { LadderStep } from "@/lib/session-length";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import { getProvider } from "@/lib/llm/registry";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
@@ -22,10 +24,12 @@ interface EvalRequest {
   language: ConvLang;
   userTurns: string[];
   pronunciationContext?: SttContext | null;
+  /** The session's difficulty ladder — counts the C2-question answers the C2 gate needs. */
+  ladderSteps?: LadderStep[];
 }
 
 export async function POST(req: Request) {
-  const { language, userTurns, pronunciationContext } = (await req.json()) as EvalRequest;
+  const { language, userTurns, pronunciationContext, ladderSteps } = (await req.json()) as EvalRequest;
 
   if (!userTurns.length) {
     return NextResponse.json(
@@ -51,8 +55,8 @@ export async function POST(req: Request) {
     });
 
     // Strips markdown fences, normalises dimensions to half points (Track AE)
-    const evaluation = withAnswerEvidence(parseCefrEvaluation(text), userTurns);
-    // AB-07: the speaking rate dictates the fluency band — store the enforced value so the bar users see matches the score.
+    const evaluation = withC2Evidence(withAnswerEvidence(parseCefrEvaluation(text), userTurns), ladderSteps ?? []);
+    // The speaking rate caps fluency — store the capped value so the bar users see matches the score.
     if (evaluation.dimensions.fluency !== null && pronunciationContext) {
       evaluation.dimensions.fluency = fluencyFromWpm(
         evaluation.dimensions.fluency,

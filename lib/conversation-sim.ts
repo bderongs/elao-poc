@@ -40,9 +40,10 @@ import { pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import type { LlmProvider } from "@/lib/llm/types";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
-import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence } from "@/lib/cefr-prompt";
+import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence, withC2Evidence } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore, fluencyFromWpm, type CompositeCefrScore } from "@/lib/cefr-score";
 import { countWords, evaluateStop, type LadderStep, type StopDecision } from "@/lib/session-length";
+import { questionById } from "@/lib/question-bank";
 import { audioProxyAverage, type SimAudioProxy } from "@/lib/sim-audio-proxy";
 
 /** Mirrors app/page.tsx's MAX_DOMAIN_STREAK. */
@@ -357,6 +358,8 @@ export async function* runConversationSimulation(
 
       // ET — awaited here (non-blocking live, see header comment).
       const previousRung = rung;
+      // The bank question this answer replies to — bankState still holds the last examiner turn's, as live.
+      const questionRung = questionById(bankState.currentId)?.rung ?? null;
       const et = await getEtProvider(LIVE_ET_PROVIDER_ID).assess({
         language, questionAsked: question, userAnswer: answer, currentRung: rung, turnLogId: `${runId}-${turn}`, stepSize,
       });
@@ -366,10 +369,10 @@ export async function* runConversationSimulation(
       }
       yield { type: "et", turn, verdict: et?.verdict ?? "unavailable", previousRung, nextRung: rung };
 
-      // Adaptive length — the live stop rule on the ladder so far (clock = answer count).
+      // The ladder is recorded in every mode (the C2 gate counts its C2 answers); adaptive length also stops on it (clock = answer count).
+      if (et) steps.push({ atSeconds: turn, rung: previousRung, verdict: et.verdict, nextRung: rung, words: countWords(answer), questionRung });
       let stopNow = turn === answers;
       if (adaptive) {
-        if (et) steps.push({ atSeconds: turn, rung: previousRung, verdict: et.verdict, nextRung: rung, words: countWords(answer) });
         const decision = evaluateStop(steps);
         if (decision.converged || stopNow) {
           stopNow = true;
@@ -425,8 +428,8 @@ export async function* runConversationSimulation(
         json: true,
         context: `${runId}:${tag}`,
       });
-      const result = withAnswerEvidence(parseCefrEvaluation(raw), userTurns);
-      // AB-07, as app/api/evaluate/route.ts: the speaking rate dictates the fluency band.
+      const result = withC2Evidence(withAnswerEvidence(parseCefrEvaluation(raw), userTurns), steps);
+      // As app/api/evaluate/route.ts: the speaking rate caps fluency.
       if (proxy && result.dimensions.fluency !== null) {
         result.dimensions.fluency = fluencyFromWpm(result.dimensions.fluency, proxy.wpm, result.answer_count ?? null, result.words_per_answer ?? null);
       }

@@ -8,7 +8,8 @@
     "start": "next start",
     "sim:batch": "tsx scripts/sim-batch.ts",
     "sim:matrix": "tsx scripts/sim-matrix.ts",
-    "analysis:scoring": "tsx analysis/scoring-replay.ts"
+    "analysis:scoring": "tsx analysis/scoring-replay.ts",
+    "analysis:calibration": "tsx analysis/calibration.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

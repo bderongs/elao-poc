@@ -45,8 +45,8 @@ export const RECOGNITION_FORGIVENESS = {
   /** Apparent errors presumed to be recognition errors: one per this many words
    *  spoken in the session… */
   evaluatorWordsPerForgivenError: 60,
-  /** …but never more than this many in total. */
-  evaluatorMaxForgivenErrors: 3,
+  /** …but never more than this many in total — the 2 jokers of the evaluator's TOP-BAND STRICTNESS (lib/cefr-prompt.ts) and of the C2 gate (lib/cefr-score.ts). */
+  evaluatorMaxForgivenErrors: 2,
   /** Only for a strong speaker: the session's pronunciation average (0-100)… */
   evaluatorMinPronunciation: 85,
   /** …and speaking rate (words per minute) must both reach these. */
@@ -129,7 +129,7 @@ export function buildEvaluatorForgivenessNote(args: {
   return (
     `\nRECOGNITION-ERROR ALLOWANCE: this speaker is strong (pronunciation ${Math.round(args.pronunciation ?? 0)}/100, ${Math.round(args.wpm ?? 0)} WPM). ` +
     `Presume that up to ${n} apparent vocabulary or grammar error${n === 1 ? "" : "s"} in the whole transcript (the most doubtful ones: odd word choices, words that do not fit the sentence, mangled phrases) ` +
-    `are the speech recogniser's mistakes, NOT the speaker's. Do not quote them in notable_errors and do not let them lower vocabulary_grammar. ` +
+    `are the speech recogniser's mistakes, NOT the speaker's: these are the jokers. Do not quote them in notable_errors and do not let them lower vocabulary_grammar, but still list them in speaker_errors. ` +
     `Errors beyond that allowance, or the same error repeated, still count.\n`
   );
 }

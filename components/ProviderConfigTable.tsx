@@ -34,10 +34,8 @@ function FluencyWpmTooltip() {
           </div>
         ))}
         <div className={styles.tooltipHint}>
-          Hard floor: &lt; {FLUENCY_WPM_HARD_BOUNDARIES.lowWpm} wpm → ≤{" "}
-          {FLUENCY_WPM_HARD_BOUNDARIES.lowFluencyMax}. Hard ceiling: ≥{" "}
-          {FLUENCY_WPM_HARD_BOUNDARIES.highWpm} wpm → ≥{" "}
-          {FLUENCY_WPM_HARD_BOUNDARIES.highFluencyMin}.
+          The rate caps fluency at its band&apos;s top, it never raises it. Hard cap: &lt;{" "}
+          {FLUENCY_WPM_HARD_BOUNDARIES.lowWpm} wpm → ≤ {FLUENCY_WPM_HARD_BOUNDARIES.lowFluencyMax}.
         </div>
       </span>
     </span>

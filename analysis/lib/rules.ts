@@ -3,7 +3,7 @@
  * lib/cefr-score.ts), so a what-if can never drift from what the app does:
  * `PRODUCTION_RULES` IS `SCORING_RULES`. A scenario only overrides some fields.
  */
-import { SCORING_RULES, scoreWithRules as liveScoreWithRules, type ScoreOutcome, type ScoringRules } from "../../lib/cefr-score";
+import { SCORING_RULES, scoreWithRules as liveScoreWithRules, storedEvidence, type ScoreOutcome, type ScoringRules } from "../../lib/cefr-score";
 import type { CefrResult, PronunciationAvg } from "../../lib/types";
 
 export type { ScoreOutcome, ScoringRules };
@@ -27,7 +27,9 @@ export type EvidenceSource = "stored" | "turns";
 
 export function scoreSession(facts: SessionFacts, rules: ScoringRules, evidence: EvidenceSource): ScoreOutcome {
   const e = evidence === "turns" ? facts.turnEvidence : facts.storedEvidence;
+  // The C2 gate's evidence (speaker_errors, c2_answers_well) only exists on the evaluation itself.
   return liveScoreWithRules(facts.evaluation, facts.pronunciation, rules, {
+    ...storedEvidence(facts.evaluation),
     answers: e?.answers ?? null,
     wordsPerAnswer: e?.wordsPerAnswer ?? null,
   });

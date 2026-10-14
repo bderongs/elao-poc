@@ -47,3 +47,6 @@ sim-runs/
 
 # analysis reports (analysis/)
 analysis/reports/
+
+# client exports with candidates' personal data (names, emails, Speechace report links) — never commit
+doc/SpeechAce/

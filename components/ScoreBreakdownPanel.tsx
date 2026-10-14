@@ -55,6 +55,16 @@ export function ScoreBreakdownPanel({
           <RawScore label="Overall" value={speechace.overall} />
           <RawScore label="Pronunciation" value={speechace.pronunciation} />
           <RawScore label="Fluency" value={speechace.fluency} />
+          {speechace.reference && (
+            <div title={`From the ${speechace.reference.client} ELAO export${speechace.reference.calibration ? " — in the calibration set" : ""}`}>
+              <div style={{ color: adminColors.muted, fontSize: 11, marginBottom: 2 }}>
+                ELAO reference{speechace.reference.calibration ? " · calibration" : ""}
+              </div>
+              <span>
+                oral {speechace.reference.oral_level ?? "—"} · global {speechace.reference.global_level ?? "—"}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -63,8 +73,8 @@ export function ScoreBreakdownPanel({
         title={<CategoryTitle anchor="score-global" label="Global score" />}
       >
         <p style={cardCopy}>
-          The average of the four dimensions below (×10), plus a flat +5% if two of them reach 9/10, and lifted to 90
-          (C2) for a clearly excellent session — see the scoring page.
+          The average of the four dimensions below, on a curve (an average of 9 is 87, C1+; C2 needs 9.5), and held
+          below C2 unless the evidence gate passes — see the scoring page.
         </p>
         {scoreNotes.length > 0 && (
           <p style={{ ...cardCopy, color: adminColors.faint }}>This session: {scoreNotes.join(" · ")}</p>

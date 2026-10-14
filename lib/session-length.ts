@@ -11,6 +11,7 @@
  */
 
 import { CEFR_LADDER, type CefrRung } from "@/lib/cefr-rung";
+import type { BankRung } from "@/lib/question-bank/types";
 
 /**
  * - "fixed": today's behaviour — one fixed length, nothing recorded beyond the ladder.
@@ -29,6 +30,14 @@ export interface LadderStep {
   nextRung: CefrRung;
   /** Word count of the answer that was judged. */
   words: number;
+  /**
+   * Rung of the bank question this answer replied to (the code-picked A1/C1/C2
+   * question or its follow-up, or the warm-up); null when the examiner chose
+   * the question itself (A2–B2). `rung` can lag a step behind it — ET is
+   * non-blocking, so the next question is often asked from the previous rung.
+   * Absent on ladders stored before 2026-10-14.
+   */
+  questionRung?: BankRung | null;
 }
 
 export type StopReason = "bracketed" | "plateau" | "ceiling" | "floor";
@@ -63,7 +72,7 @@ const BRACKET_MAX_SPAN = 1;
 const BRACKET_MIN_REVERSALS = 2;
 /** Plateau: this many consecutive "adequate" at the same rung. */
 const PLATEAU_RUN = 3;
-/** Ceiling / floor: this many consecutive "well" at C2, or non-"well" at A1. */
+/** Ceiling / floor: this many consecutive "well" to C2 questions (see isC2Answer), or non-"well" at A1. */
 const EDGE_RUN = 2;
 /**
  * Floor, second form: this many consecutive steps at A1 that never climbed.
@@ -80,6 +89,20 @@ const LONG_ANSWER_FROM: CefrRung = "B2";
 
 const idx = (r: CefrRung) => CEFR_LADDER.indexOf(r);
 
+/**
+ * Did this answer reply to a C2 question? The bank question's own rung when
+ * it was recorded — the ladder's `rung` lags, so two "well" at rung C2 were
+ * often two answers to C1 questions — else (older ladders) the ladder rung.
+ */
+function isC2Answer(step: LadderStep): boolean {
+  return step.questionRung !== undefined ? step.questionRung === "C2" : step.rung === "C2";
+}
+
+/** Answers to C2-bank questions judged "well" — the evidence the C2 gate (lib/cefr-score.ts) needs. Only counts steps that recorded their question's rung. */
+export function countC2AnswersWell(steps: LadderStep[]): number {
+  return steps.filter((s) => s.questionRung === "C2" && s.verdict === "well").length;
+}
+
 function direction(step: LadderStep): number {
   return Math.sign(idx(step.nextRung) - idx(step.rung));
 }
@@ -89,7 +112,7 @@ function detect(steps: LadderStep[]): { reason: StopReason; level: CefrRung } | 
 
   const edge = last(EDGE_RUN);
   if (edge.length === EDGE_RUN) {
-    if (edge.every((s) => s.rung === "C2" && s.verdict === "well")) return { reason: "ceiling", level: "C2" };
+    if (edge.every((s) => isC2Answer(s) && s.verdict === "well")) return { reason: "ceiling", level: "C2" };
     if (edge.every((s) => s.rung === "A1" && s.verdict !== "well")) return { reason: "floor", level: "A1" };
   }
   const stuck = last(FLOOR_STUCK_RUN);

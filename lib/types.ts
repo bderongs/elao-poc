@@ -24,6 +24,10 @@ export interface CefrResult {
   /** Number of candidate answers and their mean length in words — stamped at evaluation time (withAnswerEvidence in lib/cefr-prompt.ts) for the C2-floor rule. Absent on sessions evaluated before 2026-10-08. */
   answer_count?: number;
   words_per_answer?: number;
+  /** Every genuine vocabulary/grammar error the evaluator counted against the speaker, quoted — jokers included. Its length feeds the C2 gate (lib/cefr-score.ts). Absent on evaluations before prompt v6 (2026-10-14). */
+  speaker_errors?: string[];
+  /** Answers to C2-bank questions the per-answer judge (ET) rated "well" — stamped at evaluation time (withC2Evidence in lib/cefr-prompt.ts) for the C2 gate. Absent before 2026-10-14. */
+  c2_answers_well?: number;
 }
 
 export interface PronunciationAvg {
@@ -40,6 +44,23 @@ export interface SpeechaceScores {
   fluency: number | null;
   pronunciation: number | null;
   overall: number | null;
+  /** The levels the client's ELAO platform gave this candidate, from its exports (scripts/calibration-set.ts). Absent on sessions not found in an export. */
+  reference?: SpeechaceReference;
+}
+
+/** Reference levels from the ELAO exports — levels and scores only, never the candidate's identity. */
+export interface SpeechaceReference {
+  /** Export the row came from (e.g. "Safran", "UPV"). */
+  client: string;
+  /** "Expression orale" level ELAO derived from Speechace (e.g. "C1", "B2 (75)") and its score (%). */
+  oral_level: string | null;
+  oral_pct: number | null;
+  /** ELAO's overall level across its tests (grammar, vocabulary, listening, speaking). */
+  global_level: string | null;
+  grammar_level: string | null;
+  listening_level: string | null;
+  /** Part of the calibration set (analysis/calibration.ts). */
+  calibration?: boolean;
 }
 
 export interface SessionSummary {

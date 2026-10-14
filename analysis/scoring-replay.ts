@@ -4,8 +4,8 @@
  * rules and with one or more what-if scenarios, and lists the sessions whose
  * level changes. No API calls, nothing is written to the database.
  *
- *   npm run analysis:scoring -- --scenario no-floor
- *   npm run analysis:scoring -- --scenario llm-base,bonus-8.5 --lang fr --since 2026-09-17
+ *   npm run analysis:scoring -- --scenario before-2026-10-14
+ *   npm run analysis:scoring -- --scenario no-c2-gate,with-bonus --lang fr --since 2026-09-17
  *   npm run analysis:scoring -- --list
  *
  * Full guide: analysis/README.md
@@ -24,12 +24,11 @@ const LEVELS = ["A0", "A1", "A1+", "A2", "A2+", "B1", "B1+", "B2", "B2+", "C1", 
 const rank = (l: string) => { const i = LEVELS.indexOf(l); return i >= 0 ? i : LEVELS.indexOf(scoreToLevel(0)); };
 
 function merge(names: string[]): ScoringRules {
-  let rules: ScoringRules = { ...PRODUCTION_RULES, bonus: { ...PRODUCTION_RULES.bonus } };
+  let rules: ScoringRules = { ...PRODUCTION_RULES };
   for (const n of names) {
     const s = SCENARIOS[n];
     if (!s) { console.error(`Unknown scenario "${n}". Run with --list.`); process.exit(1); }
-    const { bonus, ...rest } = s.overrides;
-    rules = { ...rules, ...rest, bonus: { ...rules.bonus, ...bonus } };
+    rules = { ...rules, ...s.overrides };
   }
   return rules;
 }

@@ -1,7 +1,7 @@
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { getSessionDetail } from "@/lib/sessions-service";
 import { getProvider } from "@/lib/llm/registry";
-import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence } from "@/lib/cefr-prompt";
+import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence, withC2Evidence } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore } from "@/lib/cefr-score";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { PronunciationAvg, CefrResult, EvaluationRow } from "@/lib/types";
@@ -79,6 +79,10 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
     detail.session.pronunciation_scores ?? undefined,
   );
 
+  // The C2 gate's evidence, when the stored ladder recorded each answer's question rung (since 2026-10-14).
+  const ladderSteps = detail.session.ladder_json?.steps;
+  const hasC2Evidence = !!ladderSteps?.some((s) => s.questionRung !== undefined);
+
   const supabase = getSupabaseServer();
 
   return Promise.all(
@@ -105,7 +109,8 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
           maxTokens: 1500,
           json: true,
         });
-        const resultJson = withAnswerEvidence(parseCefrEvaluation(text), userTurns);
+        const evaluated = withAnswerEvidence(parseCefrEvaluation(text), userTurns);
+        const resultJson = hasC2Evidence ? withC2Evidence(evaluated, ladderSteps!) : evaluated;
         const durationMs = Date.now() - startedAt;
 
         const { data: row, error: updateError } = await supabase

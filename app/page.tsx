@@ -25,6 +25,7 @@ import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
 import { SESSION_DURATION_MINUTES, SESSION_LENGTH_LABEL_FR, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
+import { questionById } from "@/lib/question-bank";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   UserWords,
@@ -71,6 +72,11 @@ const SKIP_TEXT: Record<Lang, string> = {
 };
 
 /** Sent to the examiner (never added to the transcript) when the user hits "Je ne comprends pas" — paired with `clarify: true`, which is what actually drives the simpler rephrase. */
+/** Once the length rule asks for the close and the user stays silent: this much real quiet (avatar done, user not talking, no turn in flight) before the closing remark… */
+const CLOSE_SILENCE_MS = 20_000;
+/** …but never longer than this after the request, so a stuck turn can't hold the session open. */
+const CLOSE_MAX_WAIT_MS = 90_000;
+
 const CLARIFY_TEXT: Record<Lang, string> = {
   fr: "Je n'ai pas compris la question.",
   en: "I didn't understand the question.",
@@ -302,7 +308,14 @@ export default function Home() {
   const [answersCount, setAnswersCount] = useState(0);
   const ladderDecisionRef = useRef<StopDecision>({ converged: false, estimatedLevel: null, reason: "not_converged" });
   const wouldStopAtRef = useRef<{ at: number; estimatedLevel: LadderRecord["estimatedLevel"]; reason: LadderRecord["reason"] } | null>(null);
-  const endTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Close watch (see the length-rule effect): polls for a quiet moment to deliver the closing remark. */
+  const endTimeoutRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Mirrors isUserTalking for the close watch, which runs outside React's render cycle. */
+  const isUserTalkingRef = useRef(false);
+  const clearCloseWatch = () => {
+    if (endTimeoutRef.current) clearInterval(endTimeoutRef.current);
+    endTimeoutRef.current = null;
+  };
   /** Resolver for waitForPlaybackToFinish() — set while waiting for the current TTS to finish. */
   const playbackDoneWaiterRef = useRef<(() => void) | null>(null);
   /** Guards against overlapping endSession() calls (double-click, or a manual click racing the 3-min auto-close). */
@@ -448,10 +461,12 @@ export default function Home() {
   // shadow: at fixedSessionSeconds; adaptive: once the level has settled past
   // SESSION_MIN_SECONDS, or at SESSION_MAX_SECONDS), then end the session.
   // Don't interrupt mid-sentence: set a flag so onFinal triggers __END__
-  // after the user finishes speaking. Safety timeout fires after 20 s in
-  // case the user is already silent. endSession() itself stops STT
-  // synchronously, so it must only run AFTER the closing turn completes —
-  // never call it directly from here.
+  // after the user finishes speaking. If the user stays silent, a close
+  // watch delivers the closing remark after CLOSE_SILENCE_MS of real quiet
+  // (avatar done, user not talking, no turn in flight) — a fixed 20 s timer
+  // used to fire mid-answer and drop the answer (session 6bba17db).
+  // endSession() itself stops STT synchronously, so it must only run AFTER
+  // the closing turn completes — never call it directly from here.
   useEffect(() => {
     if (phase !== "active" || !sessionStarted) return;
     const lengthParams = {
@@ -470,12 +485,18 @@ export default function Home() {
     if (!closeRequestedRef.current && !pendingEndRef.current && shouldCloseSession({ ...lengthParams, mode: SESSION_LENGTH_MODE })) {
       closeRequestedRef.current = true;
       pendingEndRef.current = true;
-      endTimeoutRef.current = setTimeout(() => {
+      const requestedAt = Date.now();
+      let quietSince = requestedAt;
+      endTimeoutRef.current = setInterval(() => {
+        const now = Date.now();
+        if (isSpeakingRef.current || isProcessingRef.current || isUserTalkingRef.current) quietSince = now;
+        if (now - quietSince < CLOSE_SILENCE_MS && now - requestedAt < CLOSE_MAX_WAIT_MS) return;
+        clearCloseWatch();
         if (pendingEndRef.current) {
           pendingEndRef.current = false;
           deliverClosingRemarkAndEnd();
         }
-      }, 20_000);
+      }, 1000);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elapsed, phase]);
@@ -829,6 +850,8 @@ export default function Home() {
    */
   const runTranscriptAssessment = async (userAnswer: string, questionAsked: string, turnLogId: string) => {
     const etProcess = assessProcessLabel("ET", turnLogId);
+    // The bank question this answer replies to — read now, before the next examiner turn replaces it.
+    const questionRung = questionById(bankStateRef.current.currentId)?.rung ?? null;
     logClientEvent("et_request_sent", { turnLogId, process: etProcess });
     try {
       const r = await fetch("/api/assess-transcript", {
@@ -867,6 +890,7 @@ export default function Home() {
             verdict,
             nextRung: guardedRung,
             words: countWords(userAnswer),
+            questionRung,
           },
         ];
         ladderDecisionRef.current = evaluateStop(ladderStepsRef.current);
@@ -1419,10 +1443,7 @@ export default function Home() {
       const shouldEnd = pendingEndRef.current;
       if (shouldEnd) {
         pendingEndRef.current = false;
-        if (endTimeoutRef.current) {
-          clearTimeout(endTimeoutRef.current);
-          endTimeoutRef.current = null;
-        }
+        clearCloseWatch();
       }
 
       // EO (needs the recording, not just text) fires here, non-blocking —
@@ -1472,9 +1493,11 @@ export default function Home() {
         onSpeechStart: () => {
           setSttNotice(null);
           if (!isSpeakingRef.current) setPartialUser("…"); // listening indicator — no live captions without a streaming ASR
+          isUserTalkingRef.current = true;
           setIsUserTalking(true);
         },
         onSpeechEnd: (spokenMs) => {
+          isUserTalkingRef.current = false;
           setIsUserTalking(false);
           void onSpeechEnd(spokenMs);
         },
@@ -1557,7 +1580,7 @@ export default function Home() {
       const down = CEFR_LADDER[Math.max(CEFR_LADDER.indexOf(from) - conversationSettingsRef.current.stepSize, 0)];
       ladderStepsRef.current = [
         ...ladderStepsRef.current,
-        { atSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0, rung: from, verdict: "struggled", nextRung: down, words: 0 },
+        { atSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0, rung: from, verdict: "struggled", nextRung: down, words: 0, questionRung: questionById(bankStateRef.current.currentId)?.rung ?? null },
       ];
       ladderDecisionRef.current = evaluateStop(ladderStepsRef.current);
       setAnswersCount(ladderStepsRef.current.length);
@@ -1799,10 +1822,7 @@ export default function Home() {
     endSessionInFlightRef.current = true;
 
     pendingEndRef.current = false;
-    if (endTimeoutRef.current) {
-      clearTimeout(endTimeoutRef.current);
-      endTimeoutRef.current = null;
-    }
+    clearCloseWatch();
 
     setPhase("evaluating"); // flip the UI before any awaits
     releaseWakeLock();
@@ -1830,6 +1850,24 @@ export default function Home() {
       setAudioBlob(blob);
     }
 
+    // An answer that finished while the closing remark was playing sits in the
+    // turn buffer, and nothing flushes it once the session ends — add it now
+    // so it is saved and evaluated, its pronunciation pass tracked as usual.
+    for (const buffered of bufferedTurnsRef.current.splice(0)) {
+      const turnIndex = historyRef.current.length;
+      const questionContext = [...historyRef.current].reverse().find((m) => m.role === "assistant")?.content ?? "";
+      historyRef.current = [...historyRef.current, { role: "user", content: buffered.text, pronunciation: buffered.pronunciation }];
+      setHistory(historyRef.current);
+      logClientEvent("turn_late_answer_kept", { turnLogId: buffered.turnLogId });
+      trackPronunciation(
+        buffered.recordingPromise.then((recording) =>
+          recording
+            ? callPronunciationAPI(recording.blob, turnIndex, buffered.pronunciation.wpm ?? 0, buffered.text, questionContext, buffered.turnLogId)
+            : undefined,
+        ),
+      );
+    }
+
     // Let any in-flight pass-2 pronunciation calls land first (capped): the
     // last answer is spoken right before the closing, so without this its
     // score is still the 0 placeholder when the session average is taken.
@@ -1852,7 +1890,7 @@ export default function Home() {
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, userTurns, pronunciationContext: finalPronunciationAvg }),
+        body: JSON.stringify({ language, userTurns, pronunciationContext: finalPronunciationAvg, ladderSteps: ladderStepsRef.current }),
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
       result = await res.json();
