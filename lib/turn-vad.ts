@@ -136,6 +136,16 @@ const BUFFER_SIZE = 4096;
  * wohne…" → "wohne…", confirmed against Gradium).
  */
 const PRE_ROLL_FRAMES = 4;
+/**
+ * Silence is normally measured from audio frames, so if the browser stops
+ * delivering them mid-utterance (window switched away on macOS, context
+ * suspended/"interrupted") the silence timer is never armed and the turn
+ * never ends. A wall-clock watchdog treats "no frame for FRAME_STALL_MS" as
+ * stalled and closes the turn once the usual long budget has passed since
+ * the last voiced frame.
+ */
+const FRAME_STALL_MS = 1000;
+const WATCHDOG_INTERVAL_MS = 500;
 
 export class TurnVad {
   private audioContext: AudioContext | null = null;
@@ -160,6 +170,9 @@ export class TurnVad {
   private noiseFloor = SILENCE_THRESHOLD / NOISE_FLOOR_MULTIPLIER;
   /** Last PRE_ROLL_FRAMES sub-threshold frames while not speaking (copies — the browser reuses its buffers). */
   private preRoll: Float32Array[] = [];
+  /** Timestamp of the last audio frame of any level — see FRAME_STALL_MS. */
+  private lastFrameMs = Date.now();
+  private watchdog: ReturnType<typeof setInterval> | null = null;
 
   constructor(stream: MediaStream, callbacks: TurnVadCallbacks) {
     this.cb = callbacks;
@@ -181,6 +194,27 @@ export class TurnVad {
     this.source.connect(this.processor);
     this.processor.connect(silentGain);
     silentGain.connect(this.audioContext.destination);
+    this.watchdog = setInterval(() => this.checkStalled(), WATCHDOG_INTERVAL_MS);
+  }
+
+  /** Ends an open utterance whose audio frames stopped arriving (see
+   *  FRAME_STALL_MS). Also called by the page when it becomes visible again,
+   *  since background timers can be throttled. */
+  checkStalled() {
+    if (!this.isSpeaking) return;
+    const now = Date.now();
+    if (now - this.lastFrameMs < FRAME_STALL_MS) return; // frames flowing — handleAudio's timers own this
+    const budget = this.pauseZone === "mastery" ? SILENCE_MS_LONG_EXTENDED : SILENCE_MS_LONG;
+    if (now - this.lastVoiceMs >= budget) this.finalize();
+  }
+
+  /** Snapshot for logging around visibility changes. */
+  getDiagnostics() {
+    return {
+      contextState: this.audioContext?.state ?? "closed",
+      msSinceFrame: Date.now() - this.lastFrameMs,
+      isSpeaking: this.isSpeaking,
+    };
   }
 
   /** Tell the VAD the difficulty zone of the current question: Mastery (C2)
@@ -207,6 +241,7 @@ export class TurnVad {
   }
 
   private handleAudio(float32: Float32Array) {
+    this.lastFrameMs = Date.now();
     const rms = Math.sqrt(float32.reduce((s, v) => s + v * v, 0) / float32.length);
     // Echo guard stays absolute: leaked avatar voice isn't room noise, and
     // learning the floor from it would raise the threshold for no reason.
@@ -288,13 +323,34 @@ export class TurnVad {
     if (spoke) this.cb.onSpeechEnd?.(spokenMs);
   }
 
+  /** "J'ai terminé" — the user says their turn is over, whatever the VAD
+   *  thinks (background noise keeping it "speaking", or a mic too quiet to
+   *  ever cross the threshold). Resets the segment and returns its spoken
+   *  duration (0 when no speech was detected); does NOT fire onSpeechEnd —
+   *  the caller ends the turn itself. */
+  forceEnd(): number {
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    if (this.bargeInTimer !== null) {
+      clearTimeout(this.bargeInTimer);
+      this.bargeInTimer = null;
+    }
+    const spokenMs = this.isSpeaking ? Math.max(0, this.lastVoiceMs - this.speechStartMs) : 0;
+    this.isSpeaking = false;
+    return spokenMs;
+  }
+
   /** The AudioContext's actual sample rate — not necessarily the mic's native
    *  rate, since a MediaStreamAudioSourceNode resamples to the context's rate
    *  (which defaults to the output device's, not the mic's). lib/realtime-stt.ts
    *  needs this to resample onAudioFrame's buffers correctly. */
   /** Un-suspends the analysis context (no-op when already running) — safe to call from any tap handler. */
   resume() {
-    if (this.audioContext?.state === "suspended") void this.audioContext.resume().catch(() => {});
+    // Safari reports "interrupted" (not in the TS lib type) after the page was backgrounded.
+    const state = this.audioContext?.state as string | undefined;
+    if (state && state !== "running" && state !== "closed") void this.audioContext!.resume().catch(() => {});
   }
 
   getSampleRate(): number {
@@ -302,6 +358,10 @@ export class TurnVad {
   }
 
   stop() {
+    if (this.watchdog !== null) {
+      clearInterval(this.watchdog);
+      this.watchdog = null;
+    }
     if (this.silenceTimer !== null) {
       clearTimeout(this.silenceTimer);
       this.silenceTimer = null;

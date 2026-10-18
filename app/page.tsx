@@ -225,6 +225,8 @@ export default function Home() {
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
 
   const vadRef = useRef<TurnVad | null>(null);
+  /** startSession's onSpeechEnd, so "J'ai terminé" (handleFinishedTalking) can end a turn the VAD missed. */
+  const speechEndRef = useRef<((spokenMs: number, forced?: boolean) => Promise<void>) | null>(null);
   const playerRef = useRef<StreamingAudioPlayer | null>(null);
   /** setTimeout ids for the in-progress caption word-reveal — cleared whenever a
    *  turn starts fresh or the session ends, so a stale reveal never bleeds text
@@ -567,11 +569,14 @@ export default function Home() {
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
-        logClientEvent("session_backgrounded", {});
+        logClientEvent("session_backgrounded", { vad: vadRef.current?.getDiagnostics() });
         return;
       }
+      logClientEvent("session_foregrounded", { vad: vadRef.current?.getDiagnostics() });
       requestWakeLock(); // released automatically while hidden
       resumeAudioContexts();
+      // An answer that ended while hidden may still be open if frames stalled — close it now.
+      vadRef.current?.checkStalled();
       if (micStreamRef.current?.getAudioTracks().some((t) => t.readyState === "ended")) markInterrupted("visibility");
     };
     // track.stop() (our own endSession) doesn't fire "ended" — only the
@@ -971,6 +976,18 @@ export default function Home() {
     void handleUserTurn(CLARIFY_TEXT[language] ?? CLARIFY_TEXT.fr, undefined, "clarify", { clarifyRequest: true });
   };
 
+  /** "J'ai terminé" — fallback when the VAD never closes the turn (noise
+   *  keeping it open, or a voice too quiet to register): ends it by hand,
+   *  through the same transcription path a detected silence would take. */
+  const handleFinishedTalking = () => {
+    if (turnState !== "userSpeaking" || isProcessingRef.current || !speechEndRef.current) return;
+    const spokenMs = vadRef.current?.forceEnd() ?? 0;
+    isUserTalkingRef.current = false;
+    setIsUserTalking(false);
+    logClientEvent("turn_forced_end", { spokenMs });
+    void speechEndRef.current(spokenMs, true);
+  };
+
   /** Cancels any in-progress caption word-reveal timers (see scheduleWordReveal). */
   function clearPendingReveals() {
     revealTimeoutsRef.current.forEach((id) => clearTimeout(id));
@@ -1271,7 +1288,7 @@ export default function Home() {
     // has stopped talking; transcription is either streamed live to Mistral's
     // realtime endpoint while the user talks (lib/realtime-stt.ts), or, as a
     // fallback, a batch call once the clip is fully recorded (app/api/transcribe) ──
-    const onSpeechEnd = async (spokenMs: number) => {
+    const onSpeechEnd = async (spokenMs: number, forced = false) => {
       // Wall-clock from the moment VAD considers the utterance final to the
       // moment a transcript is actually in hand — logged below alongside
       // sttPath so before/after latency is a single-field diff either way.
@@ -1364,6 +1381,13 @@ export default function Home() {
           if (spokenMs >= TRUNCATION_CHECK_MIN_SPOKEN_MS && wpm < TRUNCATION_CHECK_MAX_WPM) {
             suspectTruncated = true;
             fallbackReason = `suspiciously short realtime transcript (${Math.round(wpm)} wpm over ${Math.round(spokenMs / 1000)} s)`;
+          }
+          // A forced end ("J'ai terminé") with nothing streamed usually means
+          // the VAD never heard the speech, so no frames reached realtime STT —
+          // the turn recording still has it, so ask the batch endpoint.
+          if (forced && !text.trim()) {
+            sttPath = "batch-fallback";
+            fallbackReason = "forced end with empty realtime transcript";
           }
         } catch (e) {
           fallbackReason = String(e instanceof Error ? e.message : e);
@@ -1480,6 +1504,8 @@ export default function Home() {
     // of player.interrupt()'s onAmplitudeChange(0) call below, so by the time
     // this utterance's onSpeechEnd fires it's processed immediately rather
     // than buffered (willBuffer reads isSpeakingRef/isProcessingRef).
+    speechEndRef.current = onSpeechEnd;
+
     const handleBargeIn = () => {
       if (!isSpeakingRef.current) return; // avatar already finished — nothing to interrupt
       chatAbortControllerRef.current?.abort();
@@ -2135,8 +2161,30 @@ export default function Home() {
         <>
           <TopBar
             right={
-              <span style={{ fontSize: 14, color: "#6B6F7D" }}>
-                {LANG_NAME_FR[language].charAt(0).toUpperCase() + LANG_NAME_FR[language].slice(1)} · évaluation orale
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#6B6F7D" }}>
+                {/* Lets a misclicked language be fixed without going back to the picker. */}
+                <select
+                  aria-label="Changer de langue"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value as Lang)}
+                  style={{
+                    fontFamily: "inherit",
+                    fontSize: 14,
+                    color: "#141D33",
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: "1px solid #C9C4B8",
+                    padding: "2px 2px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {LANG_NAME_FR[l.code].charAt(0).toUpperCase() + LANG_NAME_FR[l.code].slice(1)}
+                    </option>
+                  ))}
+                </select>
+                · évaluation orale
               </span>
             }
           />
@@ -2303,9 +2351,34 @@ export default function Home() {
 
             {turnState === "userSpeaking" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
-                <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 26px", borderRadius: 100, background: "#FDF0D0", border: "1px solid #F0DDA8" }}>
-                  <LevelBars count={8} barWidth={4} height={26} color="#8A6410" level={Math.max(micLevel, 0.1)} gapPx={4} />
-                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>À vous — on vous écoute</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 26px", borderRadius: 100, background: "#FDF0D0", border: "1px solid #F0DDA8" }}>
+                    <LevelBars count={8} barWidth={4} height={26} color="#8A6410" level={Math.max(micLevel, 0.1)} gapPx={4} />
+                    <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>À vous — on vous écoute</span>
+                  </div>
+                  <button
+                    onClick={handleFinishedTalking}
+                    title="J'ai terminé — si Léa ne réagit pas à la fin de votre réponse"
+                    aria-label="J'ai terminé"
+                    style={{
+                      width: 40,
+                      height: 40,
+                      flex: "none",
+                      borderRadius: "50%",
+                      background: "#FFFFFF",
+                      border: "1px solid #F0DDA8",
+                      color: "#8A6410",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </button>
                 </div>
                 {sttNotice && <span style={{ fontSize: 15, color: "#B3542E", textAlign: "center" }}>{sttNotice}</span>}
                 <div className={styles.turnActions}>
