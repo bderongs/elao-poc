@@ -66,12 +66,12 @@ const NORMAL_RATE = "-3%";
  *              event: error → { stage, message }
  *
  * Latency strategy:
- *  1. TTS is fired immediately on each sentence boundary — NO await inside Claude loop.
- *  2. All TTS requests run in parallel with Claude generation.
- *  3. The TTS response is streamed (chunks forwarded as they arrive) — Azure
- *     for nl-BE/es/it/de, Mistral (Voxtral) for en/fr (see
- *     lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG).
- *  4. By the time Claude finishes, sentence-1 TTS is already done or nearly done.
+ *  1. TTS is fired immediately on each sentence boundary — NO await inside the LLM loop.
+ *  2. All TTS requests run in parallel with LLM generation.
+ *  3. The TTS response is streamed (chunks forwarded as they arrive) — Gradium
+ *     for en/fr/es/de, Azure for nl-BE/it (see lib/tts/registry.ts's
+ *     LIVE_TTS_PROVIDER_BY_LANG).
+ *  4. By the time the LLM finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
   const { language, history, userMessage, turnLogId, rung, usedQuestions, bankState, isStart, avoidDomain, switchToDomain, clarify, clarifyAttempt } =
@@ -111,8 +111,8 @@ export async function POST(req: Request) {
       // Promises are pushed immediately when a sentence boundary is hit — no await.
       const ttsQueue: { text: string; readerPromise: Promise<ReadableStreamDefaultReader<Uint8Array> | null> }[] = [];
 
-      // Mistral for en/fr (preset voices exist), Azure for everything else —
-      // see lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
+      // Gradium for en/fr/es/de, Azure for nl-BE/it (Gradium doesn't cover
+      // them) — see lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
       const fireTTS = (sentence: string) =>
         ttsQueue.push({
           text: sentence,
@@ -208,7 +208,7 @@ export async function POST(req: Request) {
       // sentence and send it as ONE audio event. Sending many small events
       // (one per Azure read() chunk) creates arbitrary waveform boundaries
       // mid-sentence which cause audible clicks and static at the player.
-      // Since TTS runs in parallel with Claude, the full sentence audio is
+      // Since TTS runs in parallel with the LLM, the full sentence audio is
       // typically already available by the time we reach this drain phase —
       // buffering adds no meaningful latency.
       for (const { text: sentenceText, readerPromise } of ttsQueue) {

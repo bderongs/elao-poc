@@ -17,7 +17,6 @@ out/
 *.fbx
 *.glb
 # ...except the avatars in active use, committed until they're moved to a CDN
-!public/avatars/brunette-t.glb
 !public/avatars/woman_2.glb
 
 # build artifacts

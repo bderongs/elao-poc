@@ -1,8 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // @react-three/fiber v8 has JSX type incompatibilities with React 19 — pre-existing
-  typescript: { ignoreBuildErrors: true },
+  // No ESLint config in this repo — type errors still fail the build.
   eslint: { ignoreDuringBuilds: true },
   webpack: (config, { isServer }) => {
     if (!isServer) {

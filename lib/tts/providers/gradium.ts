@@ -1,5 +1,5 @@
 /**
- * Gradium TTS — the live voice for English/French, replacing Mistral
+ * Gradium TTS — the live voice for English/French/Spanish/German, replacing Mistral
  * (Voxtral) after its first-sentence latency spiked to 5–14s on some turns
  * (logs/server-2026-09-21.log, 12:23 session). Gradium is Paris-based and
  * the requests go to its EU endpoint (eu.api.gradium.ai), which pins

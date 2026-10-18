@@ -1,7 +1,7 @@
 /**
- * Azure Neural TTS — the live voice for 4 of 6 languages (Dutch-BE, Spanish,
- * Italian, German); English/French use lib/tts/providers/mistral.ts instead
- * (see lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG). Moved here as-is
+ * Azure Neural TTS — the live voice for Dutch-BE and Italian, which Gradium
+ * doesn't cover; the other languages use lib/tts/providers/gradium.ts (see
+ * lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG). Moved here as-is
  * from app/api/chat/route.ts — no behavior change, just relocated behind the
  * TTS provider registry.
  */

@@ -431,14 +431,6 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
 }
 
 /**
- * Live-session incremental save (supabase/migrations/0010_session_status.sql).
- * startLiveSession creates the 'in_progress' row at the first answer;
- * saveLiveProgress rewrites its transcript after every answer. Only text and
- * pronunciation JSON travel here — audio still uploads once, at the end, via
- * createSessionFromForm. Both are public (a guest has no account) and only
- * ever touch 'in_progress' conversation rows the caller may own.
- */
-/**
  * sessions.ladder_json comes from public endpoints (the live save and the
  * final save) — accept only a plain object of bounded size with a steps
  * array; it's diagnostic data, so anything else is just dropped.
@@ -502,6 +494,14 @@ export async function saveSimulationSession(record: SimulationRecord): Promise<{
   return { id: sessionId };
 }
 
+/**
+ * Live-session incremental save (supabase/migrations/0010_session_status.sql).
+ * startLiveSession creates the 'in_progress' row at the first answer;
+ * saveLiveProgress rewrites its transcript after every answer. Only text and
+ * pronunciation JSON travel here — audio still uploads once, at the end, via
+ * createSessionFromForm. Both are public (a guest has no account) and only
+ * ever touch 'in_progress' conversation rows the caller may own.
+ */
 export async function startLiveSession(language: string, userId: string | null): Promise<{ id: string }> {
   const { data, error } = await getSupabaseServer()
     .from("sessions")
