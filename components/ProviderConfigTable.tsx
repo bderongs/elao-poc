@@ -47,6 +47,9 @@ function FluencyWpmTooltip() {
 // from lib/session-cost.ts's estimators.
 function costForCapability(c: CapabilityConfig): CostEstimate | null {
   switch (c.capability) {
+    case "CONVERSATION":
+    case "TT":
+      return null; // not priced yet
     case "ET":
       return estimateEtCostUsd(c.providerId, c.modelLabel);
     case "CEFR_EVAL":
@@ -157,6 +160,9 @@ export function ProviderConfigTable({ config: fullConfig, language }: { config: 
                 <td data-label="Capability">
                   {c.capabilityLabel}
                   {c.capability === "CEFR_EVAL" && <FluencyWpmTooltip />}
+                  {c.description && (
+                    <div style={{ color: adminColors.muted, fontSize: 12, marginTop: 2, maxWidth: 360 }}>{c.description}</div>
+                  )}
                 </td>
                 <td data-label="Provider">{c.perLanguage ? "Varies by language" : c.providerLabel}</td>
                 <td data-label="Model">{c.perLanguage ? "—" : c.modelLabel}</td>
@@ -177,7 +183,7 @@ export function ProviderConfigTable({ config: fullConfig, language }: { config: 
           ))}
           <tr>
             <td data-label="Capability" style={{ fontWeight: 700 }}>
-              Total (est.)
+              Total (est., priced rows only)
             </td>
             <td data-label="Provider" />
             <td data-label="Model" />
