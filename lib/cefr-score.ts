@@ -17,9 +17,15 @@ export function scoreToLevel(score: number): string {
   return "A0";
 }
 
+/** Lowest score of each base level (5-point bands, see scoreToLevel). */
+const LEVEL_FLOOR: Record<string, number> = { A1: 40, A2: 50, B1: 60, B2: 70, C1: 80, C2: 90 };
+const baseLevelOf = (score: number) => scoreToLevel(score).replace("+", "");
+
 export interface CompositeCefrScore {
   score: number;
   level: string;
+  /** At the top of the scale the test assesses (ScoringRules.ceiling) — the results screen says the level may be higher still. */
+  topOfScale?: boolean;
 }
 
 /**
@@ -49,14 +55,41 @@ export interface ScoringRules {
     minWordsPerAnswer: number;
   };
   /**
-   * C2 needs proof, not just high axes: at most `maxSpeakerErrors` genuine
-   * vocabulary/grammar errors in the whole conversation (the jokers — the
-   * evaluator's speaker_errors) and at least `minC2AnswersWell` answers to
-   * C2-bank questions judged "well" (c2_answers_well, stamped at evaluation
-   * time). A score in the C2 band without both is held at `cap`. Sessions
-   * evaluated before the evidence existed (2026-10-14) never pass. null = off.
+   * C2 is decided by evidence, not by the axes alone: at most
+   * `maxSpeakerErrors` genuine vocabulary/grammar errors in the whole
+   * conversation (the jokers — the evaluator's speaker_errors) and at least
+   * `minC2AnswersWell` answers to C2-bank questions judged "well"
+   * (c2_answers_well, stamped at evaluation time).
+   * - Without that evidence, a score in the C2 band is held at `cap`.
+   *   Sessions evaluated before the evidence existed (2026-10-14) never pass.
+   * - With it, a session whose axis mean reaches `liftFromAxisMean` is lifted
+   *   to C2 (`cap` + 1): the evaluator scores a native ~9 per axis, the same
+   *   as a strong C1, so the axes can't separate them — the C2 questions can
+   *   (a native French session: mean 8.84, three C2 answers "well"). null = no lift.
+   * maxSpeakerErrors null = the error count isn't checked (it proved unreliable:
+   * false errors on natives, missed ones on C1 speakers).
+   * null = gate off.
    */
-  c2Gate: null | { maxSpeakerErrors: number; minC2AnswersWell: number; cap: number };
+  c2Gate: null | { maxSpeakerErrors: number | null; minC2AnswersWell: number; cap: number; liftFromAxisMean: number | null };
+  /**
+   * Boundary checks (lib/cefr-boundary.ts, stamped on the evaluation): a judge
+   * compares the speaker with the description of their level and the one
+   * above / below, twice. "up": both runs say "the level above" → the score
+   * rises to that level's floor. "both": also, when the upward check doesn't
+   * fire and both runs of the downward one say "the level below", the score
+   * drops to the top of that level. "off": ignored. Only applies when the
+   * score still sits in the level the checks were run from.
+   */
+  boundaryCheck: "off" | "up" | "both";
+  /**
+   * The highest level the test reports. C1 and C2 can't be told apart
+   * reliably from a short conversation (calibration and live tests,
+   * 2026-10-14…18), so scores stop at `cap` (89, C1+). A session that shows
+   * C2-type evidence — at least `minC2AnswersWell` answers to C2-bank
+   * questions judged "well" and an axis mean of at least `minAxisMean` — is
+   * flagged `topOfScale` instead of being lifted to C2. Applied last. null = no ceiling.
+   */
+  ceiling: null | { cap: number; topOfScale: { minC2AnswersWell: number; minAxisMean: number } };
 }
 
 /**
@@ -64,7 +97,10 @@ export interface ScoringRules {
  * mean goes through a curve so the evaluator's C1 band (8–9 per axis) lands
  * in C1/C1+ instead of C2 (a mean of 9 is 87, C2 needs ~9.5); no +5 % bonus
  * and no C2 floor (both lifted C1 sessions into C2); the speaking rate only
- * caps fluency; and C2 needs the evidence gate above.
+ * caps fluency.
+ * 2026-10-18 (Baptiste): the test no longer reports C2 — scores stop at C1+,
+ * with a "top of the scale" flag on C2-type evidence (`ceiling`); the C2 gate
+ * and the boundary checks are off.
  */
 export const SCORING_RULES: ScoringRules = {
   baseScore: "axis-mean",
@@ -73,7 +109,9 @@ export const SCORING_RULES: ScoringRules = {
   fluencyFromWpm: "cap",
   bonus: null,
   c2Floor: null,
-  c2Gate: { maxSpeakerErrors: 2, minC2AnswersWell: 2, cap: 89 },
+  c2Gate: null,
+  boundaryCheck: "off",
+  ceiling: { cap: 89, topOfScale: { minC2AnswersWell: 2, minAxisMean: 8.75 } },
 };
 
 /**
@@ -189,11 +227,11 @@ export function scoreWithRules(
     (v): v is number => v !== null,
   );
 
+  const axisMean = present.length ? present.reduce((a, b) => a + b, 0) / present.length : null;
   let baseScore = result.score_percent;
-  if (rules.baseScore === "axis-mean" && present.length) {
-    const mean = present.reduce((a, b) => a + b, 0) / present.length;
-    baseScore = Math.round(axisMeanToScore(mean, rules.axisCurve));
-    if (baseScore !== result.score_percent) notes.push(`base ${result.score_percent}→${baseScore} (axis mean ${Math.round(mean * 100) / 100})`);
+  if (rules.baseScore === "axis-mean" && axisMean !== null) {
+    baseScore = Math.round(axisMeanToScore(axisMean, rules.axisCurve));
+    if (baseScore !== result.score_percent) notes.push(`base ${result.score_percent}→${baseScore} (axis mean ${Math.round(axisMean * 100) / 100})`);
   }
 
   let score = baseScore;
@@ -213,24 +251,54 @@ export function scoreWithRules(
     }
   }
 
+  const bc = result.boundary_checks;
+  if (rules.boundaryCheck !== "off" && bc && baseLevelOf(score) === bc.from) {
+    if (bc.up?.decision === "upper") {
+      score = Math.max(score, LEVEL_FLOOR[bc.up.upper]);
+      notes.push(`boundary check → ${bc.up.upper} (${score})`);
+    } else if (rules.boundaryCheck === "both" && bc.down?.decision === "lower") {
+      score = Math.min(score, LEVEL_FLOOR[bc.from] - 1);
+      notes.push(`boundary check → ${bc.down.lower} (${score})`);
+    }
+  }
+
   const g = rules.c2Gate;
-  if (g && score > g.cap && scoreToLevel(score) === "C2") {
+  if (g) {
     const missing: string[] = [];
-    if (evidence.speakerErrors === null) missing.push("no error count");
-    else if (evidence.speakerErrors > g.maxSpeakerErrors) missing.push(`${evidence.speakerErrors} errors > ${g.maxSpeakerErrors}`);
+    if (g.maxSpeakerErrors !== null) {
+      if (evidence.speakerErrors === null) missing.push("no error count");
+      else if (evidence.speakerErrors > g.maxSpeakerErrors) missing.push(`${evidence.speakerErrors} errors > ${g.maxSpeakerErrors}`);
+    }
     if (evidence.c2AnswersWell === null) missing.push("no C2-question evidence");
     else if (evidence.c2AnswersWell < g.minC2AnswersWell) missing.push(`${evidence.c2AnswersWell} C2 answers "well" < ${g.minC2AnswersWell}`);
-    if (missing.length) {
+    if (missing.length && score > g.cap) {
       score = g.cap;
       notes.push(`C2 gate → ${g.cap} (${missing.join(", ")})`);
+    } else if (!missing.length && g.liftFromAxisMean !== null && axisMean !== null && axisMean >= g.liftFromAxisMean && score <= g.cap) {
+      score = g.cap + 1;
+      notes.push(`C2 by evidence → ${score} (${evidence.c2AnswersWell} C2 answers "well", ${evidence.speakerErrors} errors, axis mean ${Math.round(axisMean * 100) / 100})`);
+    }
+  }
+
+  let topOfScale = false;
+  const c = rules.ceiling;
+  if (c) {
+    if (score > c.cap) {
+      notes.push(`capped at ${scoreToLevel(c.cap)} (${score} → ${c.cap})`);
+      score = c.cap;
+    }
+    const t = c.topOfScale;
+    if (scoreToLevel(score) === scoreToLevel(c.cap) && evidence.c2AnswersWell !== null && evidence.c2AnswersWell >= t.minC2AnswersWell && axisMean !== null && axisMean >= t.minAxisMean) {
+      topOfScale = true;
+      notes.push(`top of scale (${evidence.c2AnswersWell} C2 answers "well", axis mean ${Math.round(axisMean * 100) / 100})`);
     }
   }
 
   // The evaluator's own level label is kept only when nothing moved its number
-  // — and never a "C2" label on a score outside the C2 band (the gate's job).
+  // — and never a "C2" label on a score outside the C2 band (the gate's / ceiling's job).
   const kept = score === result.score_percent ? result.level : undefined;
   const level = kept && !(kept === "C2" && scoreToLevel(score) !== "C2") ? kept : scoreToLevel(score);
-  return { score, level, notes };
+  return { score, level, notes, ...(topOfScale ? { topOfScale } : {}) };
 }
 
 /**
@@ -244,9 +312,14 @@ export function scoreWithRules(
  * overall number" it should call this rather than reading
  * `result.score_percent` directly, which is the LLM's holistic number alone.
  */
+/** The level the boundary checks start from: today's rules with the checks themselves left out. */
+export function levelBeforeBoundaryChecks(result: CefrResult, pronunciationAvg: Pick<PronunciationAvg, "pronunciation" | "wpm"> | null): string {
+  return scoreWithRules(result, pronunciationAvg as PronunciationAvg | null, { ...SCORING_RULES, boundaryCheck: "off" }).level;
+}
+
 export function computeCompositeCefrScore(result: CefrResult, pronunciationAvg: PronunciationAvg | null): CompositeCefrScore {
-  const { score, level } = scoreWithRules(result, pronunciationAvg, SCORING_RULES);
-  return { score, level };
+  const { score, level, topOfScale } = scoreWithRules(result, pronunciationAvg, SCORING_RULES);
+  return { score, level, ...(topOfScale ? { topOfScale } : {}) };
 }
 
 export interface SessionMainScore extends CompositeCefrScore {

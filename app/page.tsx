@@ -26,6 +26,8 @@ import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/Deb
 import { SESSION_DURATION_MINUTES, SESSION_LENGTH_LABEL_FR, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { questionById } from "@/lib/question-bank";
+import { substantiveAnswers } from "@/lib/pronunciation-rollup";
+import { exchangesFromHistory } from "@/lib/cefr-boundary";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import {
   UserWords,
@@ -145,11 +147,9 @@ function computePronunciationAvgFromHistory(history: Msg[]): PronunciationAvg | 
   const withPron = history.filter((m) => m.role === "user" && m.pronunciation);
   const scored = withPron.filter((m) => !isPlaceholderPronunciation(m.pronunciation!));
   if (!scored.length) return null;
-  const avg = (key: keyof PronunciationResult) => {
-    const vals = scored.map((m) => m.pronunciation![key] as number);
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
-  };
-  const pronunciation = avg("pronunciationScore");
+  // Very short answers (a garbled opening, "can you repeat?") don't count — see PRONUNCIATION_MIN_WORDS.
+  const counted = substantiveAnswers(scored, (m) => m.content.trim().split(/\s+/).filter(Boolean).length);
+  const pronunciation = counted.reduce((a, m) => a + m.pronunciation!.pronunciationScore, 0) / counted.length;
   // WPM over substantive turns (≥ 6 words; short answers return wpm=0).
   // Word-WEIGHTED, not a plain mean: a 40-word turn should count far more
   // than a 6-word one toward the speaking-rate figure that anchors fluency.
@@ -1916,7 +1916,13 @@ export default function Home() {
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, userTurns, pronunciationContext: finalPronunciationAvg, ladderSteps: ladderStepsRef.current }),
+        body: JSON.stringify({
+          language,
+          userTurns,
+          pronunciationContext: finalPronunciationAvg,
+          ladderSteps: ladderStepsRef.current,
+          exchanges: exchangesFromHistory(historyRef.current),
+        }),
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
       result = await res.json();

@@ -21,7 +21,11 @@ const OLD_FLOOR: ScoringRules["c2Floor"] = { floor: 90, minAxesHigh: 3, axisHigh
 export const SCENARIOS: Record<string, Scenario> = {
   "before-2026-10-14": {
     description: "The rules live 2026-10-08 → 2026-10-14: axis mean × 10, +5 % bonus, C2 floor, WPM band raises fluency, no C2 gate.",
-    overrides: { axisCurve: null, fluencyFromWpm: "band", bonus: OLD_BONUS, c2Floor: OLD_FLOOR, c2Gate: null },
+    overrides: { axisCurve: null, fluencyFromWpm: "band", bonus: OLD_BONUS, c2Floor: OLD_FLOOR, c2Gate: null, ceiling: null },
+  },
+  "show-c2": {
+    description: "Report C2 again (the 2026-10-14 → 18 rules): no C1+ ceiling; C2 by evidence (≥ 2 C2 answers \"well\", ≤ 2 errors, axis mean ≥ 8.75), held at C1+ without it.",
+    overrides: { ceiling: null, c2Gate: { maxSpeakerErrors: 2, minC2AnswersWell: 2, cap: 89, liftFromAxisMean: 8.75 } },
   },
   "llm-base": {
     description: "Go back to the evaluator's holistic score_percent as the base score (what the app did before 2026-10-08).",
@@ -41,9 +45,13 @@ export const SCENARIOS: Record<string, Scenario> = {
     ref: "Track V",
     overrides: { c2Floor: OLD_FLOOR },
   },
-  "no-c2-gate": {
-    description: "Switch the C2 evidence gate off (≤ 2 speaker errors, ≥ 2 C2 answers judged \"well\").",
-    overrides: { c2Gate: null },
+  "boundary-up": {
+    description: "Apply the upward boundary check: both runs say 'the level above' → that level's floor.",
+    overrides: { boundaryCheck: "up" },
+  },
+  "boundary-both": {
+    description: "Apply the boundary checks both ways (up first; else down when both runs say 'the level below').",
+    overrides: { boundaryCheck: "both" },
   },
   "wpm-band": {
     description: "The speaking rate also raises fluency into its band (AB-07 as shipped 2026-10-08), not only caps it.",

@@ -62,12 +62,24 @@ export function liveConversationPronunciationProviderId(language: string | null 
  * reimplemented here so uploaded sessions (no browser-side history array)
  * can get the same `PronunciationAvg` shape feeding into the CEFR eval prompt.
  */
+/**
+ * Answers shorter than this don't count toward the session's pronunciation
+ * average (as long as longer ones exist): a garbled 3-word opening ("C'était
+ * un truc.", scored 25) pulled a native speaker's average from ~93 to 89.
+ */
+export const PRONUNCIATION_MIN_WORDS = 5;
+
+/** The items that count toward the pronunciation average — the substantive answers, or all of them if none is. */
+export function substantiveAnswers<T>(items: T[], wordsOf: (item: T) => number): T[] {
+  const long = items.filter((i) => wordsOf(i) >= PRONUNCIATION_MIN_WORDS);
+  return long.length ? long : items;
+}
+
 export function computePronunciationAvg(results: PronunciationResult[]): PronunciationAvg | null {
   if (!results.length) return null;
 
-  const avg = (key: "pronunciationScore" | "wpm") =>
-    results.reduce((s, r) => s + (r[key] ?? 0), 0) / results.length;
-  const pronunciation = avg("pronunciationScore");
+  const counted = substantiveAnswers(results, (r) => r.text.trim().split(/\s+/).filter(Boolean).length);
+  const pronunciation = counted.reduce((s, r) => s + (r.pronunciationScore ?? 0), 0) / counted.length;
 
   // WPM over substantive turns only (wpm=0 flags a turn too short to time),
   // word-weighted so a long turn counts more than a short one.

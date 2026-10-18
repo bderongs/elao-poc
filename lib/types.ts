@@ -1,4 +1,5 @@
 import type { PronunciationResult } from "@/lib/pronunciation/types";
+import type { BoundaryChecks } from "@/lib/cefr-boundary";
 import type { CapabilityConfig } from "@/lib/system-config";
 import type { LadderRecord } from "@/lib/session-length";
 
@@ -28,6 +29,8 @@ export interface CefrResult {
   speaker_errors?: string[];
   /** Answers to C2-bank questions the per-answer judge (ET) rated "well" — stamped at evaluation time (withC2Evidence in lib/cefr-prompt.ts) for the C2 gate. Absent before 2026-10-14. */
   c2_answers_well?: number;
+  /** Second opinion at the level boundary, by comparison (lib/cefr-boundary.ts) — applied by ScoringRules.boundaryCheck. */
+  boundary_checks?: BoundaryChecks;
 }
 
 export interface PronunciationAvg {

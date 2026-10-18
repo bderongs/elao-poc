@@ -12,7 +12,7 @@ import { buildEvaluatorForgivenessNote } from "@/lib/recognition-forgiveness";
 // Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
 // every session_evaluations row with it, so scoring drift across prompt
 // edits stays distinguishable from drift across models.
-export const CEFR_PROMPT_VERSION = "v7"; // v7: generosity below C1 removed (higher-band bias, tie-break up, length floor, B2 floor), axis↔CEFR anchors — calibration set 2026-10-14; v6: top-band strictness with 2 jokers, speaker_errors, WPM caps fluency only (2026-10-14); v5: C2 description no longer says "five dimensions"; v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
+export const CEFR_PROMPT_VERSION = "v9"; // v9: candidate-facing text never names a CEFR level (the shown level is computed, capped at C1+); v8: native spoken norms are not speaker_errors (a native's "ne" dropping and fillers were counted against them); v7: generosity below C1 removed (higher-band bias, tie-break up, length floor, B2 floor), axis↔CEFR anchors — calibration set 2026-10-14; v6: top-band strictness with 2 jokers, speaker_errors, WPM caps fluency only (2026-10-14); v5: C2 description no longer says "five dimensions"; v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
 
 // Single source of truth for the WPM → fluency mapping baked into
 // CEFR_SYSTEM_PROMPT below — each band's top value is the most fluency that
@@ -45,6 +45,7 @@ OUTPUT RULES:
 - Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
 - All string values in English, regardless of the transcript language.
 - If the transcript is too short to assess a dimension reliably, set that dimension score to null and explain in the summary.
+- summary, strengths, areas_for_improvement and notable_errors are shown to the candidate: describe the performance, never name a CEFR level or score in them (the level shown is computed separately).
 
 OUTPUT SCHEMA:
 {
@@ -61,7 +62,7 @@ OUTPUT SCHEMA:
   "strengths": [string],         // 3-5 specific observations from the transcript
   "areas_for_improvement": [string], // 3-5 specific observations with examples where possible
   "notable_errors": [string],    // up to 3 concrete error examples quoted from transcript
-  "speaker_errors": [string],    // EVERY genuine vocabulary/grammar error counted against the speaker, quoted with its correction, jokers included (see TOP-BAND STRICTNESS); [] if none
+  "speaker_errors": [string],    // EVERY genuine vocabulary/grammar error counted against the speaker, quoted with its correction, jokers included (see TOP-BAND STRICTNESS); [] if none. NEVER native spoken norms: no dropped "ne", contraction, colloquial word, filler or repetition
   "summary": string              // 2-3 sentence overall assessment
 }
 
@@ -112,6 +113,7 @@ TOP-BAND STRICTNESS — read this before giving any dimension 9 or more, or a le
 The benefit-of-the-doubt rules in this prompt (BENEFIT OF THE DOUBT, the VOCABULARY_GRAMMAR PROTECTION RULE, ERROR DENSITY) exist to protect learners from recognizer noise. They do NOT apply at the top: they decide nothing between C1 and C2, and nothing about scores of 9 and above. There, judge the transcript as written:
 - JOKERS: over the whole conversation, at most 2 genuine vocabulary/grammar errors are tolerated — the speaker's own or the recognizer's, no need to decide which. Every further error is a real one.
 - A genuine error is anything a careful examiner would correct in an educated native speaker's speech: wrong preposition or collocation ("a country I've been in"), wrong word or construction ("travel less far", "go to me" for "come to me"), a dropped subject or article, a blended or broken structure ("one of the issues is that if…"). Fillers, self-corrections and repeated words are fluency, not vocabulary_grammar.
+- NOT errors — the norms of educated native SPEECH, never listed in speaker_errors: dropped "ne" in French negation ("j'en ai pas"), contractions and reductions ("t'es", "gonna", "'s"), colloquial but correct register ("pas mal de", "un truc", "c'est cool"), interjections and fillers ("oula", "bah", "well"), repeated words and restarts. Judge spoken language against how educated natives speak, not against written grammar.
 - List every genuine error in speaker_errors, jokers included.
 - vocabulary_grammar 9.5–10 needs at most 2 speaker_errors (the jokers) and precise, idiomatic, varied language throughout. 3–4 errors: at most 9. 5 or more: at most 8.5.
 - Fluency 9.5–10 needs the "10" descriptor to hold across the conversation, whatever the speaking rate: a fast rate only allows a high score, it does not earn one.

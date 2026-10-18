@@ -198,44 +198,6 @@ export const C2: BankEntry[] = [
     ],
   },
   {
-    id: "c2-work-02",
-    domain: "work_studies",
-    text: {
-      en: "How would you describe the gap between how others see your work and how you see it yourself?",
-      fr: "Comment décririez-vous l'écart entre la façon dont les autres voient votre travail et la façon dont vous le voyez vous-même ?",
-      "nl-BE": "Hoe zou u het verschil beschrijven tussen hoe anderen uw werk zien en hoe u het zelf ziet?",
-      es: "¿Cómo describiría la diferencia entre cómo ven los demás su trabajo y cómo lo ve usted?",
-      it: "Come descriverebbe la distanza tra come gli altri vedono il suo lavoro e come lo vede lei?",
-      de: "Wie würden Sie den Unterschied beschreiben zwischen dem, wie andere Ihre Arbeit sehen, und wie Sie sie selbst sehen?",
-    },
-    simpler: {
-      en: "Do people understand what you do at work or in your studies?",
-      fr: "Les gens comprennent-ils ce que vous faites dans votre travail ou vos études ?",
-      "nl-BE": "Begrijpen mensen wat u doet in uw werk of studie?",
-      es: "¿La gente entiende lo que hace en su trabajo o en sus estudios?",
-      it: "Le persone capiscono che cosa fa nel suo lavoro o nei suoi studi?",
-      de: "Verstehen die Leute, was Sie in Ihrer Arbeit oder im Studium machen?",
-    },
-    followUps: [
-      {
-        en: "Does that gap bother you, or not really?",
-        fr: "Cet écart vous gêne-t-il, ou pas vraiment ?",
-        "nl-BE": "Stoort dat verschil u, of eigenlijk niet?",
-        es: "¿Le molesta esa diferencia, o no mucho?",
-        it: "Questa distanza la disturba, o non molto?",
-        de: "Stört Sie dieser Unterschied, oder eigentlich nicht?",
-      },
-      {
-        en: "Has it ever led to a misunderstanding?",
-        fr: "Cela a-t-il déjà provoqué un malentendu ?",
-        "nl-BE": "Heeft dat ooit tot een misverstand geleid?",
-        es: "¿Ha provocado alguna vez un malentendido?",
-        it: "Ha mai causato un malinteso?",
-        de: "Hat das schon einmal zu einem Missverständnis geführt?",
-      },
-    ],
-  },
-  {
     id: "c2-hobbies-01",
     domain: "hobbies_free_time",
     text: {

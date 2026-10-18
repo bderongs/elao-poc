@@ -41,7 +41,8 @@ import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import type { LlmProvider } from "@/lib/llm/types";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
 import { CEFR_SYSTEM_PROMPT, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence, withC2Evidence } from "@/lib/cefr-prompt";
-import { computeCompositeCefrScore, fluencyFromWpm, type CompositeCefrScore } from "@/lib/cefr-score";
+import { computeCompositeCefrScore, fluencyFromWpm, levelBeforeBoundaryChecks, SCORING_RULES, type CompositeCefrScore } from "@/lib/cefr-score";
+import { exchangesFromHistory, withBoundaryChecks } from "@/lib/cefr-boundary";
 import { countWords, evaluateStop, type LadderStep, type StopDecision } from "@/lib/session-length";
 import { questionById } from "@/lib/question-bank";
 import { audioProxyAverage, type SimAudioProxy } from "@/lib/sim-audio-proxy";
@@ -428,11 +429,14 @@ export async function* runConversationSimulation(
         json: true,
         context: `${runId}:${tag}`,
       });
-      const result = withC2Evidence(withAnswerEvidence(parseCefrEvaluation(raw), userTurns), steps);
+      let result = withC2Evidence(withAnswerEvidence(parseCefrEvaluation(raw), userTurns), steps);
       // As app/api/evaluate/route.ts: the speaking rate caps fluency.
       if (proxy && result.dimensions.fluency !== null) {
         result.dimensions.fluency = fluencyFromWpm(result.dimensions.fluency, proxy.wpm, result.answer_count ?? null, result.words_per_answer ?? null);
       }
+      if (SCORING_RULES.boundaryCheck !== "off") result = await withBoundaryChecks(result, {
+        provider, language, exchanges: exchangesFromHistory(history), level: levelBeforeBoundaryChecks(result, proxy ?? null), context: `${runId}:${tag}-boundary`,
+      });
       return { result, composite: computeCompositeCefrScore(result, proxy ?? null) };
     };
     const main = await evaluate(config.audioProxy, "cefr-eval");

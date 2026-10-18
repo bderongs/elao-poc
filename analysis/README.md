@@ -36,7 +36,7 @@ npm run analysis:calibration                 # the report (agreement, level-by-l
 - The exports (`doc/SpeechAce/`, one .xlsx per client) hold names and e-mails: they stay out of git. Only levels and scores are stored, on `sessions.speechace_scores.reference`; `reference.calibration = true` marks the set.
 - **After a prompt change** (bump `CEFR_PROMPT_VERSION`), run `score` again — it only evaluates sessions with no evaluation at the new version — then `npm run analysis:calibration` and compare with the previous report (`--prompt v6` reads an older version).
 - `score` and `build` write to the shared database and call paid APIs; the report only reads.
-- The format has no C2 questions, so the C2 gate would hold everyone below C2; the report's levels are computed with the gate off.
+- Levels are computed with the production rules, so they stop at C1+ like the live test; a reference C2 scored C1+ counts as one level apart.
 - **Formula changes** don't need re-evaluating: `npm run analysis:calibration -- --variants pron-stretch,linear-axes` compares rule sets (scenarios) on the same evaluations.
 - **Pronunciation engines**: `npx tsx scripts/calibration-set.ts compare voxtral` runs another engine on every answer (comparison only — though an admin "recompute" on one of these sessions would then make the latest engine its headline), and the report adds an engine-by-engine comparison.
 
@@ -74,7 +74,7 @@ Baseline check: the replay's production rules equal the live formula on 59/59 se
 ### What to check before shipping a rule
 
 1. **No regression where we are confident.** Mid-range sessions (A2–C1) should not move unless you intended it.
-2. **It does what it was meant to do.** E.g. the C2 gate should hold back C1 sessions, not native ones.
+2. **It does what it was meant to do.** E.g. a curve change should move the levels it targets, and nothing else.
 3. **Weak sessions stay put.** A rule that rescues weak candidates is a bug.
 4. **Mind the sample.** Most stored sessions are the team's own EN/FR tests. The replay is a *regression guard* (nothing broke), not a *calibration* (the thresholds are right). Calibration needs more real sessions, ideally including non-native controls.
 
@@ -89,12 +89,12 @@ Ladder (ET)   ──► c2_answers_well (answers to C2-bank questions judged "we
                           │
    mean of the axes ── curve: ≤ 8 → × 10, 8 → 80, 9 → 87, 9.5 → 90, 10 → 100
                           │
-   C2 gate: a C2 score is held at 89 unless speaker_errors ≤ 2 and c2_answers_well ≥ 2
+   ceiling: the score stops at 89 (C1+); "top of scale" when c2_answers_well ≥ 2 and axis mean ≥ 8.75
                           ▼
                        score ──► level (5-point bands)
 ```
 
-The evaluator's own holistic `score_percent` is still stored but no longer the base (it was noisy: identical axes gave 78 or 82). Axis-mean base since **2026-10-08**; curve, C2 gate and fluency cap since **2026-10-14** (a C1 speaker was rated C2: the evaluator scores C1 at 8–9 per axis, and the old × 10 plus the +5 % bonus and C2 floor turned that into C2). `--scenario before-2026-10-14` replays the old rules.
+The evaluator's own holistic `score_percent` is still stored but no longer the base (it was noisy: identical axes gave 78 or 82). Axis-mean base since **2026-10-08**; curve, C2 gate and fluency cap since **2026-10-14** (a C1 speaker was rated C2: the evaluator scores C1 at 8–9 per axis, and the old × 10 plus the +5 % bonus and C2 floor turned that into C2). `--scenario before-2026-10-14` replays the old rules. Since **2026-10-18** the test doesn't report C2 at all (`ceiling`): C1 and C2 couldn't be told apart reliably (calibration set, live tests with a C1 and a native speaker); `--scenario show-c2` replays the 14–18 October rules that did.
 
 | Piece | File |
 |---|---|
@@ -114,9 +114,9 @@ The replay runs the **same engine** as the app (`PRODUCTION_RULES` *is* `SCORING
 
 The fluency axis is capped at the top of the band the speaking rate allows (`FLUENCY_WPM_BANDS`, e.g. 115–129 wpm → at most 8.5), instead of trusting the LLM to follow its own table. Since 2026-10-14 the rate only caps: a fast speaker no longer gets 10 for speed alone (`--scenario wpm-band` replays the old raise-and-cap rule). A speaking rate measured on little speech is noise (one 7-word answer came out at 341 wpm), so the rule only applies when there are **≥ 3 answers, ≥ 100 words in total and a rate ≤ 220 wpm** (`WPM_RELIABLE` in `lib/cefr-score.ts`). It needs the answer evidence, so it applies to sessions evaluated since 2026-10-08; for new evaluations the enforced value is also what is stored, so the fluency bar matches the score. Backtest it on old sessions with `--scenario no-wpm-fluency --evidence turns`.
 
-### The C2 gate and old sessions
+### The ceiling, "top of scale" and old sessions
 
-The gate needs two figures stamped on the evaluation when it is created: `speaker_errors` (from the evaluator, prompt v6) and `c2_answers_well` (counted from the ladder, whose steps record each answer's bank-question rung since 2026-10-14). **Sessions evaluated before 2026-10-14 have neither, so they can't show C2.** `--scenario no-c2-gate` shows what the curve alone does.
+The "top of scale" note needs `c2_answers_well`, stamped on the evaluation when it is created (counted from the ladder, whose steps record each answer's bank-question rung since 2026-10-14). **Sessions evaluated before 2026-10-14 never get it** — they still stop at C1+. `speaker_errors` (prompt v6+) is stored and shown in the admin but no longer decides anything.
 
 `--evidence turns` recomputes the answer count and length from the stored turns (they feed the speaking-rate cap and the old C2 floor, `--scenario with-floor`); "Before" then becomes hypothetical (the report says so).
 
@@ -131,7 +131,7 @@ Each is an override of today's rules.
 | `linear-axes` | Axis mean × 10 instead of the curve | — |
 | `with-bonus` | Bring back the +5 % bonus (2 axes ≥ 9) | — |
 | `with-floor` | Bring back the C2 floor | Track V |
-| `no-c2-gate` | Switch the C2 evidence gate off | — |
+| `show-c2` | Report C2 again: no ceiling, C2 by evidence (the 14–18 October rules) | — |
 | `wpm-band` | The speaking rate also raises fluency into its band | AB-07 |
 | `no-wpm-fluency` | Ignore the speaking rate entirely | AB-07 |
 | `pron-stretch` / `pron-linear` / `pron-soft` | Stretch the pronunciation engine's squeezed 65–85 range over the axis (`pronunciationCurve`) | calibration |
@@ -149,7 +149,7 @@ Each is an override of today's rules.
 },
 ```
 
-The knobs are the fields of `ScoringRules` in `lib/cefr-score.ts`: `baseScore`, `axisCurve`, `pronunciationCurve`, `fluencyFromWpm`, `bonus`, `c2Floor`, `c2Gate`. An override replaces the field whole.
+The knobs are the fields of `ScoringRules` in `lib/cefr-score.ts`: `baseScore`, `axisCurve`, `pronunciationCurve`, `fluencyFromWpm`, `bonus`, `c2Floor`, `c2Gate`, `boundaryCheck`, `ceiling`. An override replaces the field whole.
 
 **C. A genuinely new kind of rule** — add a field to `ScoringRules` (default = off in `PRODUCTION_RULES`), implement it in `scoreWithRules` (`lib/cefr-score.ts`), then add a scenario that turns it on. Keep "off" equal to the current behaviour.
 

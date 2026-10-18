@@ -19,6 +19,8 @@ const FR_LABELS: CefrPanelLabels = {
   toImprove: "À améliorer",
   notableErrors: "Erreurs notables",
   confidence: { high: "ÉLEVÉE", medium: "MOYENNE", low: "FAIBLE" },
+  topOfScale:
+    "Le niveau le plus élevé évalué par ce test. Votre expression orale se situe en haut de notre échelle ; votre niveau est peut-être encore supérieur (C2), ce que cette courte conversation n'est pas conçue pour mesurer.",
 };
 
 export default async function DashboardSessionDetailPage({

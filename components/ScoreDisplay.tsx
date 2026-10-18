@@ -121,6 +121,9 @@ const DEFAULT_CEFR_LABELS = {
   toImprove: "To improve",
   notableErrors: "Notable errors",
   confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
+  /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). */
+  topOfScale:
+    "The highest level this test assesses. Your spoken language is at the top of our scale; your level may be higher still (C2), which this short conversation is not designed to measure.",
 };
 
 export type CefrPanelLabels = Partial<typeof DEFAULT_CEFR_LABELS>;
@@ -158,7 +161,7 @@ export function CefrPanel({
   const vocabGram  = result.dimensions.vocabulary_grammar;
   const comm       = result.dimensions.communication;
 
-  const { score: compositeScore, level: compositeLevel } = computeCompositeCefrScore(result, pronunciationAvg);
+  const { score: compositeScore, level: compositeLevel, topOfScale } = computeCompositeCefrScore(result, pronunciationAvg);
 
   const dim4: [string, number | null][] = [
     ["Pronunciation", pronScore],
@@ -208,6 +211,9 @@ export function CefrPanel({
             {t.score} {compositeScore}/100
           </div>
           {sourceLabel && <div style={{ fontSize: 10, color: faintColor, marginTop: 2 }}>via {sourceLabel}</div>}
+          {topOfScale && (
+            <div style={{ fontSize: light ? 13 : 11, lineHeight: 1.5, color: bodyColor, marginTop: 6, maxWidth: 420 }}>{t.topOfScale}</div>
+          )}
         </div>
         <span
           style={

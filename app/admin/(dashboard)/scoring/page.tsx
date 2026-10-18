@@ -113,15 +113,17 @@ export default function ScoringGuidePage() {
         <p style={label}>
           Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). Up to an average of 8
           the scale is simply × 10 (7 → 70, B2; 8 → 80, C1). Above 8 it is stretched, because the AI scores a C1
-          speaker 8-9 on each dimension: an average of 9 gives 87 (C1+), and C2 (90) needs an average of 9.5. Example
-          above: average 8.5 → {composite.score}, {composite.level}.
+          speaker 8-9 on each dimension: an average of 9 gives 87 (C1+). Example above: average 8.5 →{" "}
+          {composite.score}, {composite.level}.
         </p>
         <p style={{ ...label, marginBottom: 0 }}>
-          <strong>C2 needs proof:</strong> a score in the C2 band is held at 89 (C1+) unless the AI counted at most 2
-          genuine vocabulary/grammar errors in the whole conversation (the two &quot;jokers&quot;) <em>and</em> the
-          candidate answered at least 2 of the C2 questions well. Sessions from before 2026-10-14 don&apos;t have that
-          evidence, so they can&apos;t show C2. From 2026-10-08 to 2026-10-14 a +5% bonus and a &quot;C2 floor&quot;
-          applied on top of the average; both lifted C1 speakers into C2 and were removed.
+          <strong>The scale stops at C1+ (89).</strong> A short conversation can&apos;t reliably tell C1 from C2 — the
+          AI scores a strong C1 speaker and a native speaker about the same — so the test doesn&apos;t report C2.
+          When a C1+ candidate also answered at least 2 of the C2 questions well, with an average of 8.75 or more, the
+          result says they are at the top of what the test measures and may be higher still. The C2 questions are
+          still asked: they separate C1 from C1+ and trigger that message. History: until 2026-10-14 a +5% bonus and a
+          &quot;C2 floor&quot; lifted C1 speakers into C2; from 2026-10-14 to 2026-10-18 C2 needed C2-question
+          evidence and at most 2 counted errors, which proved too noisy (false errors on natives).
         </p>
       </ExplainerCard>
 
@@ -176,8 +178,7 @@ export default function ScoringGuidePage() {
           wrong-looking words in the transcript are assumed to be mistakes made turning speech into text, not real
           speaker errors, and aren&apos;t penalized. That benefit of the doubt stops at the top: for 9/10 or more (and
           for C1+/C2) only 2 errors in the whole conversation are let off as &quot;jokers&quot;, and every further one
-          counts. The AI lists the errors it counted; that list also decides whether C2 is possible (see{" "}
-          <a href="#score-global" style={linkStyle}>Global score</a>).
+          counts. The AI lists the errors it counted (shown in the admin; they no longer decide the level).
         </p>
       </ExplainerCard>
 

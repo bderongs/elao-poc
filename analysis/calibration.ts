@@ -13,8 +13,8 @@
  * so "within one level" matters more than exact matches.
  *
  * The Speechace format is five short monologues with no C2 questions and no
- * difficulty ladder, so the C2 gate always holds these sessions below C2: the
- * "level" column is computed with the gate off, and the report says how many
+ * difficulty ladder; levels are computed with the production rules (the
+ * test stops at C1+, see ScoringRules.ceiling), and the report says how many
  * the gate would have held back.
  *
  * Pronunciation engines: when the set was also run through other engines
@@ -138,11 +138,11 @@ async function main() {
   p();
   p(`Calibration set: ${sessions.length} sessions, ${rows.length} evaluated with this prompt and model.`);
   if (rows.length < sessions.length) p(`⚠ ${sessions.length - rows.length} not evaluated yet — run \`npx tsx scripts/calibration-set.ts score\`.`);
-  p(`Levels below are computed with the C2 gate off (no C2 questions in this format); the gate would hold back ${rows.filter((r) => r.heldByGate).length}.`);
+  p(`Levels below use the production rules: the scale stops at C1+, so a reference C2 is at best one level apart.`);
   p();
 
   if (variants.length) {
-    // Same evaluations, other rule sets (gate off, as above): what a formula change would do to agreement.
+    // Same evaluations, other rule sets: what a formula change would do to agreement.
     const sets: [string, ScoringRules][] = [["(production)", noGate], ...variants.map((v) => {
       if (!SCENARIOS[v]) throw new Error(`Unknown scenario "${v}" (analysis/scenarios.ts)`);
       return [v, { ...noGate, ...SCENARIOS[v].overrides, c2Gate: null }] as [string, ScoringRules];
@@ -195,6 +195,28 @@ async function main() {
     p("## Pronunciation vs Speechace");
     p();
     p(`${pr.length} sessions: our mean ${mx.toFixed(1)}, Speechace ${my.toFixed(1)} (difference ${(mx - my).toFixed(1)}), correlation r = ${(cov / (sx * sy)).toFixed(2)}.`);
+    p();
+  }
+
+  // ── Boundary checks: does the judge's choice agree with the references? ──
+  const withChecks = rows.filter((r) => r.result.boundary_checks);
+  if (withChecks.length) {
+    p(`## Boundary checks (${withChecks.length} sessions)`);
+    p();
+    p("A decision agrees with a reference when it picks the side the reference level is on (\"upper\" and the reference is at or above the upper level, \"lower\" and it is at or below the lower one). Split = the two runs disagreed.");
+    p();
+    p("| Check | Decided | Split | Said upper | Agrees with global | Agrees with oral |");
+    p("|---|---|---|---|---|---|");
+    for (const dir of ["up", "down"] as const) {
+      const checks = withChecks.map((r) => ({ r, c: r.result.boundary_checks![dir] })).filter((x) => x.c);
+      const decided = checks.filter((x) => x.c!.decision !== "split");
+      const agrees = (key: "global" | "oral") => {
+        const xs = decided.filter((x) => x.r[key] >= 0);
+        const ok = xs.filter((x) => x.c!.decision === "upper" ? x.r[key] >= levelIndex(x.c!.upper) : x.r[key] <= levelIndex(x.c!.lower));
+        return pct(ok.length, xs.length);
+      };
+      p(`| ${dir} | ${decided.length} | ${checks.length - decided.length} | ${decided.filter((x) => x.c!.decision === "upper").length} | ${agrees("global")} | ${agrees("oral")} |`);
+    }
     p();
   }
 

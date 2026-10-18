@@ -20,6 +20,8 @@ const FR_CEFR_LABELS = {
   toImprove: "À travailler",
   notableErrors: "Erreurs notables",
   confidence: { high: "FIABLE", medium: "MOYEN", low: "INDICATIF" },
+  topOfScale:
+    "Le niveau le plus élevé évalué par ce test. Votre expression orale se situe en haut de notre échelle ; votre niveau est peut-être encore supérieur (C2), ce que cette courte conversation n'est pas conçue pour mesurer.",
 };
 
 /**
