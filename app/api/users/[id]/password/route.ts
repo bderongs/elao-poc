@@ -5,9 +5,9 @@ export const runtime = "nodejs";
 
 /**
  * PATCH /api/users/:id/password — admin-only (gated by middleware.ts).
- * Sets a password via the service-role admin API, no email involved — the
- * only account-provisioning path that works while Supabase's auth-email
- * rate limit is blocking magic links.
+ * Sets a password via the service-role admin API, no email involved — lets
+ * an admin hand out working credentials without the reset-email flow (which
+ * Supabase's auth-email rate limit can block).
  */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

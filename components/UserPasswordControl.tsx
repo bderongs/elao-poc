@@ -4,9 +4,9 @@ import { useState } from "react";
 import { adminColors } from "@/lib/admin-theme";
 
 /**
- * Inline "set password" control for the admin Users table — a second,
- * email-free way to provision an account (alongside magic link), since
- * Supabase's auth-email rate limit can block magic links entirely.
+ * Inline "set password" control for the admin Users table — an email-free
+ * way to provision or reset an account, since Supabase's auth-email rate
+ * limit can block the /login/forgot reset email.
  */
 export function UserPasswordControl({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false);

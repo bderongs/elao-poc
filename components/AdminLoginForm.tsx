@@ -14,27 +14,24 @@ const inputStyle: React.CSSProperties = {
 };
 
 /**
- * Two independent sign-in paths: password (instant, no email — the only
- * option that works while Supabase's auth-email rate limit is blocking
- * magic links) and magic link (no password to manage, but email-dependent).
- * An account only has a password if an admin set one via /admin/users.
+ * Email + password only — admins are regular accounts whose profile has
+ * role 'admin'. A forgotten password goes through the candidate-facing
+ * /login/forgot reset flow (or another admin sets one via /admin/users).
  */
 export function AdminLoginForm({ next, error }: { next: string; error?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [passwordStatus, setPasswordStatus] = useState<"idle" | "sending" | "error">("idle");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [linkStatus, setLinkStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [linkError, setLinkError] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "sending" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const submitPassword = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPasswordStatus("sending");
-    setPasswordError(null);
+    setStatus("sending");
+    setErrorMessage(null);
     const { error } = await getSupabaseBrowser().auth.signInWithPassword({ email, password });
     if (error) {
-      setPasswordStatus("error");
-      setPasswordError(error.message);
+      setStatus("error");
+      setErrorMessage(error.message);
       return;
     }
     // Hard navigation so middleware re-runs with the session cookie the
@@ -43,28 +40,13 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
     window.location.href = next;
   };
 
-  const submitMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLinkStatus("sending");
-    setLinkError(null);
-    const { error } = await getSupabaseBrowser().auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
-    });
-    if (error) {
-      setLinkStatus("error");
-      setLinkError(error.message);
-      return;
-    }
-    setLinkStatus("sent");
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <input
         type="email"
         required
         autoFocus
+        autoComplete="email"
         placeholder="you@example.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
@@ -75,71 +57,41 @@ export function AdminLoginForm({ next, error }: { next: string; error?: string }
         <div style={{ color: adminColors.danger, fontSize: 12 }}>That account doesn&apos;t have admin access.</div>
       )}
 
-      <form onSubmit={submitPassword} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <input
-          type="password"
-          required
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={inputStyle}
-        />
-        {passwordStatus === "error" && passwordError && (
-          <div style={{ color: adminColors.danger, fontSize: 12 }}>{passwordError}</div>
-        )}
-        <button
-          type="submit"
-          disabled={passwordStatus === "sending"}
-          style={{
-            padding: "8px 10px",
-            borderRadius: 4,
-            border: "none",
-            background: adminColors.ink,
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: 14,
-            cursor: passwordStatus === "sending" ? "default" : "pointer",
-            opacity: passwordStatus === "sending" ? 0.7 : 1,
-          }}
-        >
-          {passwordStatus === "sending" ? "Signing in…" : "Sign in with password"}
-        </button>
-      </form>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, color: adminColors.muted, fontSize: 11 }}>
-        <div style={{ flex: 1, height: 1, background: adminColors.border }} />
-        or
-        <div style={{ flex: 1, height: 1, background: adminColors.border }} />
-      </div>
-
-      {linkStatus === "sent" ? (
-        <div style={{ color: adminColors.ink, fontSize: 13, textAlign: "center" }}>
-          Check <strong>{email}</strong> for a sign-in link.
-        </div>
-      ) : (
-        <form onSubmit={submitMagicLink} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {linkStatus === "error" && linkError && (
-            <div style={{ color: adminColors.danger, fontSize: 12 }}>{linkError}</div>
-          )}
-          <button
-            type="submit"
-            disabled={linkStatus === "sending"}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 4,
-              border: `1px solid ${adminColors.border}`,
-              background: "none",
-              color: adminColors.ink,
-              fontWeight: 600,
-              fontSize: 14,
-              cursor: linkStatus === "sending" ? "default" : "pointer",
-              opacity: linkStatus === "sending" ? 0.7 : 1,
-            }}
-          >
-            {linkStatus === "sending" ? "Sending…" : "Send magic link instead"}
-          </button>
-        </form>
+      <input
+        type="password"
+        required
+        autoComplete="current-password"
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        style={inputStyle}
+      />
+      {status === "error" && errorMessage && (
+        <div style={{ color: adminColors.danger, fontSize: 12 }}>{errorMessage}</div>
       )}
-    </div>
+      <button
+        type="submit"
+        disabled={status === "sending"}
+        style={{
+          padding: "8px 10px",
+          borderRadius: 4,
+          border: "none",
+          background: adminColors.ink,
+          color: "#fff",
+          fontWeight: 600,
+          fontSize: 14,
+          cursor: status === "sending" ? "default" : "pointer",
+          opacity: status === "sending" ? 0.7 : 1,
+        }}
+      >
+        {status === "sending" ? "Signing in…" : "Sign in"}
+      </button>
+      <a
+        href={`/login/forgot?next=${encodeURIComponent(next)}`}
+        style={{ color: adminColors.muted, fontSize: 12, textAlign: "center" }}
+      >
+        Forgot password?
+      </a>
+    </form>
   );
 }

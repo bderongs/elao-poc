@@ -5,10 +5,10 @@ import { CandidateTopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
 
 /**
- * Landing spot for the post-test sign-up magic link (see
- * components/ClaimResultsForm.tsx) — /auth/callback exchanges the code for a
- * session cookie and redirects here with the just-finished session's id, so
- * it can be tied to the new account before showing a confirmation.
+ * Landing spot after the post-test sign-up/sign-in (see
+ * components/ClaimResultsForm.tsx) — arrives already logged in, with the
+ * just-finished session's id, so it can be tied to the account before
+ * showing a confirmation.
  */
 export default async function ResultsSavedPage({
   searchParams,

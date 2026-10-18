@@ -49,8 +49,8 @@ export async function setUserRole(id: string, role: "user" | "admin"): Promise<v
 
 // Sets a password via the admin API — doesn't touch email delivery at all,
 // so it works even while Supabase's auth-email rate limit is blocking
-// magic links. Lets an admin hand a colleague working credentials directly
-// instead of waiting on (or generating) a link.
+// password-reset emails. Lets an admin hand a colleague working credentials
+// directly instead of waiting on a reset link.
 export async function setUserPassword(id: string, password: string): Promise<void> {
   const supabase = getSupabaseServer();
   const { error } = await supabase.auth.admin.updateUserById(id, { password });

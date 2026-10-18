@@ -545,7 +545,7 @@ async function upsertProfilePreference(userId: string, language: string, cefrLev
 /**
  * Ties an anonymous session to a newly signed-up account (the post-test
  * "save my results" flow) — the `user_id is null` guard makes a repeat call
- * (e.g. a double-clicked magic link) a no-op instead of reassigning an
+ * (e.g. a reload of /results-saved) a no-op instead of reassigning an
  * already-claimed session.
  */
 export async function claimSession(sessionId: string, userId: string): Promise<void> {

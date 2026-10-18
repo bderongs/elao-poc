@@ -214,6 +214,15 @@ Built, not activated (`lib/score-callback.ts`, shown on `/admin/system-config`).
   - whether they need their own user reference on the test link.
 - [ ] Set `enabled: true`, `SCORE_CALLBACK_URL` and `SCORE_CALLBACK_SECRET` in Vercel, then run one real session and check delivery.
 
+### 6.2 Email + password accounts — Supabase settings and live check *(new 2026-10-14)*
+Magic links are gone. `/login`, the welcome screen and the post-session claim card all use one form (`components/AuthForm.tsx`) with a "Se connecter" tab and a "Créer un compte" tab (email, password, confirmation, at least 8 characters). Admin login keeps password only. "Mot de passe oublié" sends a reset email: `/login/forgot` → `/auth/callback` → `/login/reset`.
+- [ ] In the Supabase dashboard (each project), go to Authentication → Providers → Email: turn **"Confirm email" off** and set the minimum password length to 8. If confirmation stays on, sign-up shows "Vérifiez vos emails" instead of logging in.
+- [ ] Check that `<site>/auth/callback` is in Redirect URLs for local and Vercel. The reset email depends on it.
+- [ ] Optional: translate the "Reset password" email template into French.
+- [ ] Live check: sign-up, then sign-out and sign-in, the claim from the results card (`sessions.user_id` set), the reset email, and `/?level=B1` surviving sign-in.
+- [ ] Tell existing users: accounts created by magic link have no password. They use "Mot de passe oublié" once, or an admin sets one in `/admin/users`.
+- [ ] Later: Google sign-in. The button is already there but disabled. Enable the Google provider in Supabase (Google Cloud OAuth client) and set `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=true`.
+
 ---
 
 ## 7. Open questions for the client
