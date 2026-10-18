@@ -1,5 +1,6 @@
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { getTurnForAssessment } from "@/lib/sessions-service";
+import { fetchRecording } from "@/lib/recordings";
 import { getProvider } from "@/lib/pronunciation/registry";
 import { getProvider as getSttProvider, LIVE_STT_PROVIDER_ID } from "@/lib/stt/registry";
 import type { TurnEvaluationRow } from "@/lib/types";
@@ -18,10 +19,7 @@ export async function assessTurn(turnId: string, providerIds: string[]): Promise
   if (!turn) throw new Error("turn not found");
   if (!turn.audioUrl) throw new Error("turn has no recording");
 
-  const audioRes = await fetch(turn.audioUrl);
-  if (!audioRes.ok) throw new Error(`failed to fetch recording: HTTP ${audioRes.status}`);
-  const contentType = audioRes.headers.get("content-type") || "audio/webm;codecs=opus";
-  const audioBuf = await audioRes.arrayBuffer();
+  const { audio: audioBuf, contentType } = await fetchRecording(turn.audioUrl);
 
   const supabase = getSupabaseServer();
 

@@ -8,6 +8,9 @@ import {
 } from "@/lib/pronunciation-rollup";
 import { getSystemConfig } from "@/lib/system-config";
 import { isCefrRung } from "@/lib/cefr-rung";
+import { verifyEvaluation } from "@/lib/evaluation-signature";
+import { signRecordingUrls } from "@/lib/recordings";
+import { logServerEvent } from "@/lib/server-log";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { LadderRecord } from "@/lib/session-length";
@@ -188,9 +191,19 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
   // migration 0011 must still show the session.
   const { data: ladderRow } = await supabase.from("sessions").select("ladder_json").eq("id", id).maybeSingle();
 
+  // The bucket is private: pages get expiring links, never the stored URL (lib/recordings.ts).
+  const [sessionAudioUrl, ...turnAudioUrls] = await signRecordingUrls([
+    (session as SessionDetailRow).audio_url,
+    ...turnRows.map((t) => t.audio_url),
+  ]);
+
   return {
-    session: { ...(session as SessionDetailRow), ladder_json: (ladderRow?.ladder_json ?? null) as LadderRecord | null },
-    turns: turnRows,
+    session: {
+      ...(session as SessionDetailRow),
+      audio_url: sessionAudioUrl,
+      ladder_json: (ladderRow?.ladder_json ?? null) as LadderRecord | null,
+    },
+    turns: turnRows.map((t, i) => ({ ...t, audio_url: turnAudioUrls[i] })),
     evaluations: (evaluations ?? []) as EvaluationRow[],
     turnEvaluations,
   };
@@ -297,14 +310,31 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
 
   const language = (form.get("language") as string | null) ?? "en";
   const durationSeconds = parseInt((form.get("durationSeconds") as string | null) ?? "0", 10);
-  const cefrLevel = (form.get("cefrLevel") as string | null) || null;
-  const globalScoreRaw = form.get("globalScore") as string | null;
-  const globalScore = globalScoreRaw ? parseInt(globalScoreRaw, 10) : null;
-  const scores = parseJsonField(form, "scores", null);
-  const evaluation = parseJsonField(form, "evaluation", null);
   const pronunciationScores = parseJsonField(form, "pronunciationScores", null);
   const turns = parseJsonField<TurnMeta[]>(form, "turns", []);
   const ladder = sanitizeLadder(parseJsonField<unknown>(form, "ladder", null));
+
+  // This route is public, so the evaluation is kept only if /api/evaluate
+  // signed it for these answers (lib/evaluation-signature.ts); level, score
+  // and dimensions are read from it rather than from separate form fields.
+  // An unverified one is dropped, not the session — an admin can still
+  // re-run the evaluation from the eval lab.
+  const claimedEvaluation = parseJsonField<CefrResult | null>(form, "evaluation", null);
+  const evaluationVerified =
+    claimedEvaluation !== null &&
+    verifyEvaluation(form.get("evaluationSignature") as string | null, {
+      language,
+      evaluation: claimedEvaluation,
+      pronunciation: pronunciationScores,
+      userTurns: turns.filter((t) => t.role === "user").map((t) => t.content),
+    });
+  if (claimedEvaluation && !evaluationVerified) {
+    logServerEvent("session_evaluation_unverified", { language, claimedLevel: claimedEvaluation.level ?? null });
+  }
+  const evaluation = evaluationVerified ? claimedEvaluation : null;
+  const cefrLevel = evaluation?.level || null;
+  const globalScore = typeof evaluation?.score_percent === "number" ? Math.trunc(evaluation.score_percent) : null;
+  const scores = evaluation?.dimensions ?? null;
 
   // ── whole-session recording (listen-back) — already uploaded by the browser ──
   const publicUrl = (path: string) => supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;

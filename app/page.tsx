@@ -593,7 +593,12 @@ export default function Home() {
   }, [sessionActive]);
 
   // ── save session via the server API (no direct Supabase access from the browser) ──
-  const saveSession = async (audioBlob: Blob | null, result?: typeof cefrResult, pronunciationScores: PronunciationAvg | null = pronunciationAvg) => {
+  const saveSession = async (
+    audioBlob: Blob | null,
+    result?: typeof cefrResult,
+    pronunciationScores: PronunciationAvg | null = pronunciationAvg,
+    evaluationSignature: string | null = null,
+  ) => {
     if (sessionSavedRef.current) return;
     sessionSavedRef.current = true;
 
@@ -605,10 +610,9 @@ export default function Home() {
     if (liveSessionIdRef.current) form.append("sessionId", liveSessionIdRef.current);
     form.append("language", language);
     form.append("durationSeconds", String(elapsed));
-    if (result?.level) form.append("cefrLevel", result.level);
-    if (result?.score_percent != null) form.append("globalScore", String(result.score_percent));
-    form.append("scores", JSON.stringify(result?.dimensions ?? null));
+    // Level, score and dimensions are read server-side from the (verified) evaluation itself.
     form.append("evaluation", JSON.stringify(result ?? null));
+    if (evaluationSignature) form.append("evaluationSignature", evaluationSignature);
     form.append("pronunciationScores", JSON.stringify(pronunciationScores));
     form.append("ladder", JSON.stringify(buildLadderRecord()));
 
@@ -1908,6 +1912,7 @@ export default function Home() {
     const finalPronunciationAvg = computePronunciationAvgFromHistory(historyRef.current);
 
     let result: CefrResult | null = null;
+    let evaluationSignature: string | null = null;
     try {
       const userTurns = historyRef.current
         .filter((m) => m.role === "user")
@@ -1926,6 +1931,8 @@ export default function Home() {
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
       result = await res.json();
+      // Sent back with the save, which only stores an evaluation it can verify (lib/evaluation-signature.ts).
+      evaluationSignature = res.headers.get("X-Evaluation-Signature");
     } catch (e) {
       console.error("Evaluation failed:", e);
       setEvalFailed(true);
@@ -1934,7 +1941,7 @@ export default function Home() {
 
     // Persist regardless of whether evaluation succeeded — this is the only
     // place a session is ever saved, so it must always run.
-    await saveSession(blob ?? audioBlob, result ?? undefined, finalPronunciationAvg);
+    await saveSession(blob ?? audioBlob, result ?? undefined, finalPronunciationAvg, evaluationSignature);
 
     setEvalDone(true); // EvaluatingScreen takes it from here (min-visible-duration, then phase -> "done")
   };

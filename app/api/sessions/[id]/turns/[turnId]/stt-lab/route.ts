@@ -1,4 +1,5 @@
 import { getTurnForAssessment } from "@/lib/sessions-service";
+import { fetchRecording } from "@/lib/recordings";
 import { getProvider, LIVE_STT_PROVIDER_ID } from "@/lib/stt/registry";
 
 export const runtime = "nodejs";
@@ -25,12 +26,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     if (!turn) return Response.json({ error: "turn not found" }, { status: 404 });
     if (!turn.audioUrl) return Response.json({ error: "turn has no recording" }, { status: 400 });
 
-    const audioRes = await fetch(turn.audioUrl);
-    if (!audioRes.ok) {
-      return Response.json({ error: `failed to fetch recording: HTTP ${audioRes.status}` }, { status: 502 });
+    let recording: Awaited<ReturnType<typeof fetchRecording>>;
+    try {
+      recording = await fetchRecording(turn.audioUrl);
+    } catch (e) {
+      return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
     }
-    const contentType = audioRes.headers.get("content-type") || "audio/webm;codecs=opus";
-    const audioBuf = await audioRes.arrayBuffer();
+    const { audio: audioBuf, contentType } = recording;
 
     const result = await getProvider(LIVE_STT_PROVIDER_ID).transcribe({
       audio: audioBuf,

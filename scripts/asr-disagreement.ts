@@ -22,6 +22,7 @@ for (const f of [".env", ".env.local"]) if (existsSync(f)) process.loadEnvFile(f
 
 import { getSupabaseServer } from "../lib/supabase-server";
 import { deepgramVerbatim } from "../lib/pronunciation/providers/azure-ensemble";
+import { recordingPath } from "../lib/recordings";
 
 const args = process.argv.slice(2);
 const opt = (name: string, def?: string) => {
@@ -100,10 +101,13 @@ async function main() {
       let audio: ArrayBuffer;
       let contentType = "audio/wav";
       try {
-        const res = await fetch(t.audio_url as string);
-        if (!res.ok) { out.push(`- turn ${t.turn_index}: audio ${res.status}`); continue; }
-        contentType = res.headers.get("content-type") ?? contentType;
-        audio = await res.arrayBuffer();
+        // Private bucket — download with the service-role client, not the stored URL.
+        const path = recordingPath(t.audio_url as string);
+        if (!path) { out.push(`- turn ${t.turn_index}: audio outside the recordings bucket`); continue; }
+        const { data: file, error } = await sb.storage.from("recordings").download(path);
+        if (error || !file) { out.push(`- turn ${t.turn_index}: audio ${error?.message ?? "missing"}`); continue; }
+        contentType = file.type || contentType;
+        audio = await file.arrayBuffer();
       } catch (e) { out.push(`- turn ${t.turn_index}: audio fetch failed`); continue; }
 
       const dg = await deepgramVerbatim(audio, contentType, s.language === "nl" ? "nl-BE" : s.language);

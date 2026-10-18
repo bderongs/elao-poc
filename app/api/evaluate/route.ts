@@ -13,6 +13,7 @@ import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/cefr-eval";
 import { logServerEvent } from "@/lib/server-log";
 import { fluencyFromWpm, levelBeforeBoundaryChecks, SCORING_RULES } from "@/lib/cefr-score";
 import { withBoundaryChecks, type Exchange } from "@/lib/cefr-boundary";
+import { EVALUATION_SIGNATURE_HEADER, signEvaluation } from "@/lib/evaluation-signature";
 
 interface SttContext {
   pronunciation: number;
@@ -34,7 +35,7 @@ interface EvalRequest {
 export async function POST(req: Request) {
   const { language, userTurns, pronunciationContext, ladderSteps, exchanges } = (await req.json()) as EvalRequest;
 
-  if (!userTurns.length) {
+  if (!Array.isArray(userTurns) || !userTurns.length || !userTurns.every((t) => typeof t === "string")) {
     return NextResponse.json(
       { error: "No user turns provided" },
       { status: 400 },
@@ -79,7 +80,10 @@ export async function POST(req: Request) {
     });
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
-    return NextResponse.json(evaluation);
+    // The browser hands this result to the public final save — the signature
+    // is what lets that save tell it apart from a made-up one (lib/evaluation-signature.ts).
+    const signature = signEvaluation({ language, evaluation, pronunciation: pronunciationContext ?? null, userTurns });
+    return NextResponse.json(evaluation, { headers: { [EVALUATION_SIGNATURE_HEADER]: signature } });
   } catch (e) {
     return NextResponse.json(
       { error: String(e) },

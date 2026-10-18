@@ -1,12 +1,15 @@
 import { AdminLoginForm } from "@/components/AdminLoginForm";
 import { adminColors } from "@/lib/admin-theme";
+import { safeNext } from "@/lib/safe-next";
 
 export default async function AdminLoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ next?: string; error?: string }>;
 }) {
-  const { next = "/admin", error } = await searchParams;
+  const { next: rawNext, error } = await searchParams;
+  // Ends up in window.location.href — an unchecked value is an open redirect or a javascript: URL.
+  const next = safeNext(rawNext, "/admin");
 
   return (
     <div
