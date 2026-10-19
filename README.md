@@ -134,10 +134,17 @@ publique Supabase que pour la connexion et l'envoi de l'audio par URL signée.
   déterminé pourrait donc faire évaluer une transcription inventée. Ce qui
   est garanti, c'est que le score stocké vient bien de notre évaluateur et
   correspond à la transcription stockée, relisible dans l'admin.
-- **Points ouverts** : pas encore de limite de débit sur les API publiques
-  qui appellent les modèles (`/api/chat`, `/api/evaluate`, `/api/transcribe`,
-  `/api/pronunciation`, jetons de transcription) ; à mettre en place (règles
-  du pare-feu Vercel ou limiteur par IP) avant une ouverture large.
+- **Limite de débit** : les API publiques qui appellent les modèles
+  (`/api/chat`, `/api/transcribe`, `/api/pronunciation`,
+  `/api/assess-transcript`, `/api/classify-topic`, jetons de transcription,
+  `/api/evaluate`) sont limitées par adresse IP sur 10 minutes : 1 000 appels
+  en tout, dont 30 évaluations finales (`lib/rate-limit.ts`). Une session
+  complète en fait 100 à 120, ce qui laisse passer environ 8 sessions en même
+  temps derrière une même adresse (réseau d'entreprise ou d'école). Au-delà,
+  la réponse est `429`. Le comptage se fait en mémoire, par serveur : il
+  arrête un script qui martèle l'API depuis une machine, mais ce n'est pas un
+  quota strict. Pour un quota strict, ajouter une règle de limite de débit
+  dans le pare-feu Vercel.
 
 ## Comptes administrateurs
 
