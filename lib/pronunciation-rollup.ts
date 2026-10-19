@@ -24,7 +24,7 @@ import type { PronunciationResult } from "@/lib/pronunciation/types";
  * Voxtral remains registered as an on-demand comparison run from the admin
  * gear for every language — not removed, just no longer the live default —
  * pending a lighter-weight fix (e.g. an independent phonetic-alignment
- * anchor; Qwen-Audio is shortlisted for a follow-up comparison). See
+ * anchor). See
  * lib/system-config.ts, which surfaces this (and the other 4 capabilities'
  * live provider) in the admin UI and per-session logs/records.
  */
