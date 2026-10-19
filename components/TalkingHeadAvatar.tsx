@@ -11,13 +11,13 @@ const VISEME_NAMES = Object.values(VISEMES);
 // viseme-playback code (modules/talkinghead.mjs, its text/timestamp-driven
 // pipeline) rather than invented — that's the one place these ARKit/Oculus
 // blendshapes have already been tuned by the library author against real
-// RPM rigs. Two things it does that we'd gotten wrong by inventing our own
+// ARKit/Oculus-viseme rigs. Two things it does that we'd gotten wrong by inventing our own
 // scheme:
 //
 // 1. jawOpen is NEVER driven by lipsync. It only appears in mood/emoji
 //    expressions there, plus a compatibility shim for avatars missing the
 //    mouthOpen blendshape. The viseme shapes themselves (viseme_aa,
-//    viseme_O, ...) are sculpted as full mouth shapes on a real RPM rig and
+//    viseme_O, ...) are sculpted as full mouth shapes on a real ARKit/Oculus rig and
 //    already carry the jaw-drop — they don't need a second, independently
 //    driven jawOpen stacked on top. Our old JAW_COUPLING/envelope pair was
 //    fighting itself: exactly the "high baseline" the visuals showed.
@@ -53,7 +53,7 @@ const VOLUME_CEIL = 0.5; // at/above this, volume modulation is fully open (matc
 
 // Local avatar (public/avatars/) — must export the ARKit + Oculus viseme
 // blendshapes TalkingHead's rig requires, or lip-sync will silently fail.
-const DEFAULT_AVATAR_URL = "/avatars/woman_2.glb";
+const AVATAR_URL = "/avatars/woman_2.glb";
 
 interface TalkingHeadAvatarProps {
   /**
@@ -228,7 +228,7 @@ export function TalkingHeadAvatar({
         headRotateClamp: "X:[-0.08,0.08] Y:[-0.1,0.1] Z:[-0.06,0.06]",
       });
 
-      const avatarUrl = process.env.NEXT_PUBLIC_AVATAR_GLB_URL || DEFAULT_AVATAR_URL;
+      const avatarUrl = AVATAR_URL;
       await head.showAvatar({ url: avatarUrl });
       loaded = true;
 
@@ -275,7 +275,7 @@ export function TalkingHeadAvatar({
       // The "head" cameraView only crops the *framing* — the full-body mesh
       // (T-posed arms, legs, shoes) is still there and pokes into frame right
       // behind the head. Hide everything but the face/head-adjacent meshes by
-      // their standard RPM material names (works across any RPM export).
+      // their material names (the Wolf3D_* names baked into woman_2.glb).
       const HIDDEN_MATERIALS = new Set([
         "Wolf3D_Body",
         "Wolf3D_Outfit_Top",
