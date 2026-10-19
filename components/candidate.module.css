@@ -55,6 +55,37 @@
   inset: -12px -8px;
 }
 
+/* ─── 0. welcome (what the test is) ────────────────────────────────────── */
+
+.welcomeScreen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 44px;
+  padding: 0 24px 60px;
+}
+
+.welcomeSteps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 220px));
+  gap: 32px;
+}
+
+.welcomeStep {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.welcomeCta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
 /* ─── 1. language picker ───────────────────────────────────────────────── */
 
 .langScreen {
@@ -209,6 +240,28 @@
   }
 
   .fullWidthMobile {
+    width: 100%;
+  }
+
+  .welcomeScreen {
+    justify-content: flex-start;
+    gap: 28px;
+    padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .welcomeSteps {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .welcomeStep {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .welcomeCta {
     width: 100%;
   }
 

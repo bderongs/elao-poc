@@ -23,7 +23,7 @@ import { CandidateTopBar as TopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
 import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
-import { SESSION_DURATION_MINUTES, SESSION_LENGTH_LABEL_FR, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
+import { AVATAR_NAME, SESSION_DURATION_MINUTES, SESSION_LENGTH_LABEL_FR, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { questionById } from "@/lib/question-bank";
 import { substantiveAnswers } from "@/lib/pronunciation-rollup";
@@ -175,10 +175,10 @@ function computePronunciationAvgFromHistory(history: Msg[]): PronunciationAvg | 
 export default function Home() {
   const [language, setLanguage] = useState<Lang>("fr");
   const [sessionStarted, setSessionStarted] = useState(false);
-  /** Pre-session onboarding: "welcome" (sign in / continue as guest) -> optionally
-   *  "confirm-preference" (returning signed-in user, stored language+rung) -> "language" (today's picker)
-   *  -> "instructions" (mic check, doc/new_design screen 2). */
-  const [preSessionStep, setPreSessionStep] = useState<"welcome" | "confirm-preference" | "language" | "instructions">("welcome");
+  /** Pre-session onboarding: "welcome" (what the test is) -> "auth" (sign in / sign up / continue as guest)
+   *  -> "language" (today's picker) -> "instructions" (mic check, doc/new_design screen 2). A returning
+   *  signed-in user skips the first two, landing on "confirm-preference" (stored language+rung) or "language". */
+  const [preSessionStep, setPreSessionStep] = useState<"welcome" | "auth" | "confirm-preference" | "language" | "instructions">("welcome");
   const [micStatus, setMicStatus] = useState<"pending" | "granted" | "denied">("pending");
   const [micDeviceLabel, setMicDeviceLabel] = useState<string | null>(null);
   /** 0-1, sampled from the real mic input — drives both the mic-check meter and the live "userSpeaking" bars. */
@@ -2068,24 +2068,78 @@ export default function Home() {
       {!sessionStarted && preSessionStep === "welcome" && (
         <>
           <TopBar right={<AuthNavLink light />} />
-          <div className={styles.centerScreen}>
-            <div style={{ width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
-              <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
-                Bienvenue
-              </h2>
-              <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
-                Créez un compte pour retrouver votre progression, ou continuez sans compte.
-              </p>
-              <div style={{ width: "100%", boxSizing: "border-box", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22, textAlign: "left" }}>
-                <WelcomeAuthForm light />
-              </div>
-              <span
-                onClick={() => setPreSessionStep("language")}
-                className={`elao-text-action ${styles.tapTarget}`}
-                style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
-              >
-                Continuer sans compte
+          <div className={styles.welcomeScreen}>
+            <div style={{ textAlign: "center", maxWidth: 640, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                Évaluation orale · CECRL
               </span>
+              <h1 className={styles.titleXL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
+                Votre niveau de langue,
+                <br className={styles.hideMobile} /> en une conversation.
+              </h1>
+              <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.55, maxWidth: 540 }}>
+                Échangez à voix haute pendant {SESSION_LENGTH_LABEL_FR} avec {AVATAR_NAME}, notre examinatrice. Ses questions
+                s&apos;adaptent à vos réponses&nbsp;; il n&apos;y a rien à préparer.
+              </p>
+            </div>
+            <div className={styles.welcomeSteps}>
+              {[
+                ["Choisissez la langue", "Français, anglais, néerlandais, espagnol, italien ou allemand."],
+                [`Parlez avec ${AVATAR_NAME}`, "Une vraie conversation, au rythme qui vous convient."],
+                ["Recevez votre niveau", "De A1 à C2, avec le détail : prononciation, fluidité, vocabulaire, grammaire."],
+              ].map(([title, desc], i) => (
+                <div key={title} className={styles.welcomeStep}>
+                  <StepBadge n={i + 1} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#141D33" }}>{title}</span>
+                    <span style={{ fontSize: 15, color: "#6B6F7D", lineHeight: 1.5 }}>{desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className={styles.welcomeCta}>
+              <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={() => setPreSessionStep("auth")} style={primaryBtn()}>
+                Commencer
+              </button>
+              <span style={{ fontSize: 13, color: "#8A8F9C" }}>Prévoyez un endroit calme et un micro.</span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── pre-session: sign in / sign up, or continue as guest ── */}
+      {!sessionStarted && preSessionStep === "auth" && (
+        <>
+          <TopBar />
+          <div className={styles.centerScreen}>
+            <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
+                  Créez votre compte
+                </h2>
+                <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
+                  Pour retrouver vos résultats et suivre votre progression.
+                </p>
+              </div>
+              <div style={{ width: "100%", boxSizing: "border-box", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22, textAlign: "left" }}>
+                <WelcomeAuthForm light defaultMode="signup" />
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "16px 28px" }}>
+                <span
+                  onClick={() => setPreSessionStep("welcome")}
+                  className={`elao-text-action ${styles.tapTarget}`}
+                  style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+                >
+                  ← Retour
+                </span>
+                <span
+                  onClick={() => setPreSessionStep("language")}
+                  className={`elao-text-action ${styles.tapTarget}`}
+                  style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
+                >
+                  Continuer sans compte
+                </span>
+              </div>
             </div>
           </div>
         </>
@@ -2219,23 +2273,7 @@ export default function Home() {
                   ["Laissez un silence", "Léa comprend que vous avez terminé et enchaîne."],
                 ].map(([title, desc], i) => (
                   <div key={title} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-                    <div
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: "50%",
-                        background: "#FDF0D0",
-                        color: "#8A6410",
-                        fontFamily: "'Outfit',sans-serif",
-                        fontSize: 15,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flex: "none",
-                      }}
-                    >
-                      {i + 1}
-                    </div>
+                    <StepBadge n={i + 1} />
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#141D33" }}>{title}</span>
                       <span style={{ fontSize: 15, color: "#6B6F7D" }}>{desc}</span>
@@ -2547,6 +2585,29 @@ function LevelBars({
           />
         );
       })}
+    </div>
+  );
+}
+
+/** Numbered yellow badge for the step lists on the welcome and instructions screens (doc/new_design screen 2). */
+function StepBadge({ n }: { n: number }) {
+  return (
+    <div
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: "50%",
+        background: "#FDF0D0",
+        color: "#8A6410",
+        fontFamily: "'Outfit',sans-serif",
+        fontSize: 15,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flex: "none",
+      }}
+    >
+      {n}
     </div>
   );
 }
