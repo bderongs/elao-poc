@@ -80,10 +80,13 @@ modèle que l'évaluation finale, `lib/cefr-boundary.ts`) existe mais est
   dans le fichier indiqué ci-dessus. La page `/admin/system-config` est en
   lecture seule.
 
-Le coût estimé par session sur `/admin/system-config` est approximatif : la
-conversation, le suivi des thèmes, les voix Gradium et la transcription en
-flux ne sont pas encore chiffrés, et le total n'additionne que les lignes
-chiffrées.
+Le coût estimé par session sur `/admin/system-config` (environ 0,09 $ en
+octobre 2026) est un ordre de grandeur, pas une facture : prix publics des
+fournisseurs × usage moyen des sessions réelles, avec la taille réelle des
+consignes envoyées aux modèles. Le poste principal est la prononciation
+(Azure). Prix et usage moyen sont datés dans `lib/session-cost.ts`, à
+remettre à jour si un fournisseur change ses prix. Le tarif Gradium dépend de
+l'abonnement (calcul fait sur le tarif de l'offre S).
 
 ## Architecture
 
@@ -217,7 +220,6 @@ Le détail de chaque variable est dans `.env.example`.
 | `SCORE_CALLBACK_URL`, `SCORE_CALLBACK_SECRET` | Envoi du score à un système externe (désactivé dans `lib/score-callback.ts`) | Facultatif |
 | `NEXT_PUBLIC_SATISFACTION_MODAL` | `1` = questionnaire de satisfaction après le résultat | Facultatif |
 | `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | `true` = bouton « Continuer avec Google » actif | Facultatif |
-| `NEXT_PUBLIC_AVATAR_GLB_URL` | Avatar 3D (défaut : `public/avatars/woman_2.glb`) | Facultatif |
 
 ## Base de données
 

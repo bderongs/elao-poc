@@ -2,6 +2,8 @@ import { Fragment } from "react";
 import type { CapabilityConfig } from "@/lib/system-config";
 import { FLUENCY_WPM_BANDS, FLUENCY_WPM_HARD_BOUNDARIES } from "@/lib/cefr-prompt";
 import {
+  estimateConversationCostUsd,
+  estimateTtCostUsd,
   estimateSttCostUsd,
   estimateTtsCostUsd,
   estimateEtCostUsd,
@@ -48,8 +50,9 @@ function FluencyWpmTooltip() {
 function costForCapability(c: CapabilityConfig): CostEstimate | null {
   switch (c.capability) {
     case "CONVERSATION":
+      return estimateConversationCostUsd(c.providerId, c.modelLabel);
     case "TT":
-      return null; // not priced yet
+      return estimateTtCostUsd(c.providerId, c.modelLabel);
     case "ET":
       return estimateEtCostUsd(c.providerId, c.modelLabel);
     case "CEFR_EVAL":
@@ -183,7 +186,7 @@ export function ProviderConfigTable({ config: fullConfig, language }: { config: 
           ))}
           <tr>
             <td data-label="Capability" style={{ fontWeight: 700 }}>
-              Total (est., priced rows only)
+              Total (est.)
             </td>
             <td data-label="Provider" />
             <td data-label="Model" />

@@ -1,51 +1,64 @@
 /**
  * Rough per-session cost estimate for the admin system-config page —
- * NOT a billing reconciliation tool. Two independently uncertain inputs go
- * into every number here:
+ * NOT a billing reconciliation tool. Three inputs go into every number:
  *
- *   1. Public per-unit vendor pricing (Mistral, Azure Speech, Deepgram),
- *      checked against each vendor's own pricing page on 2026-08-14. Re-check
- *      the constants below if a vendor changes pricing or a LIVE_..._ID /
- *      env-configured model changes.
- *   2. Average per-session usage — turn counts, word counts, TTS characters,
- *      speaking rate — computed from the 37 sessions (of 180 total) in the
- *      last 180 days that have a stored `transcript`, via direct SQL against
- *      the `sessions` table. Small sample; re-run and update AVG_SESSION as
- *      real usage grows or shifts (e.g. once non-demo traffic dominates).
+ *   1. Vendor list prices, checked on each vendor's own pricing source on
+ *      2026-10-19 (see "Vendor pricing" below). Re-check them if a vendor
+ *      changes pricing or a live provider / model changes.
+ *   2. Average real session (AVG_SESSION) — from the 26 completed live
+ *      conversations of 2026-09-19 → 2026-10-19 (sessions table, transcript +
+ *      pronunciation_scores + evaluation_json). Re-measure as usage shifts.
+ *   3. Prompt sizes, measured from the prompts themselves at import time, so
+ *      they can't drift when a prompt is edited. Variable content (history,
+ *      evidence, JSON written back) is estimated from AVG_SESSION.
  *
- * Where an LLM call's prompt is fixed source text (CEFR_SYSTEM_PROMPT, the
- * ET pacing judge's SYSTEM_PROMPT, the EO ensemble's JUDGE_SYSTEM), its
- * length is measured exactly from that source rather than guessed. Variable,
- * per-turn content (the evidence a judge reads, the JSON it writes back) is
- * estimated from AVG_SESSION at ~4 characters/token — a standard rough
- * heuristic, not a real tokenizer — so these numbers are good for comparing
- * modules' relative cost, not for reconciling against a vendor invoice.
+ * Tokens are estimated at ~4 characters each — a standard rough heuristic,
+ * not a real tokenizer. Good for comparing steps and spotting the big
+ * items, not for reconciling an invoice.
  */
 
-// ─── Average real session (see file header for how this was derived) ──────
+import { buildExaminerPrompt } from "@/lib/examiner-prompt";
+import { CEFR_SYSTEM_PROMPT } from "@/lib/cefr-prompt";
+import { SYSTEM_PROMPT as ET_SYSTEM_PROMPT } from "@/lib/level-assessment";
+import { SYSTEM_PROMPT as TT_SYSTEM_PROMPT } from "@/lib/topic-tracking";
+import { JUDGE_SYSTEM as EO_JUDGE_SYSTEM } from "@/lib/pronunciation/providers/azure-ensemble";
+import { SYSTEM_PROMPT as VOXTRAL_SYSTEM_PROMPT } from "@/lib/pronunciation/providers/voxtral";
+import type { ConvLang } from "@/lib/conversation-prompts";
+import type { CefrRung } from "@/lib/cefr-rung";
+
+// ─── Average real session (see file header) ────────────────────────────────
 
 export const AVG_SESSION = {
-  userTurns: 3.89,
-  assistantTurns: 5.0,
-  userWordsPerSession: 147.5,
-  /** Derived from session_turns.content: avg 151.8 chars / 28.67 words per user turn. */
-  charsPerWord: 5.3,
-  assistantCharsPerSession: 361.4,
-  userWpm: 143.5,
-  /** Real average length of a completed CEFR-eval result_json (n=279, session_evaluations). */
-  cefrEvalResultChars: 2220,
+  userTurns: 6.15,
+  /** Examiner messages: opening, one per answer, closing. Each is one conversation call. */
+  assistantTurns: 7.31,
+  userWordsPerSession: 224.7,
+  userCharsPerSession: 1214.5,
+  /** What the examiner says — also the characters sent to TTS. */
+  assistantCharsPerSession: 542.4,
+  userWpm: 144.5,
+  /** Average length of a stored evaluation_json. */
+  cefrEvalResultChars: 1699,
 };
 
-const userAudioMinutesPerSession = AVG_SESSION.userWordsPerSession / AVG_SESSION.userWpm;
-const userCharsPerSession = AVG_SESSION.userWordsPerSession * AVG_SESSION.charsPerWord;
-const userCharsPerTurn = userCharsPerSession / AVG_SESSION.userTurns;
+/** Silence streamed to realtime STT around each answer (before speaking + the end-of-turn pause). */
+const STREAMED_SILENCE_SECONDS_PER_ANSWER = 3;
+
+const userSpeechMinutes = AVG_SESSION.userWordsPerSession / AVG_SESSION.userWpm;
+const streamedMinutes = userSpeechMinutes + (AVG_SESSION.userTurns * STREAMED_SILENCE_SECONDS_PER_ANSWER) / 60;
+const userCharsPerTurn = AVG_SESSION.userCharsPerSession / AVG_SESSION.userTurns;
 const userWordsPerTurn = AVG_SESSION.userWordsPerSession / AVG_SESSION.userTurns;
+const charsPerWord = AVG_SESSION.userCharsPerSession / AVG_SESSION.userWordsPerSession;
 const assistantCharsPerTurn = AVG_SESSION.assistantCharsPerSession / AVG_SESSION.assistantTurns;
 
-// ─── Vendor pricing, checked 2026-08-14 ────────────────────────────────────
-// Sources: mistral.ai/pricing/api, Azure retail-prices API (productName
-// "Azure Speech", meters "S1 Speech To Text" / "S1 Speech to Text Enhanced
-// Feature Audio" / "S1 Neural Text To Speech Characters"), deepgram.com/pricing.
+// ─── Vendor pricing, checked 2026-10-19 ────────────────────────────────────
+// Mistral: mistral.ai/pricing and docs.mistral.ai model cards; the -latest
+//   aliases resolved with GET /v1/models (large → mistral-large-2512,
+//   small → mistral-small-2603, voxtral-mini → voxtral-mini-2602).
+// Voxtral transcription: mistral.ai/news/voxtral-transcribe-2.
+// Azure: prices.azure.com retail API, region germanywestcentral, pay as you go.
+// Deepgram: deepgram.com/pricing, pay as you go.
+// Gradium: gradium.ai/pricing (1 TTS character = 1 credit).
 
 const CHARS_PER_TOKEN = 4;
 
@@ -55,41 +68,43 @@ const MISTRAL_TEXT_PRICE_PER_M: Record<string, { in: number; out: number }> = {
 };
 const MISTRAL_TEXT_PRICE_FALLBACK = MISTRAL_TEXT_PRICE_PER_M["mistral-large-latest"];
 
-const MISTRAL_TRANSCRIBE_PER_MIN = 0.003; // voxtral-mini-latest, dedicated transcription endpoint
-const MISTRAL_TTS_PER_1K_CHARS = 0.016; // voxtral-mini-tts-2603
+const MISTRAL_TRANSCRIBE_PER_MIN = 0.003; // voxtral-mini-latest, batch
+const MISTRAL_REALTIME_TRANSCRIBE_PER_MIN = 0.006; // voxtral-mini-transcribe-realtime
+const MISTRAL_TTS_PER_1K_CHARS = 0.016; // voxtral-mini-tts (registered, not live)
 
-// voxtral-small-latest on /v1/chat/completions (checked mistral.ai/pricing/api,
-// 2026-08-31) — audio and text share one request but are priced separately;
-// output (transcript + verdict JSON) is priced separately again.
+// voxtral-small-latest on /v1/chat/completions (admin comparison provider).
 const VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN = 0.004;
 const VOXTRAL_SMALL_TEXT_INPUT_PRICE_PER_M = 0.1;
 const VOXTRAL_SMALL_OUTPUT_PRICE_PER_M = 0.4;
 
 const AZURE_STT_PER_HOUR = 1.0;
-const AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR = 0.3; // billed on top of STT, same recognition call
+// Not listed pay-as-you-go for germanywestcentral; consistent with its
+// committed-tier add-on prices ($0.24/h at 2K hours).
+const AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR = 0.3;
 const AZURE_NEURAL_TTS_PER_1M_CHARS = 15.0;
 
-const DEEPGRAM_NOVA3_PRERECORDED_MONO_PER_MIN = 0.0077; // pay-as-you-go, monolingual (this app passes an explicit language)
+const DEEPGRAM_NOVA3_PRERECORDED_PER_MIN = 0.0043;
 
-function mistralTextPrice(modelLabel: string) {
-  return MISTRAL_TEXT_PRICE_PER_M[modelLabel] ?? MISTRAL_TEXT_PRICE_FALLBACK;
-}
+// Credit price depends on the plan: S plan top-ups are $5 per 100k credits
+// ($50/M characters); XS $69/M, M $40/M, L $38/M.
+const GRADIUM_TTS_PER_1M_CHARS = 50;
 
 function mistralTextCostUsd(modelLabel: string, inputChars: number, outputChars: number): number {
-  const price = mistralTextPrice(modelLabel);
-  const inTokens = inputChars / CHARS_PER_TOKEN;
-  const outTokens = outputChars / CHARS_PER_TOKEN;
-  return (inTokens / 1_000_000) * price.in + (outTokens / 1_000_000) * price.out;
+  const price = MISTRAL_TEXT_PRICE_PER_M[modelLabel] ?? MISTRAL_TEXT_PRICE_FALLBACK;
+  return ((inputChars / CHARS_PER_TOKEN) * price.in + (outputChars / CHARS_PER_TOKEN) * price.out) / 1_000_000;
 }
 
-// ─── Fixed prompt sizes, measured from source (see file header) ───────────
-// Kept as plain char counts here rather than importing the prompt constants
-// themselves — this module has no business re-rendering CEFR_SYSTEM_PROMPT
-// etc., only estimating cost from their known length.
-const CEFR_SYSTEM_PROMPT_CHARS = 14451;
-const ET_SYSTEM_PROMPT_CHARS = 820;
-const EO_JUDGE_SYSTEM_CHARS = 4824;
-const VOXTRAL_SYSTEM_PROMPT_CHARS = 3333; // lib/pronunciation/providers/voxtral.ts's SYSTEM_PROMPT
+const tokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN).toLocaleString("en-US");
+
+// ─── Prompt sizes, measured from the prompts themselves ────────────────────
+
+const LANGS: ConvLang[] = ["en", "fr", "nl-BE", "es", "it", "de"];
+const RUNGS: CefrRung[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
+/** The examiner's system prompt varies by language and level — use the average. */
+const EXAMINER_SYSTEM_CHARS = (() => {
+  const sizes = LANGS.flatMap((language) => RUNGS.map((rung) => buildExaminerPrompt({ language, rung }).system.length));
+  return sizes.reduce((a, b) => a + b, 0) / sizes.length;
+})();
 
 export interface CostEstimate {
   usdPerSession: number;
@@ -97,109 +112,129 @@ export interface CostEstimate {
   note: string;
 }
 
-export function estimateSttCostUsd(providerId: string): CostEstimate | null {
-  if (providerId !== "voxtral") return null; // only the live STT provider is priced
+// ─── Estimators, one per capability ────────────────────────────────────────
+
+/** Examiner conversation: one call per examiner message, re-sending the system prompt and the whole history so far. */
+export function estimateConversationCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
+  if (providerId !== "mistral") return null;
+  // History grows linearly over the session, so on average each call carries half of it.
+  const avgHistoryChars = (AVG_SESSION.userCharsPerSession + AVG_SESSION.assistantCharsPerSession) / 2;
+  const inputChars = EXAMINER_SYSTEM_CHARS + avgHistoryChars;
+  const usd = mistralTextCostUsd(modelLabel, inputChars, assistantCharsPerTurn) * AVG_SESSION.assistantTurns;
   return {
-    usdPerSession: userAudioMinutesPerSession * MISTRAL_TRANSCRIBE_PER_MIN,
-    note: `${userAudioMinutesPerSession.toFixed(2)} min user audio × $${MISTRAL_TRANSCRIBE_PER_MIN}/min (Voxtral transcribe)`,
+    usdPerSession: usd,
+    note: `${AVG_SESSION.assistantTurns.toFixed(1)} calls × ~${tokens(inputChars)} tok in (prompt + history) / ~${tokens(assistantCharsPerTurn)} tok out (${modelLabel}). Occasional regenerations not counted.`,
   };
 }
 
-/** TTS cost for ONE language's live provider — the top-level TTS capability has no single answer since it varies by language. */
+/** Topic tracking: one small call per examiner question. */
+export function estimateTtCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
+  if (providerId !== "mistral") return null;
+  const calls = AVG_SESSION.assistantTurns - 1; // the closing remark asks no question
+  const inputChars = TT_SYSTEM_PROMPT.length + assistantCharsPerTurn * 2 + userCharsPerTurn; // question + recent exchange
+  const outputChars = 25; // {"domain":"..."}
+  const usd = mistralTextCostUsd(modelLabel, inputChars, outputChars) * calls;
+  return { usdPerSession: usd, note: `${calls.toFixed(1)} calls × ~${tokens(inputChars)} tok in (${modelLabel})` };
+}
+
+/** Speech-to-text for ONE language's live provider. */
+export function estimateSttCostUsd(providerId: string): CostEstimate | null {
+  if (providerId === "mistral-realtime") {
+    return {
+      usdPerSession: streamedMinutes * MISTRAL_REALTIME_TRANSCRIBE_PER_MIN,
+      note: `${streamedMinutes.toFixed(2)} min streamed × $${MISTRAL_REALTIME_TRANSCRIBE_PER_MIN}/min (Mistral realtime). Batch fallbacks ($${MISTRAL_TRANSCRIBE_PER_MIN}/min) not counted.`,
+    };
+  }
+  if (providerId === "voxtral") {
+    return {
+      usdPerSession: userSpeechMinutes * MISTRAL_TRANSCRIBE_PER_MIN,
+      note: `${userSpeechMinutes.toFixed(2)} min user audio × $${MISTRAL_TRANSCRIBE_PER_MIN}/min (Voxtral batch)`,
+    };
+  }
+  return null; // gradium-realtime: wired but off, not priced
+}
+
+/** Text-to-speech for ONE language's live provider. */
 export function estimateTtsCostUsd(providerId: string): CostEstimate | null {
-  if (providerId === "mistral") {
-    const usd = (AVG_SESSION.assistantCharsPerSession / 1000) * MISTRAL_TTS_PER_1K_CHARS;
-    return { usdPerSession: usd, note: `${AVG_SESSION.assistantCharsPerSession.toFixed(0)} chars × $${MISTRAL_TTS_PER_1K_CHARS}/1K chars (Voxtral TTS)` };
+  const chars = AVG_SESSION.assistantCharsPerSession;
+  if (providerId === "gradium") {
+    return {
+      usdPerSession: (chars / 1_000_000) * GRADIUM_TTS_PER_1M_CHARS,
+      note: `${chars.toFixed(0)} chars × $${GRADIUM_TTS_PER_1M_CHARS}/1M chars (Gradium, S-plan top-up rate; $38–69/1M depending on plan)`,
+    };
   }
   if (providerId === "azure") {
-    const usd = (AVG_SESSION.assistantCharsPerSession / 1_000_000) * AZURE_NEURAL_TTS_PER_1M_CHARS;
-    return { usdPerSession: usd, note: `${AVG_SESSION.assistantCharsPerSession.toFixed(0)} chars × $${AZURE_NEURAL_TTS_PER_1M_CHARS}/1M chars (Azure Standard Neural)` };
+    return {
+      usdPerSession: (chars / 1_000_000) * AZURE_NEURAL_TTS_PER_1M_CHARS,
+      note: `${chars.toFixed(0)} chars × $${AZURE_NEURAL_TTS_PER_1M_CHARS}/1M chars (Azure Neural)`,
+    };
+  }
+  if (providerId === "mistral") {
+    return {
+      usdPerSession: (chars / 1000) * MISTRAL_TTS_PER_1K_CHARS,
+      note: `${chars.toFixed(0)} chars × $${MISTRAL_TTS_PER_1K_CHARS}/1K chars (Voxtral TTS)`,
+    };
   }
   return null;
 }
 
+/** Per-answer level judge: one small call per answer. */
 export function estimateEtCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
   if (providerId !== "mistral") return null;
-  // Fixed wrapper text around the two variable fields, measured from
-  // lib/level-assessment.ts's `content:` template literal.
-  const wrapperChars = 60;
-  const inputChars = ET_SYSTEM_PROMPT_CHARS + wrapperChars + assistantCharsPerTurn + userCharsPerTurn;
-  const outputChars = 22; // {"verdict":"struggled"} — fixed shape, longest verdict
-  const perCallUsd = mistralTextCostUsd(modelLabel, inputChars, outputChars);
-  const usd = perCallUsd * AVG_SESSION.userTurns;
-  return { usdPerSession: usd, note: `${AVG_SESSION.userTurns.toFixed(1)} turns × ~${Math.round(inputChars / CHARS_PER_TOKEN)} tok in (${modelLabel})` };
+  const wrapperChars = 60; // lib/level-assessment.ts's "Current rung / Question asked / Speaker's answer" template
+  const inputChars = ET_SYSTEM_PROMPT.length + wrapperChars + assistantCharsPerTurn + userCharsPerTurn;
+  const outputChars = 22; // {"verdict":"struggled"}
+  const usd = mistralTextCostUsd(modelLabel, inputChars, outputChars) * AVG_SESSION.userTurns;
+  return { usdPerSession: usd, note: `${AVG_SESSION.userTurns.toFixed(1)} calls × ~${tokens(inputChars)} tok in (${modelLabel})` };
 }
 
+/** Pronunciation for ONE language's live provider. */
 export function estimateEoCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
   if (providerId === "voxtral") {
-    // One /v1/chat/completions call per turn: the learner's raw audio (billed
-    // per audio-minute, not tokens) plus SYSTEM_PROMPT + the short per-turn
-    // text wrapper (billed as text-input tokens); output is the transcript +
-    // one small JSON verdict per word (billed as output tokens). Only
-    // voxtral-small-latest is priced — the modelLabel param isn't branched on
-    // since that's the only Voxtral chat model this provider uses.
-    const langLabelChars = 8; // avg of the 6 LANG_LABELS entries in voxtral.ts
-    const userTextWrapperChars = 156; // fixed literal chars in voxtral.ts's userText template
-    const textInputChars = VOXTRAL_SYSTEM_PROMPT_CHARS + userTextWrapperChars + langLabelChars + assistantCharsPerTurn;
-    const perWordJsonOutChars = 20 + AVG_SESSION.charsPerWord; // {"w":"<word>","v":"good"}, overhead + avg word
-    const outputChars = userCharsPerTurn /* transcript */ + userWordsPerTurn * perWordJsonOutChars + 100; // + turn_score/summary wrapper
-
-    const audioUsd = userAudioMinutesPerSession * VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN;
-    const textInUsd = (textInputChars / CHARS_PER_TOKEN / 1_000_000) * VOXTRAL_SMALL_TEXT_INPUT_PRICE_PER_M;
-    const outUsd = (outputChars / CHARS_PER_TOKEN / 1_000_000) * VOXTRAL_SMALL_OUTPUT_PRICE_PER_M;
-    const perCallUsd = audioUsd + textInUsd + outUsd;
-    const usd = perCallUsd * AVG_SESSION.userTurns;
-
+    // One audio + text call per answer (admin comparison provider).
+    const textInputChars = VOXTRAL_SYSTEM_PROMPT.length + 170 + assistantCharsPerTurn;
+    const outputChars = userCharsPerTurn + userWordsPerTurn * (20 + charsPerWord) + 100;
+    const perCallUsd =
+      (userSpeechMinutes / AVG_SESSION.userTurns) * VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN +
+      (textInputChars / CHARS_PER_TOKEN / 1_000_000) * VOXTRAL_SMALL_TEXT_INPUT_PRICE_PER_M +
+      (outputChars / CHARS_PER_TOKEN / 1_000_000) * VOXTRAL_SMALL_OUTPUT_PRICE_PER_M;
     return {
-      usdPerSession: usd,
-      note:
-        `${AVG_SESSION.userTurns.toFixed(1)} calls × (${(userAudioMinutesPerSession / AVG_SESSION.userTurns).toFixed(2)} min audio × $${VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN}/min` +
-        ` + ~${Math.round(textInputChars / CHARS_PER_TOKEN)} tok text in + ~${Math.round(outputChars / CHARS_PER_TOKEN)} tok out, ${modelLabel})`,
+      usdPerSession: perCallUsd * AVG_SESSION.userTurns,
+      note: `${AVG_SESSION.userTurns.toFixed(1)} calls × (audio + ~${tokens(textInputChars)} tok in + ~${tokens(outputChars)} tok out, ${modelLabel})`,
     };
   }
 
   if (providerId !== "azure-ensemble") return null;
 
-  const deepgramUsd = userAudioMinutesPerSession * DEEPGRAM_NOVA3_PRERECORDED_MONO_PER_MIN;
-  const azureUsd =
-    (userAudioMinutesPerSession / 60) * (AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR);
-
-  // Mistral judge call, per turn: evidence repeats the transcript 2x (live +
-  // verbatim) plus a per-word confidence list and a per-word acoustic-score
-  // list; the response is one small JSON entry per word. Word count comes
-  // from the average user turn length above.
-  const evidenceHeaderChars = 150;
-  const perWordConfidenceChars = 12;
-  const perWordAcousticChars = 15;
-  const perWordJsonOutChars = 26;
-  const evidenceChars =
-    evidenceHeaderChars +
-    userCharsPerTurn * 2 + // live + verbatim transcripts
-    userWordsPerTurn * perWordConfidenceChars +
-    userWordsPerTurn * perWordAcousticChars;
-  const outputChars = userWordsPerTurn * perWordJsonOutChars + 100; // + turn_score/summary wrapper
-  const inputChars = EO_JUDGE_SYSTEM_CHARS + evidenceChars;
-  const mistralUsd = mistralTextCostUsd(modelLabel, inputChars, outputChars) * AVG_SESSION.userTurns;
+  const deepgramUsd = userSpeechMinutes * DEEPGRAM_NOVA3_PRERECORDED_PER_MIN;
+  const azureUsd = (userSpeechMinutes / 60) * (AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR);
+  // Mistral judge, per answer: both transcripts, per-word confidences and
+  // acoustic scores in; one small JSON entry per word out.
+  const evidenceChars = 150 + userCharsPerTurn * 2 + userWordsPerTurn * (12 + 15);
+  const inputChars = EO_JUDGE_SYSTEM.length + evidenceChars;
+  const outputChars = userWordsPerTurn * 26 + 100;
+  const judgeModel = modelLabel.match(/\+ (\S+) judge/)?.[1] ?? "mistral-large-latest";
+  const mistralUsd = mistralTextCostUsd(judgeModel, inputChars, outputChars) * AVG_SESSION.userTurns;
 
   return {
     usdPerSession: deepgramUsd + azureUsd + mistralUsd,
     note:
-      `${userAudioMinutesPerSession.toFixed(2)} min audio × (Deepgram $${DEEPGRAM_NOVA3_PRERECORDED_MONO_PER_MIN}/min + Azure $${(AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR).toFixed(2)}/hr)` +
-      ` + ${AVG_SESSION.userTurns.toFixed(1)} judge calls (${modelLabel})`,
+      `${userSpeechMinutes.toFixed(2)} min audio × (Deepgram $${DEEPGRAM_NOVA3_PRERECORDED_PER_MIN}/min + Azure $${(AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR).toFixed(2)}/h)` +
+      ` + ${AVG_SESSION.userTurns.toFixed(1)} judge calls × ~${tokens(inputChars)} tok in (${judgeModel})`,
   };
 }
 
+/** Final CEFR evaluation: one call on the whole transcript (boundary checks off). */
 export function estimateCefrEvalCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
-  if (providerId !== "mistral") return null; // Anthropic pricing not modeled — it isn't the live judge today
-
-  // buildEvaluationUserMessage's fixed wrapper text (language/turn-count
-  // header, pronunciation section, "[Turn N · Xw]" labels) plus the actual
-  // transcript.
+  if (providerId !== "mistral") return null;
+  // buildEvaluationUserMessage's wrapper (header, pronunciation section, "[Turn N · Xw]" labels) + the transcript.
   const wrapperChars = 900 + 13 * AVG_SESSION.userTurns;
-  const inputChars = CEFR_SYSTEM_PROMPT_CHARS + wrapperChars + userCharsPerSession;
-  const outputChars = AVG_SESSION.cefrEvalResultChars; // measured, not estimated
-  const usd = mistralTextCostUsd(modelLabel, inputChars, outputChars);
-  return { usdPerSession: usd, note: `1 call × ~${Math.round(inputChars / CHARS_PER_TOKEN)} tok in / ~${Math.round(outputChars / CHARS_PER_TOKEN)} tok out (${modelLabel})` };
+  const inputChars = CEFR_SYSTEM_PROMPT.length + wrapperChars + AVG_SESSION.userCharsPerSession;
+  const outputChars = AVG_SESSION.cefrEvalResultChars;
+  return {
+    usdPerSession: mistralTextCostUsd(modelLabel, inputChars, outputChars),
+    note: `1 call × ~${tokens(inputChars)} tok in / ~${tokens(outputChars)} tok out (${modelLabel})`,
+  };
 }
 
 export function formatUsd(usd: number): string {

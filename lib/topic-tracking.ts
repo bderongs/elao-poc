@@ -22,7 +22,7 @@ import { mistralComplete, mistralChatModel } from "@/lib/mistral";
 import { logServerEvent } from "@/lib/server-log";
 import { TOPIC_DOMAINS, isTopicDomain, type TopicDomain } from "@/lib/topic-domain";
 
-const SYSTEM_PROMPT = `You are a fast topic classifier for a spoken-language oral exam. Given the question the examiner just asked, decide which single domain it belongs to.
+export const SYSTEM_PROMPT = `You are a fast topic classifier for a spoken-language oral exam. Given the question the examiner just asked, decide which single domain it belongs to.
 
 Domains: ${TOPIC_DOMAINS.join(", ")}
 

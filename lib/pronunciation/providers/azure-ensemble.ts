@@ -178,7 +178,7 @@ export async function azureAcoustic(
 
 // ─── The judge ────────────────────────────────────────────────────────────────
 
-const JUDGE_SYSTEM = `You are an expert phonetician assessing the pronunciation of a second-language learner.
+export const JUDGE_SYSTEM = `You are an expert phonetician assessing the pronunciation of a second-language learner.
 
 You cannot hear the audio. You receive evidence from two independent speech-recognition engines that both processed the SAME recording, and you triangulate:
 

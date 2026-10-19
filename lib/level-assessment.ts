@@ -33,7 +33,7 @@ function stepRung(current: CefrRung, verdict: string, stepSize: number, strong: 
   return current; // "adequate", or an unrecognized verdict — hold position
 }
 
-const SYSTEM_PROMPT = `You are a fast pacing judge for a spoken-language oral exam — NOT the final assessment, just a quick per-turn signal for how hard the NEXT question should be.
+export const SYSTEM_PROMPT = `You are a fast pacing judge for a spoken-language oral exam — NOT the final assessment, just a quick per-turn signal for how hard the NEXT question should be.
 
 Given the question asked and the speaker's answer (transcribed by speech recognition — expect minor recognition noise, don't penalise obvious ASR artefacts), judge how they handled THIS question at the CURRENT rung:
 - "well": relevant, developed beyond one clause, grammar/vocab adequate for the rung, understood the question first time.
