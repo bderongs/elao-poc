@@ -14,4 +14,4 @@
 
 drop policy if exists "profiles_update_own" on profiles;
 
-revoke insert, update, delete on profiles from anon, authenticated;
+revoke insert, update, delete, truncate on profiles from anon, authenticated;
