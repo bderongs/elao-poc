@@ -2086,7 +2086,7 @@ export default function Home() {
               {[
                 ["Choisissez la langue", "Français, anglais, néerlandais, espagnol, italien ou allemand."],
                 [`Parlez avec ${AVATAR_NAME}`, "Une vraie conversation, au rythme qui vous convient."],
-                ["Recevez votre niveau", "De A1 à C2, avec le détail : prononciation, fluidité, vocabulaire, grammaire."],
+                ["Recevez votre niveau", "De A0 à C1+, avec le détail : prononciation, fluidité, vocabulaire, grammaire."],
               ].map(([title, desc], i) => (
                 <div key={title} className={styles.welcomeStep}>
                   <StepBadge n={i + 1} />
