@@ -30,6 +30,16 @@
  *       no run from them yet — comparison only: no rollup, the session's
  *       headline pronunciation and transcripts are left alone. The report
  *       then compares the engines (analysis/calibration.ts).
+ *       --set c1c2: on the C1/C2 set instead (report: analysis/c1c2.ts).
+ *
+ *   npx tsx scripts/calibration-set.ts build-c1c2 [--dry-run] [--c1 N]
+ *       Flags the C1/C2 set (every global C2 + as many global C1, or --c1 N),
+ *       importing from Speechace the ones we don't have yet (audio included).
+ *
+ *   npx tsx scripts/calibration-set.ts verbatim --set c1c2 [--dry-run] [--concurrency 4]
+ *       Verbatim transcripts with hesitations and speech timings (Voxtral
+ *       Small Transcribe 3), cached in analysis/reports/verbatim/ for the
+ *       disfluency measures of analysis/c1c2.ts. Paid API, no database writes.
  *
  * WRITES to the shared database (sessions, session_turns, storage, eval rows)
  * and calls paid APIs (score) — unlike analysis/, which only reads.
@@ -235,8 +245,8 @@ async function build() {
   const words = await wordCounts(matched.map((s) => s.id));
   console.log(`${sessions.length} imported Speechace sessions, ${matched.length} found in the exports`);
   await mapLimit(matched, 8, async (s) => {
-    const calibration = s.speechace_scores?.reference?.calibration;
-    await setReference(s.id, s.speechace_scores, { ...exports.get(s.report!)!.ref, ...(calibration ? { calibration } : {}) });
+    const { calibration, c1c2 } = s.speechace_scores?.reference ?? {};
+    await setReference(s.id, s.speechace_scores, { ...exports.get(s.report!)!.ref, ...(calibration ? { calibration } : {}), ...(c1c2 ? { c1c2 } : {}) });
   });
 
   // 2. The calibration set: keep what is flagged, top up each group.
@@ -290,6 +300,50 @@ async function build() {
   }
 }
 
+/**
+ * The C1/C2 set: can a pronunciation engine tell C1 from C2? Speechace almost
+ * never says C2 orally (11 of ~3,250 candidates), so the set is built on the
+ * global level, which doesn't come from Speechace: every global C2, plus a
+ * stable sample of as many global C1. Flagged reference.c1c2 — separate from
+ * the calibration set, so that one keeps its 25-per-level balance.
+ */
+async function buildC1C2() {
+  const exports = loadExports(opt("dir", "doc/SpeechAce/reavancementettts")!);
+  const c1Target = opt("c1");
+  const sessions = await loadSpeechaceSessions();
+  const inDb = new Map(sessions.filter((s) => s.report).map((s) => [s.report!, s]));
+  const rows = [...exports.values()].sort((a, b) => stableKey(a.report) - stableKey(b.report));
+  const c2 = rows.filter((r) => baseLevel(r.ref.global_level) === "C2");
+  // C1: the ones we hold first (no import needed), then imports, up to the C2 count.
+  const c1All = rows.filter((r) => baseLevel(r.ref.global_level) === "C1");
+  const c1 = [...c1All.filter((r) => inDb.has(r.report)), ...c1All.filter((r) => !inDb.has(r.report))].slice(0, Number(c1Target ?? c2.length));
+  const picked = [...c2, ...c1];
+  const toFlag = picked.filter((r) => inDb.has(r.report) && !inDb.get(r.report)!.speechace_scores?.reference?.c1c2);
+  const toImport = picked.filter((r) => !inDb.has(r.report));
+  console.log(`C1/C2 set: ${c2.length} global C2 + ${c1.length} global C1 — ${picked.length - toFlag.length - toImport.length} already flagged, ${toFlag.length} to flag, ${toImport.length} to import${DRY ? " (dry run)" : ""}`);
+
+  for (const r of toFlag) {
+    const s = inDb.get(r.report)!;
+    await setReference(s.id, s.speechace_scores, { ...(s.speechace_scores?.reference ?? r.ref), ...r.ref, ...(s.speechace_scores?.reference?.calibration ? { calibration: true } : {}), c1c2: true });
+  }
+  await attachMissingAudio(picked.filter((r) => inDb.has(r.report)).map((r) => inDb.get(r.report)!.id));
+  if (DRY) return;
+  let n = 0;
+  await mapLimit(toImport, 4, async (row) => {
+    try {
+      const { id, status } = await createSpeechaceImportSession(row.url);
+      const { data } = await sb.from("sessions").select("speechace_scores").eq("id", id).single();
+      await setReference(id, data?.speechace_scores ?? null, { ...row.ref, c1c2: true });
+      console.log(`[${++n}/${toImport.length}] imported ${id.slice(0, 8)} (${status}) — global ${row.ref.global_level}`);
+    } catch (e) {
+      console.log(`[${++n}/${toImport.length}] import failed for one ${row.ref.client} report: ${e instanceof Error ? e.message : e}`);
+    }
+  });
+}
+
+/** Which flagged set a command works on: --set calibration (default) or --set c1c2. */
+const SET_FLAG = opt("set", "calibration") === "c1c2" ? "c1c2" : "calibration";
+
 async function score() {
   const concurrency = Number(opt("concurrency", "3"));
   const { data: sessions, error } = await sb
@@ -338,10 +392,14 @@ async function score() {
 
 async function compare(providerIds: string[]) {
   const concurrency = Number(opt("concurrency", "3"));
-  const { data: sessions, error } = await sb.from("sessions").select("id").eq("source", "speechace").eq("speechace_scores->reference->>calibration", "true");
+  const { data: sessions, error } = await sb.from("sessions").select("id").eq("source", "speechace").eq(`speechace_scores->reference->>${SET_FLAG}`, "true");
   if (error) throw new Error(error.message);
-  const { data: turns } = await sb.from("session_turns").select("id").in("session_id", (sessions ?? []).map((s) => s.id)).eq("role", "user").not("audio_url", "is", null);
-  const turnIds = (turns ?? []).map((t) => t.id as string);
+  const ids = (sessions ?? []).map((s) => s.id);
+  const turnIds: string[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data: turns } = await sb.from("session_turns").select("id").in("session_id", ids.slice(i, i + 100)).eq("role", "user").not("audio_url", "is", null);
+    turnIds.push(...(turns ?? []).map((t) => t.id as string));
+  }
   const done = new Set<string>();
   for (let i = 0; i < turnIds.length; i += 200) {
     const { data } = await sb.from("session_turn_evaluations").select("turn_id, provider_id").in("turn_id", turnIds.slice(i, i + 200)).in("provider_id", providerIds).not("result_json", "is", null);
@@ -358,6 +416,63 @@ async function compare(providerIds: string[]) {
   });
 }
 
+/**
+ * Verbatim transcripts (Voxtral Small Transcribe 3), for disfluency measures
+ * in analysis/c1c2.ts. Two calls per answer, because the mode changes the
+ * text: plain mode keeps hesitations and repeats ("Um, if, um, if I…"),
+ * segment mode times each stretch of speech but cleans them out. Cached as
+ * files in analysis/reports/verbatim/ (git-ignored) — no database writes.
+ */
+const VERBATIM_DIR = "analysis/reports/verbatim";
+const VERBATIM_MODEL = "voxtral-small-transcribe-3";
+
+async function transcribeVerbatim(audio: ArrayBuffer, segments: boolean): Promise<{ text: string; segments: Array<{ text: string; start: number; end: number }>; audioSeconds: number | null }> {
+  for (let attempt = 0; ; attempt++) {
+    const form = new FormData();
+    form.append("file", new Blob([audio], { type: "audio/wav" }), "answer.wav");
+    form.append("model", VERBATIM_MODEL);
+    if (segments) form.append("timestamp_granularities", "segment");
+    const res = await fetch("https://api.mistral.ai/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MISTRAL_API_KEY}` }, body: form, signal: AbortSignal.timeout(120_000) });
+    if (res.ok) {
+      const d = await res.json();
+      return { text: d.text ?? "", segments: (d.segments ?? []).map((s: { text?: string; start?: number; end?: number }) => ({ text: (s.text ?? "").trim(), start: s.start ?? 0, end: s.end ?? 0 })), audioSeconds: d.usage?.prompt_audio_seconds ?? null };
+    }
+    if ((res.status === 429 || res.status >= 500) && attempt < 5) { await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt)); continue; }
+    throw new Error(`Mistral ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  }
+}
+
+async function verbatim() {
+  const concurrency = Number(opt("concurrency", "4"));
+  const { data: sessions, error } = await sb.from("sessions").select("id, language").eq("source", "speechace").eq(`speechace_scores->reference->>${SET_FLAG}`, "true");
+  if (error) throw new Error(error.message);
+  const language = new Map((sessions ?? []).map((s) => [s.id as string, s.language as string]));
+  const ids = [...language.keys()];
+  const turns: Array<{ id: string; session_id: string; audio_url: string }> = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data } = await sb.from("session_turns").select("id, session_id, audio_url").in("session_id", ids.slice(i, i + 100)).eq("role", "user").not("audio_url", "is", null);
+    turns.push(...(data ?? []));
+  }
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(VERBATIM_DIR, { recursive: true });
+  const todo = turns.filter((t) => !existsSync(join(VERBATIM_DIR, `${t.id}.json`)));
+  console.log(`${turns.length} recorded answers, ${todo.length} to transcribe (2 calls each)${DRY ? " (dry run)" : ""}`);
+  if (DRY) return;
+  const { fetchRecording } = await import("../lib/recordings");
+  let n = 0, failed = 0;
+  await mapLimit(todo, concurrency, async (t) => {
+    try {
+      const { audio } = await fetchRecording(t.audio_url);
+      const [plain, timed] = await Promise.all([transcribeVerbatim(audio, false), transcribeVerbatim(audio, true)]);
+      writeFileSync(join(VERBATIM_DIR, `${t.id}.json`), JSON.stringify({ turnId: t.id, sessionId: t.session_id, language: language.get(t.session_id), model: VERBATIM_MODEL, plain: plain.text, segments: timed.segments, audioSeconds: plain.audioSeconds ?? timed.audioSeconds }));
+    } catch (e) {
+      failed++;
+      if (failed <= 5) console.log(`  ${t.id.slice(0, 8)}: ${e instanceof Error ? e.message : e}`);
+    }
+    if (++n % 50 === 0 || n === todo.length) console.log(`[${n}/${todo.length}] ${failed} failed`);
+  });
+}
+
 const cmd = args[0];
-(cmd === "build" ? build() : cmd === "score" ? score() : cmd === "compare" && args[1] ? compare(args[1].split(",")) : Promise.reject(new Error("usage: calibration-set.ts build|score|compare <providers> [options] — see the header")))
+(cmd === "build" ? build() : cmd === "build-c1c2" ? buildC1C2() : cmd === "verbatim" ? verbatim() :cmd === "score" ? score() : cmd === "compare" && args[1] ? compare(args[1].split(",")) : Promise.reject(new Error("usage: calibration-set.ts build|score|compare <providers> [options] — see the header")))
   .catch((e) => { console.error(e); process.exit(1); });

@@ -64,6 +64,8 @@ export interface SpeechaceReference {
   listening_level: string | null;
   /** Part of the calibration set (analysis/calibration.ts). */
   calibration?: boolean;
+  /** Part of the C1/C2 set: every global C2 plus a sample of global C1 (analysis/c1c2.ts). */
+  c1c2?: boolean;
 }
 
 export interface SessionSummary {
