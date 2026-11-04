@@ -2,6 +2,8 @@ import Link from "next/link";
 import { listSessions } from "@/lib/sessions-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { SessionListFilters } from "@/components/SessionListFilters";
+import { IntegrityBadge } from "@/components/IntegrityPanel";
+import { getIntegritySettings } from "@/lib/integrity-settings-service";
 import { formatDateTime } from "@/lib/format-date";
 import { sessionDisplayStatus } from "@/lib/session-status";
 import { adminColors } from "@/lib/admin-theme";
@@ -72,6 +74,8 @@ export default async function AdminSessionsPage({
     loadError = String(e);
   }
 
+  const integritySettings = sessions.some((s) => s.integrity_json) ? await getIntegritySettings() : null;
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -136,6 +140,11 @@ export default async function AdminSessionsPage({
                     <td data-label="Language">{s.language ?? "—"}</td>
                     <td data-label="Score">
                       <SessionScoreCell session={s} />
+                      {s.integrity_json && integritySettings && (
+                        <div style={{ marginTop: 4 }}>
+                          <IntegrityBadge record={s.integrity_json} settings={integritySettings} />
+                        </div>
+                      )}
                     </td>
                     <td data-label="Duration">
                       {s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : "—"}

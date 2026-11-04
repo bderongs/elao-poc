@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { TurnVad } from "@/lib/turn-vad";
+import { TurnVad, LIVE_TURN_VAD_MODE, type TurnVadMode } from "@/lib/turn-vad";
+import { SileroVad } from "@/lib/silero-vad";
+import { IntegrityTracker } from "@/lib/integrity-tracker";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
@@ -11,6 +13,7 @@ import { StreamingAudioPlayer } from "@/lib/audio-player";
 import { SessionRecorder, pickRecorderMimeType } from "@/lib/session-recorder";
 import { blobToWav16kMono } from "@/lib/audio-wav";
 import { logClientEvent } from "@/lib/client-log";
+import { assessRoom, rmsToDb, NOISE_CHECK_WINDOW, type RoomAssessment } from "@/lib/noise-check";
 import { CEFR_LADDER, guardStepUp, isCefrRung, zoneForRung, type CefrRung, type CefrZone } from "@/lib/cefr-rung";
 import { isTopicDomain, pickSwitchDomain, type TopicDomain } from "@/lib/topic-domain";
 import type { BankState } from "@/lib/examiner-prompt";
@@ -78,6 +81,10 @@ const SKIP_TEXT: Record<Lang, string> = {
 const CLOSE_SILENCE_MS = 20_000;
 /** …but never longer than this after the request, so a stuck turn can't hold the session open. */
 const CLOSE_MAX_WAIT_MS = 90_000;
+/** Mic-check room assessment cadence: every 12 meter ticks of 80 ms (~1 s). */
+const NOISE_CHECK_EVERY_TICKS = 12;
+/** A mic-check warning clears only after the room has read "ok" this long. */
+const NOISE_WARNING_CLEAR_MS = 3_000;
 
 const CLARIFY_TEXT: Record<Lang, string> = {
   fr: "Je n'ai pas compris la question.",
@@ -111,6 +118,17 @@ function getLevelOverrideFromUrl(): CefrRung | null {
   if (typeof window === "undefined") return null;
   const raw = new URLSearchParams(window.location.search).get("level");
   return isCefrRung(raw) ? raw : null;
+}
+
+/** How long "Vous avez quitté la fenêtre du test" stays up after coming back (ms). */
+const AWAY_NOTICE_MS = 6000;
+
+/** `?vad=silero|volume` picks the turn detection for this session over
+ *  LIVE_TURN_VAD_MODE (lib/turn-vad.ts) — side-by-side live testing. */
+function getVadModeFromUrl(): TurnVadMode {
+  if (typeof window === "undefined") return LIVE_TURN_VAD_MODE;
+  const raw = new URLSearchParams(window.location.search).get("vad");
+  return raw === "silero" || raw === "volume" ? raw : LIVE_TURN_VAD_MODE;
 }
 
 /** `?debug=1` shows the live DebugPanel (transcript, current rung, per-turn ET
@@ -183,6 +201,8 @@ export default function Home() {
   const [micDeviceLabel, setMicDeviceLabel] = useState<string | null>(null);
   /** 0-1, sampled from the real mic input — drives both the mic-check meter and the live "userSpeaking" bars. */
   const [micLevel, setMicLevel] = useState(0);
+  /** Soft warning on the mic-check card (lib/noise-check.ts) — never blocks "Je suis prêt". */
+  const [noiseWarning, setNoiseWarning] = useState<"noisy" | "quiet-voice" | null>(null);
   /** Indicator state for the conversation screen (doc/new_design screen 3): which of the three pills is shown. */
   const [turnState, setTurnState] = useState<"avatarSpeaking" | "userSpeaking" | "thinking">("thinking");
   /** True only while the turn-boundary VAD (lib/turn-vad.ts) has actually detected
@@ -225,6 +245,21 @@ export default function Home() {
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
 
   const vadRef = useRef<TurnVad | null>(null);
+  /** Silero load (lib/silero-vad.ts), started on the mic-check step when the
+   *  session uses it — null in volume mode. Never awaited before the session:
+   *  TurnVad starts on volume and switches once this resolves. */
+  const sileroLoadRef = useRef<Promise<SileroVad> | null>(null);
+  /** The loaded model, once sileroLoadRef has resolved — read for the session-end stats. */
+  const sileroRef = useRef<SileroVad | null>(null);
+  /** Turn-VAD mode for this session — LIVE_TURN_VAD_MODE or the `?vad=` override. */
+  const vadModeRef = useRef<TurnVadMode>(LIVE_TURN_VAD_MODE);
+  /** Response timing + window-change recorder for this session (lib/integrity-tracker.ts) —
+   *  null before the session starts and when the feature is disabled in admin settings. */
+  const integrityRef = useRef<IntegrityTracker | null>(null);
+  /** Admin switch (integrity_settings.enabled) — read at page load; on until it says otherwise. */
+  const [integrityEnabled, setIntegrityEnabled] = useState(true);
+  /** Neutral notice shown for a few seconds after the candidate comes back to the test window. */
+  const [awayNotice, setAwayNotice] = useState(false);
   /** startSession's onSpeechEnd, so "J'ai terminé" (handleFinishedTalking) can end a turn the VAD missed. */
   const speechEndRef = useRef<((spokenMs: number, forced?: boolean) => Promise<void>) | null>(null);
   const playerRef = useRef<StreamingAudioPlayer | null>(null);
@@ -373,6 +408,16 @@ export default function Home() {
   /** Screen wake lock held for the active session so the phone doesn't sleep mid-answer. */
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const micLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Mic-check room assessment, fed by the meter loop while the instructions
+   *  step is open; null otherwise (the session's own speech must not count). */
+  const noiseCheckRef = useRef<{
+    readings: number[];
+    ticks: number;
+    /** Since when the room has read "ok" — the warning clears after NOISE_WARNING_CLEAR_MS of it. */
+    okSince: number | null;
+    last: RoomAssessment | null;
+    warningsShown: Set<"noisy" | "quiet-voice">;
+  } | null>(null);
   /** Audio chunks (base64 + sentence text) played for the CURRENT assistant
    *  turn — cached so "Répéter la question" can replay them without a second
    *  TTS call. Reset at the start of each new turn in handleUserTurn. */
@@ -435,6 +480,7 @@ export default function Home() {
           durationSeconds: startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0,
           turns,
           ladder: buildLadderRecord(),
+          integrity: integrityRef.current?.record(),
         }),
       });
     } catch (e) {
@@ -536,9 +582,22 @@ export default function Home() {
 
   // ── instructions step: open the mic + start the level meter as soon as it mounts ──
   useEffect(() => {
-    if (preSessionStep === "instructions") void ensureMicStream();
+    if (preSessionStep !== "instructions") return;
+    noiseCheckRef.current = { readings: [], ticks: 0, okSince: null, last: null, warningsShown: new Set() };
+    setNoiseWarning(null);
+    void ensureMicStream();
+    vadModeRef.current = getVadModeFromUrl();
+    if (vadModeRef.current === "silero") ensureSileroLoad();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preSessionStep]);
+
+  // Integrity switch (lib/integrity.ts) — before the instructions screen, which mentions it when on.
+  useEffect(() => {
+    fetch("/api/integrity-settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { enabled?: boolean } | null) => { if (typeof j?.enabled === "boolean") setIntegrityEnabled(j.enabled); })
+      .catch(() => {});
+  }, []);
 
   // ── mobile: resume suspended AudioContexts on any tap while the mic is in use ──
   const audioInUse = preSessionStep === "instructions" || (sessionStarted && phase === "active");
@@ -562,16 +621,31 @@ export default function Home() {
     if (!sessionActive) return;
     setMicInterrupted(false);
     const markInterrupted = (reason: string) => {
+      integrityRef.current?.mark("techIssue");
       setMicInterrupted((already) => {
         if (!already) logClientEvent("session_mic_lost", { reason });
         return true;
       });
     };
+    // Window changes (lib/integrity-tracker.ts): a hidden tab, or the window
+    // losing focus while still visible (another app beside it). The notice
+    // never interrupts the avatar or the answer — it only shows under them.
+    let awayNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+    const comeBack = () => {
+      if (integrityRef.current?.back() == null) return;
+      setAwayNotice(true);
+      if (awayNoticeTimer) clearTimeout(awayNoticeTimer);
+      awayNoticeTimer = setTimeout(() => setAwayNotice(false), AWAY_NOTICE_MS);
+    };
+    const onBlur = () => integrityRef.current?.leave("window");
+    const onFocus = () => comeBack();
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
+        integrityRef.current?.leave("tab");
         logClientEvent("session_backgrounded", { vad: vadRef.current?.getDiagnostics() });
         return;
       }
+      comeBack();
       logClientEvent("session_foregrounded", { vad: vadRef.current?.getDiagnostics() });
       requestWakeLock(); // released automatically while hidden
       resumeAudioContexts();
@@ -585,8 +659,13 @@ export default function Home() {
     const onEnded = () => markInterrupted("track_ended");
     tracks.forEach((t) => t.addEventListener("ended", onEnded));
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      if (awayNoticeTimer) clearTimeout(awayNoticeTimer);
       tracks.forEach((t) => t.removeEventListener("ended", onEnded));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -615,6 +694,7 @@ export default function Home() {
     if (evaluationSignature) form.append("evaluationSignature", evaluationSignature);
     form.append("pronunciationScores", JSON.stringify(pronunciationScores));
     form.append("ladder", JSON.stringify(buildLadderRecord()));
+    if (integrityRef.current) form.append("integrity", JSON.stringify(integrityRef.current.record()));
 
     // Per-turn audio only exists as blob: object URLs (set once pass-2
     // pronunciation assessment finishes) — re-fetch each one to recover the
@@ -960,6 +1040,7 @@ export default function Home() {
     const chunks = currentTurnAudioChunksRef.current;
     if (!chunks.length) return;
     setRepeatUsed(true);
+    integrityRef.current?.mark("repeat");
     setTurnState("avatarSpeaking");
     for (const c of chunks) playerRef.current?.playChunk(c.audio, c.text);
   };
@@ -968,7 +1049,9 @@ export default function Home() {
    *  a neutral filler through the normal chat pipeline (doc/new_design). */
   const handleSkipQuestion = () => {
     if (turnState !== "userSpeaking" || isProcessingRef.current) return;
-    if (!window.confirm("Passer cette question sans y répondre ?")) return;
+    const confirmSkip = () => window.confirm("Passer cette question sans y répondre ?");
+    if (!(integrityRef.current ? integrityRef.current.withoutAway(confirmSkip) : confirmSkip())) return;
+    integrityRef.current?.mark("skipped");
     void handleUserTurn(SKIP_TEXT[language] ?? SKIP_TEXT.fr);
   };
 
@@ -985,7 +1068,10 @@ export default function Home() {
    *  through the same transcription path a detected silence would take. */
   const handleFinishedTalking = () => {
     if (turnState !== "userSpeaking" || isProcessingRef.current || !speechEndRef.current) return;
+    const startedAtMs = vadRef.current?.getSpeechStartMs() ?? null;
     const spokenMs = vadRef.current?.forceEnd() ?? 0;
+    // Nothing heard (VAD missed the voice) → no latency to record: the question isn't counted.
+    if (startedAtMs !== null && spokenMs > 0) integrityRef.current?.answerStarted(startedAtMs, spokenMs);
     isUserTalkingRef.current = false;
     setIsUserTalking(false);
     logClientEvent("turn_forced_end", { spokenMs });
@@ -1046,19 +1132,18 @@ export default function Home() {
       analyser.fftSize = 1024;
       source.connect(analyser);
       micAnalyserRef.current = analyser;
-      const data = new Uint8Array(analyser.fftSize);
+      // Float, not byte, samples: one byte step is ~0.008 RMS (-42 dBFS), so a
+      // quiet room read as 0 — fine for the bars, useless for the noise check.
+      const data = new Float32Array(analyser.fftSize);
       micLevelIntervalRef.current = setInterval(() => {
-        analyser.getByteTimeDomainData(data);
+        analyser.getFloatTimeDomainData(data);
         let sumSquares = 0;
-        for (let i = 0; i < data.length; i++) {
-          const v = (data[i] - 128) / 128;
-          sumSquares += v * v;
-        }
+        for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i];
         const rms = Math.sqrt(sumSquares / data.length);
         // Log (dB) scale, like a real VU meter: -55dB (room noise) → 0, -15dB (loud) → 1.
         // Linear RMS crushes normal speech (~0.02–0.1) into the bottom of the bar.
-        const db = 20 * Math.log10(Math.max(rms, 1e-5));
-        setMicLevel(Math.min(1, Math.max(0, (db + 55) / 40)));
+        setMicLevel(Math.min(1, Math.max(0, (rmsToDb(rms) + 55) / 40)));
+        updateNoiseCheck(rms);
       }, 80);
     } catch (e) {
       console.warn("Mic level meter unavailable:", e);
@@ -1094,6 +1179,47 @@ export default function Home() {
   function releaseWakeLock() {
     void wakeLockRef.current?.release().catch(() => {});
     wakeLockRef.current = null;
+  }
+
+  /** Feeds one meter reading to the mic-check room assessment and, about once
+   *  a second, updates the warning. Shows as soon as the room reads noisy (or
+   *  the voice quiet); clears only after NOISE_WARNING_CLEAR_MS of "ok", so it
+   *  doesn't flicker. No-op outside the instructions step. */
+  function updateNoiseCheck(rms: number) {
+    const nc = noiseCheckRef.current;
+    if (!nc) return;
+    nc.readings.push(rms);
+    if (nc.readings.length > NOISE_CHECK_WINDOW) nc.readings.shift();
+    if (++nc.ticks % NOISE_CHECK_EVERY_TICKS !== 0) return;
+    const a = assessRoom(nc.readings);
+    nc.last = a;
+    if (a.verdict === "noisy" || a.verdict === "quiet-voice") {
+      nc.okSince = null;
+      nc.warningsShown.add(a.verdict);
+      setNoiseWarning(a.verdict);
+    } else if (a.verdict === "ok") {
+      const now = Date.now();
+      nc.okSince ??= now;
+      if (now - nc.okSince >= NOISE_WARNING_CLEAR_MS) setNoiseWarning(null);
+    }
+  }
+
+  /** Starts loading Silero once per page (SileroVad.load() caches, and retries after a failure). */
+  function ensureSileroLoad() {
+    if (sileroLoadRef.current) return;
+    const t0 = performance.now();
+    const p = SileroVad.load();
+    sileroLoadRef.current = p;
+    p.then(
+      (s) => {
+        sileroRef.current = s;
+        logClientEvent("vad_ready", { loadMs: Math.round(performance.now() - t0) });
+      },
+      (e) => {
+        sileroLoadRef.current = null;
+        logClientEvent("vad_load_failed", { error: String(e instanceof Error ? e.message : e) });
+      },
+    );
   }
 
   function stopMicLevelLoop() {
@@ -1142,11 +1268,29 @@ export default function Home() {
     // Both need the tap's user activation, so they run before any await.
     resumeAudioContexts();
     requestWakeLock();
+    // Mic-check outcome, for calibrating lib/noise-check.ts's thresholds —
+    // then stop assessing: from here on the mic hears the session itself.
+    const nc = noiseCheckRef.current;
+    if (nc) {
+      const round = (v: number | null) => (v === null ? null : Math.round(v));
+      logClientEvent("mic_check", {
+        verdict: nc.last?.verdict ?? "unknown",
+        floorDb: round(nc.last?.floorDb ?? null),
+        voiceDb: round(nc.last?.voiceDb ?? null),
+        snrDb: round(nc.last?.snrDb ?? null),
+        warningsShown: [...nc.warningsShown],
+        warningOnStart: noiseWarning,
+        checkMs: nc.ticks * 80,
+      });
+      noiseCheckRef.current = null;
+    }
     setSessionStarted(true);
     sessionSavedRef.current = false;
     liveSessionIdRef.current = null;
     liveSessionStartRef.current = null;
     startedAtRef.current = Date.now();
+    integrityRef.current = integrityEnabled ? new IntegrityTracker(startedAtRef.current) : null;
+    setAwayNotice(false);
     closeRequestedRef.current = false;
     ladderStepsRef.current = [];
     clarifyAttemptRef.current = 0;
@@ -1266,6 +1410,8 @@ export default function Home() {
       // This is the correct moment — the SSE stream ends before audio finishes,
       // so flushing from the SSE callback would overlap with playback.
       if (reallyDone) {
+        // Response latency starts here (lib/integrity-tracker.ts) — again after a repeat.
+        integrityRef.current?.questionAsked(bankStateRef.current.currentId ?? null);
         processBufferedRef.current();
         playbackDoneWaiterRef.current?.();
         playbackDoneWaiterRef.current = null;
@@ -1321,7 +1467,10 @@ export default function Home() {
         if (willBuffer) return; // never claimed the turn — nothing to release
         isProcessingRef.current = false;
         setPartialUser("");
-        if (notifyUser) setSttNotice("Je n'ai pas bien entendu — pouvez-vous répéter ?");
+        if (notifyUser) {
+          setSttNotice("Je n'ai pas bien entendu — pouvez-vous répéter ?");
+          integrityRef.current?.mark("techIssue");
+        }
         // An answer spoken while this one was transcribing got buffered
         // behind our claim — process it now instead of dropping it.
         processBufferedRef.current();
@@ -1526,12 +1675,15 @@ export default function Home() {
           isUserTalkingRef.current = true;
           setIsUserTalking(true);
         },
-        onSpeechEnd: (spokenMs) => {
+        onSpeechEnd: (spokenMs, startedAtMs) => {
           isUserTalkingRef.current = false;
           setIsUserTalking(false);
+          integrityRef.current?.answerStarted(startedAtMs, spokenMs);
           void onSpeechEnd(spokenMs);
         },
         onBargeIn: handleBargeIn,
+        onClassifierDropped: (reason) => logClientEvent("vad_degraded", { reason }),
+        onTurnCapped: (spokenMs) => logClientEvent("turn_capped", { spokenMs, mode: vadModeRef.current }),
         // realtimeSttRef.current may still be null here (token mint above is
         // still in flight) — pushAudio is a no-op via optional chaining until
         // the .then() below assigns it, so early frames just get dropped.
@@ -1542,6 +1694,14 @@ export default function Home() {
       // starting-level URL override applies, so this is only ever non-default
       // when that override or an already-resolved admin setting put it there.
       vadRef.current.setPauseZone(zoneForRung(currentRungRef.current));
+      // Silero mode: detection runs on volume until the model is in (usually
+      // well before the first answer — it started loading on the mic check).
+      if (vadModeRef.current === "silero") {
+        ensureSileroLoad();
+        const vad = vadRef.current;
+        sileroLoadRef.current?.then((s) => { if (vadRef.current === vad) vad.setClassifier(s); }, () => {});
+      }
+      logClientEvent("vad_mode", { mode: vadModeRef.current });
       startTurnRecording(); // begin recording the first user turn
 
       // The streaming client mints its own token per turn internally
@@ -1628,6 +1788,10 @@ export default function Home() {
     // after turn 1 reads whatever ET's most recently completed result set
     // currentRungRef to (best-effort, see runTranscriptAssessment).
     const rung: CefrRung = isStart ? conversationSettingsRef.current.startingRung : currentRungRef.current;
+    // Each examiner reply but the closing remark carries the next question
+    // (or, after a "didn't understand", the same one re-asked).
+    if (clarifyButton) integrityRef.current?.mark("clarify");
+    if (!isEnd) integrityRef.current?.startQuestion({ rung, warmup: isStart, reask: clarify });
 
     try {
       // This turn's /api/chat call is allowed to overlap the previous turn's
@@ -1687,6 +1851,7 @@ export default function Home() {
         isProcessingRef.current = false;
         setIsThinking(false);
         setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
+        integrityRef.current?.mark("techIssue");
         return;
       }
 
@@ -1788,6 +1953,7 @@ export default function Home() {
             console.error("Stream error:", data);
             setIsThinking(false);
             setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
+            integrityRef.current?.mark("techIssue");
           }
         }
       }
@@ -1815,6 +1981,7 @@ export default function Home() {
       }
       console.error("handleUserTurn failed:", err);
       setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
+      integrityRef.current?.mark("techIssue");
       processBufferedRef.current();
     }
   };
@@ -1858,6 +2025,16 @@ export default function Home() {
     releaseWakeLock();
 
     await stopTurnRecording();
+    const vadLevels = vadRef.current?.getLevels();
+    if (vadLevels) {
+      const silero = vadModeRef.current === "silero" ? sileroRef.current : null;
+      logClientEvent("vad_summary", {
+        mode: vadModeRef.current,
+        endedOn: vadLevels.mode,
+        ignoredNoiseRuns: vadLevels.ignoredNoiseRuns,
+        meanInferenceMs: silero ? Math.round(silero.stats().meanInferenceMs * 100) / 100 : null,
+      });
+    }
     vadRef.current?.stop();
     setIsUserTalking(false);
     realtimeSttRef.current?.close();
@@ -2271,6 +2448,9 @@ export default function Home() {
                   ["Écoutez la question", "Vous pouvez la faire répéter une fois."],
                   ["Parlez librement", "Hésiter, reprendre, se corriger : tout cela est normal."],
                   ["Laissez un silence", "Léa comprend que vous avez terminé et enchaîne."],
+                  ...(integrityEnabled
+                    ? [["Répondez spontanément", "Sans aide extérieure. Les longs silences avant de répondre et les sorties de cette fenêtre sont enregistrés et visibles par l'évaluateur."]]
+                    : []),
                 ].map(([title, desc], i) => (
                   <div key={title} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
                     <StepBadge n={i + 1} />
@@ -2294,6 +2474,13 @@ export default function Home() {
                   <>Dites «&nbsp;bonjour&nbsp;» pour vérifier que l&apos;on vous entend bien.</>
                 )}
               </p>
+              {micStatus === "granted" && noiseWarning && (
+                <p role="status" style={{ margin: 0, padding: "10px 14px", fontSize: 14, color: "#8A6410", lineHeight: 1.5, background: "#FBF4E4", borderRadius: 10 }}>
+                  {noiseWarning === "noisy"
+                    ? "Votre environnement semble un peu bruyant. Le test fonctionnera, mais vos résultats seront plus fiables dans un endroit plus calme."
+                    : "On vous entend faiblement. Rapprochez-vous du micro ou parlez un peu plus fort."}
+                </p>
+              )}
               <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 4, borderTop: "1px solid #EFEBE2" }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: micStatus === "granted" ? "#2F9E6E" : "#C9C4B8" }} />
                 <span style={{ fontSize: 15, color: "#141D33" }}>
@@ -2389,6 +2576,13 @@ export default function Home() {
                 />
               )}
             </div>
+
+            {/* Whatever the turn state — it only sits above the indicator, never interrupts. */}
+            {awayNotice && (
+              <span role="status" style={{ fontSize: 15, color: "#6B6F7D", textAlign: "center" }}>
+                Merci de rester sur le test et de ne pas quitter cette fenêtre.
+              </span>
+            )}
 
             {turnState === "avatarSpeaking" && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>

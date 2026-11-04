@@ -1,5 +1,6 @@
 /**
- * Client-side turn-boundary detection (energy-based VAD).
+ * Client-side turn-boundary detection (energy-based VAD, optionally gated by
+ * Silero — see setClassifier and lib/silero-vad.ts).
  *
  * Replaces the role Azure's streaming recognizer used to play in
  * lib/azure-stt.ts: deciding when the user has stopped talking. This file
@@ -28,11 +29,14 @@
  */
 
 import type { CefrZone } from "@/lib/cefr-rung";
+import type { SpeechClassifier } from "@/lib/silero-vad";
 
 export interface TurnVadCallbacks {
   onSpeechStart?: () => void;
-  /** spokenMs excludes the trailing silence wait — see lastVoiceMs in finalize(). */
-  onSpeechEnd?: (spokenMs: number) => void;
+  /** spokenMs excludes the trailing silence wait — see lastVoiceMs in finalize().
+   *  startedAtMs: wall-clock time of the segment's first voiced frame — unlike
+   *  onSpeechStart, only ever reported for a segment that counted (≥ MIN_SPEECH_MS). */
+  onSpeechEnd?: (spokenMs: number, startedAtMs: number) => void;
   /** Fires once, per speech segment, when the user keeps talking through BARGE_IN_MS
    *  while the avatar is speaking — the caller's cue to stop TTS immediately. */
   onBargeIn?: () => void;
@@ -40,6 +44,14 @@ export interface TurnVadCallbacks {
    *  PRE_ROLL_FRAMES of lead-in) until the utterance is finalized, quiet
    *  in-speech buffers included — never the silence/echo between utterances. */
   onAudioFrame?: (float32: Float32Array) => void;
+  /** Classifier mode only: a run of frames loud enough to count as voice by
+   *  volume, but not speech to the classifier (cough, door, music) — once per run. */
+  onNoiseIgnored?: () => void;
+  /** The classifier was dropped for the rest of this TurnVad (too slow, or an
+   *  inference error) — detection is back to volume only. */
+  onClassifierDropped?: (reason: string) => void;
+  /** The answer hit MAX_TURN_MS and is being closed — fires just before its onSpeechEnd. */
+  onTurnCapped?: (spokenMs: number) => void;
 }
 
 /**
@@ -146,6 +158,40 @@ const PRE_ROLL_FRAMES = 4;
  */
 const FRAME_STALL_MS = 1000;
 const WATCHDOG_INTERVAL_MS = 500;
+/**
+ * Hard cap on one answer, from its first voiced frame (ms): past it the turn
+ * is closed as if "J'ai terminé" had been pressed. Background voices (TV, a
+ * colleague) are speech to the classifier too, and nothing else ever ends a
+ * turn they keep open (doc/feature-1-background-noise.md acceptance
+ * criteria). Mastery (C2) answers get longer, like their pause budget.
+ */
+const MAX_TURN_MS = 90_000;
+const MAX_TURN_MS_EXTENDED = 120_000;
+/**
+ * Classifier mode (setClassifier): a frame is voice only when the speech
+ * probability clears SPEECH_PROB_ON — or SPEECH_PROB_OFF if the previous
+ * frame was voice (hysteresis; Silero's own defaults) — AND its RMS clears
+ * the threshold above times RMS_GATE_FACTOR. Probability alone would count
+ * any voice, however far (a TV, a colleague); the volume gate keeps those out.
+ * At 1.0, with the noise floor learned exactly as in volume mode, a frame is
+ * voice in classifier mode only if volume mode would count it too: the
+ * classifier can only remove false starts, never add one. It was 0.5, which
+ * let quieter background voices hold a turn open; the quiet-mic case (Y-04)
+ * is covered by the learned floor and MIN_SPEECH_THRESHOLD, not by this gate.
+ * While the avatar speaks the echo-guard threshold applies: Silero hears the
+ * avatar's leaked voice as speech too.
+ */
+const SPEECH_PROB_ON = 0.5;
+const SPEECH_PROB_OFF = 0.35;
+const RMS_GATE_FACTOR = 1;
+/** Buffers (~85 ms each) allowed to wait for the classifier before the device
+ *  is judged too slow and detection drops back to volume only. */
+const MAX_PENDING_BUFFERS = 3;
+
+/** Turn detection live sessions use: "volume" (RMS only) or "silero" (RMS
+ *  gated by lib/silero-vad.ts). `?vad=` overrides it per session (app/page.tsx). */
+export type TurnVadMode = "volume" | "silero";
+export const LIVE_TURN_VAD_MODE: TurnVadMode = "silero";
 
 export class TurnVad {
   private audioContext: AudioContext | null = null;
@@ -173,6 +219,21 @@ export class TurnVad {
   /** Timestamp of the last audio frame of any level — see FRAME_STALL_MS. */
   private lastFrameMs = Date.now();
   private watchdog: ReturnType<typeof setInterval> | null = null;
+  /** Last frame's RMS and the threshold it was judged against — read by getLevels(). */
+  private lastRms = 0;
+  private lastThreshold = SILENCE_THRESHOLD;
+  private sampleRate = 48000;
+  /** Speech classifier (lib/silero-vad.ts) gating the volume test — null = volume only. */
+  private classifier: SpeechClassifier | null = null;
+  /** Buffers are classified one at a time, in order, on this chain. */
+  private chain: Promise<void> = Promise.resolve();
+  private pendingBuffers = 0;
+  private lastSpeechProb: number | null = null;
+  /** Whether the previous frame counted as voice — picks SPEECH_PROB_ON/OFF. */
+  private prevVoiced = false;
+  /** Inside a run of loud non-speech frames — onNoiseIgnored fires once per run. */
+  private noiseRun = false;
+  private ignoredNoiseRuns = 0;
 
   constructor(stream: MediaStream, callbacks: TurnVadCallbacks) {
     this.cb = callbacks;
@@ -182,9 +243,10 @@ export class TurnVad {
     // activation — iOS Safari can hand it back "suspended", which would mean
     // no onaudioprocess and no turn detection at all. See also resume().
     this.resume();
+    this.sampleRate = this.audioContext.sampleRate;
     this.source = this.audioContext.createMediaStreamSource(stream);
     this.processor = this.audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
-    this.processor.onaudioprocess = (e) => this.handleAudio(e.inputBuffer.getChannelData(0));
+    this.processor.onaudioprocess = (e) => this.onBuffer(e.inputBuffer.getChannelData(0));
 
     // ScriptProcessorNode only fires onaudioprocess while connected through
     // to a destination — route through a silent gain node so the mic is
@@ -194,7 +256,19 @@ export class TurnVad {
     this.source.connect(this.processor);
     this.processor.connect(silentGain);
     silentGain.connect(this.audioContext.destination);
-    this.watchdog = setInterval(() => this.checkStalled(), WATCHDOG_INTERVAL_MS);
+    this.watchdog = setInterval(() => {
+      this.checkStalled();
+      this.checkMaxLength();
+    }, WATCHDOG_INTERVAL_MS);
+  }
+
+  /** Closes an answer that has run past MAX_TURN_MS (see there). */
+  private checkMaxLength() {
+    if (!this.isSpeaking) return;
+    const cap = this.pauseZone === "mastery" ? MAX_TURN_MS_EXTENDED : MAX_TURN_MS;
+    if (Date.now() - this.speechStartMs < cap) return;
+    this.cb.onTurnCapped?.(this.lastVoiceMs - this.speechStartMs);
+    this.finalize();
   }
 
   /** Ends an open utterance whose audio frames stopped arriving (see
@@ -215,6 +289,63 @@ export class TurnVad {
       msSinceFrame: Date.now() - this.lastFrameMs,
       isSpeaking: this.isSpeaking,
     };
+  }
+
+  /** Live detection state, for the admin VAD lab (components/VadLab.tsx). */
+  getLevels() {
+    return {
+      rms: this.lastRms,
+      threshold: this.lastThreshold,
+      noiseFloor: this.noiseFloor,
+      isSpeaking: this.isSpeaking,
+      speechProb: this.lastSpeechProb,
+      mode: this.classifier ? ("classifier" as const) : ("volume" as const),
+      ignoredNoiseRuns: this.ignoredNoiseRuns,
+    };
+  }
+
+  /** Gate the volume test with a speech classifier (see SPEECH_PROB_ON), or
+   *  null to go back to volume only. Safe to call mid-session: the model is
+   *  usually still loading when the session starts. */
+  setClassifier(classifier: SpeechClassifier | null) {
+    classifier?.reset();
+    this.classifier = classifier;
+    this.lastSpeechProb = null;
+    this.prevVoiced = false;
+    this.noiseRun = false;
+  }
+
+  private dropClassifier(reason: string) {
+    if (!this.classifier) return;
+    this.classifier = null;
+    this.lastSpeechProb = null;
+    this.cb.onClassifierDropped?.(reason);
+  }
+
+  private onBuffer(channel: Float32Array) {
+    this.lastFrameMs = Date.now();
+    if (!this.classifier && this.pendingBuffers === 0) {
+      this.handleAudio(channel, null);
+      return;
+    }
+    // Async path: copy (the browser reuses its buffers) and queue behind any
+    // buffer still being classified, so frames always reach handleAudio in order.
+    const frame = channel.slice();
+    this.pendingBuffers++;
+    if (this.pendingBuffers > MAX_PENDING_BUFFERS) this.dropClassifier(`lagging (${this.pendingBuffers} buffers queued)`);
+    this.chain = this.chain.then(async () => {
+      let prob: number | null = null;
+      const classifier = this.classifier;
+      if (classifier) {
+        try {
+          prob = await classifier.probability(frame, this.sampleRate);
+        } catch (e) {
+          this.dropClassifier(`inference error: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      this.pendingBuffers--;
+      if (this.audioContext) this.handleAudio(frame, prob); // stop() ran meanwhile → drop
+    });
   }
 
   /** Tell the VAD the difficulty zone of the current question: Mastery (C2)
@@ -240,11 +371,13 @@ export class TurnVad {
     }
   }
 
-  private handleAudio(float32: Float32Array) {
-    this.lastFrameMs = Date.now();
+  /** speechProb: the classifier's verdict for this frame, null in volume-only mode. */
+  private handleAudio(float32: Float32Array, speechProb: number | null) {
     const rms = Math.sqrt(float32.reduce((s, v) => s + v * v, 0) / float32.length);
     // Echo guard stays absolute: leaked avatar voice isn't room noise, and
     // learning the floor from it would raise the threshold for no reason.
+    // Same rule with a classifier (see RMS_GATE_FACTOR): skipping speech-like
+    // frames would keep a TV's voice out of the floor, so it never got learned.
     if (!this.avatarSpeaking) {
       const rate = rms < this.noiseFloor ? NOISE_FLOOR_FALL : NOISE_FLOOR_RISE;
       this.noiseFloor += (rms - this.noiseFloor) * rate;
@@ -252,8 +385,24 @@ export class TurnVad {
     const threshold = this.avatarSpeaking
       ? ECHO_GUARD_THRESHOLD
       : Math.min(MAX_SPEECH_THRESHOLD, Math.max(MIN_SPEECH_THRESHOLD, this.noiseFloor * NOISE_FLOOR_MULTIPLIER));
+    this.lastRms = rms;
+    this.lastThreshold = threshold;
+    this.lastSpeechProb = speechProb;
 
-    if (rms > threshold) {
+    const loud = rms > threshold;
+    let voiced = loud;
+    if (speechProb !== null) {
+      const gate = threshold * RMS_GATE_FACTOR;
+      voiced = speechProb >= (this.prevVoiced ? SPEECH_PROB_OFF : SPEECH_PROB_ON) && rms > gate;
+      if (loud && !voiced && !this.noiseRun) {
+        this.ignoredNoiseRuns++;
+        this.cb.onNoiseIgnored?.();
+      }
+      this.noiseRun = loud && !voiced;
+    }
+    this.prevVoiced = voiced;
+
+    if (voiced) {
       this.lastVoiceMs = Date.now();
       if (!this.isSpeaking) {
         this.isSpeaking = true;
@@ -312,6 +461,10 @@ export class TurnVad {
   }
 
   private finalize() {
+    // Cleared, not just forgotten: finalize() also runs from the watchdog
+    // (checkStalled, checkMaxLength) with a timer still armed, which would
+    // otherwise fire into the NEXT utterance and cut it short.
+    if (this.silenceTimer !== null) clearTimeout(this.silenceTimer);
     this.silenceTimer = null;
     if (this.bargeInTimer !== null) {
       clearTimeout(this.bargeInTimer);
@@ -320,7 +473,7 @@ export class TurnVad {
     const spokenMs = this.lastVoiceMs - this.speechStartMs;
     const spoke = this.isSpeaking && spokenMs >= MIN_SPEECH_MS;
     this.isSpeaking = false;
-    if (spoke) this.cb.onSpeechEnd?.(spokenMs);
+    if (spoke) this.cb.onSpeechEnd?.(spokenMs, this.speechStartMs);
   }
 
   /** "J'ai terminé" — the user says their turn is over, whatever the VAD
@@ -328,6 +481,11 @@ export class TurnVad {
    *  ever cross the threshold). Resets the segment and returns its spoken
    *  duration (0 when no speech was detected); does NOT fire onSpeechEnd —
    *  the caller ends the turn itself. */
+  /** Wall-clock start of the open segment, or null — read before forceEnd(), which closes it. */
+  getSpeechStartMs(): number | null {
+    return this.isSpeaking ? this.speechStartMs : null;
+  }
+
   forceEnd(): number {
     if (this.silenceTimer !== null) {
       clearTimeout(this.silenceTimer);

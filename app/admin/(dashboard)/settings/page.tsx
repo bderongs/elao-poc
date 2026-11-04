@@ -1,5 +1,7 @@
 import { listConversationSettings } from "@/lib/conversation-settings-service";
 import { ConversationSettingsRow } from "@/components/ConversationSettingsRow";
+import { IntegritySettingsForm } from "@/components/IntegritySettingsForm";
+import { getIntegritySettings } from "@/lib/integrity-settings-service";
 import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
@@ -17,6 +19,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
 
 export default async function ConversationSettingsPage() {
   const rows = await listConversationSettings();
+  const integritySettings = await getIntegritySettings();
 
   return (
     <div>
@@ -58,6 +61,19 @@ export default async function ConversationSettingsPage() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className={styles.card} style={{ marginTop: 28, maxWidth: 720 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Response timing &amp; window changes</div>
+        <div style={{ fontSize: 13, color: adminColors.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          A hint for reviewers on each session page (none / low / high, with the reasons), never a
+          verdict: the score is never changed. Computed when the page is viewed, so a change here
+          also applies to past sessions. The first question, re-asks after &ldquo;je ne comprends
+          pas&rdquo;, skipped questions and questions with a technical issue are never counted. The
+          thresholds are starting values to tune on the pilots. See{" "}
+          <code>doc/feature-2-response-timing-and-integrity.md</code>.
+        </div>
+        <IntegritySettingsForm initial={integritySettings} />
       </div>
 
       <div className={styles.card} style={{ marginTop: 28, maxWidth: 720 }}>

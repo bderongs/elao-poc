@@ -32,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
         !p.startsWith("/admin/settings") &&
         !p.startsWith("/admin/system-config") &&
         !p.startsWith("/admin/simulator") &&
+        !p.startsWith("/admin/vad-lab") &&
         !p.startsWith("/admin/question-bank")),
   },
   {
@@ -77,6 +78,17 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
     isActive: (p) => p.startsWith("/admin/simulator"),
+  },
+  {
+    href: "/admin/vad-lab",
+    label: "VAD lab",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3" />
+      </svg>
+    ),
+    isActive: (p) => p.startsWith("/admin/vad-lab"),
   },
   {
     href: "/admin/question-bank",

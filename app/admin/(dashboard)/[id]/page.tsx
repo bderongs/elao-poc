@@ -12,6 +12,8 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { ProviderConfigTable } from "@/components/ProviderConfigTable";
 import { LadderPanel } from "@/components/LadderPanel";
+import { IntegrityBadge, IntegrityPanel } from "@/components/IntegrityPanel";
+import { getIntegritySettings } from "@/lib/integrity-settings-service";
 import { listProviders } from "@/lib/llm/registry";
 import { listProviders as listPronunciationProviders } from "@/lib/pronunciation/registry";
 import { buildScoreBreakdown } from "@/lib/score-breakdown";
@@ -41,6 +43,7 @@ export default async function AdminSessionDetailPage({
 
   const { session, turns, evaluations, turnEvaluations } = detail;
   const feedback = await getSessionFeedback(id).catch(() => null);
+  const integritySettings = session.integrity_json ? await getIntegritySettings() : null;
   const providerOptions = listProviders().map((p) => ({ id: p.id, label: p.label }));
   const pronunciationProviderOptions = listPronunciationProviders().map((p) => ({ id: p.id, label: p.label }));
 
@@ -155,6 +158,7 @@ export default async function AdminSessionDetailPage({
             {mainScore.level}
           </span>
         )}
+        {session.integrity_json && integritySettings && <IntegrityBadge record={session.integrity_json} settings={integritySettings} />}
       </div>
       <div className={styles.detailMeta}>
         Duration: {session.duration_seconds ? `${Math.round(session.duration_seconds / 60)} min` : "—"}
@@ -233,6 +237,14 @@ export default async function AdminSessionDetailPage({
           )}
         </CollapsibleSection>
       </div>
+
+      {session.integrity_json && integritySettings && (
+        <div style={{ marginTop: 24 }}>
+          <CollapsibleSection title="Response timing & window changes">
+            <IntegrityPanel record={session.integrity_json} settings={integritySettings} />
+          </CollapsibleSection>
+        </div>
+      )}
 
       {session.ladder_json && (
         <div style={{ marginTop: 24 }}>

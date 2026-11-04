@@ -49,3 +49,6 @@ analysis/reports/
 
 # client exports with candidates' personal data (names, emails, Speechace report links) — never commit
 doc/SpeechAce/
+
+# Copied from node_modules by scripts/copy-vad-assets.mjs
+public/vad/ort-*

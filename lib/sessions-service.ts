@@ -14,6 +14,7 @@ import { logServerEvent } from "@/lib/server-log";
 import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { LadderRecord } from "@/lib/session-length";
+import { sanitizeIntegrity, type IntegrityRecord } from "@/lib/integrity";
 import type { SimulationRecord } from "@/lib/simulation-record";
 
 // Single source of truth for reading/writing sessions — used by both the
@@ -87,8 +88,20 @@ export async function listSessions({
   if (error) throw new Error(error.message);
   const sessions = (data ?? []) as SessionSummary[];
   await attachLatestEvalFallback(supabase, sessions);
+  await attachIntegrity(supabase, sessions);
 
   return { sessions, total: count ?? 0, page: safePage, pageSize: safePageSize };
+}
+
+/** sessions.integrity_json for the list's integrity badge — read on its own and
+ *  best-effort, like the detail page: without migration 0016 the list still loads. */
+async function attachIntegrity(supabase: SupabaseClient, sessions: SessionSummary[]): Promise<void> {
+  const ids = sessions.filter((s) => s.source === "conversation").map((s) => s.id);
+  if (!ids.length) return;
+  const { data, error } = await supabase.from("sessions").select("id, integrity_json").in("id", ids);
+  if (error) return;
+  const byId = new Map((data ?? []).map((r) => [r.id as string, (r.integrity_json ?? null) as IntegrityRecord | null]));
+  for (const s of sessions) s.integrity_json = byId.get(s.id) ?? null;
 }
 
 /**
@@ -190,6 +203,8 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
   // Read on its own and best-effort, like saveLadder: an environment without
   // migration 0011 must still show the session.
   const { data: ladderRow } = await supabase.from("sessions").select("ladder_json").eq("id", id).maybeSingle();
+  // Same for migration 0016.
+  const { data: integrityRow } = await supabase.from("sessions").select("integrity_json").eq("id", id).maybeSingle();
 
   // The bucket is private: pages get expiring links, never the stored URL (lib/recordings.ts).
   const [sessionAudioUrl, ...turnAudioUrls] = await signRecordingUrls([
@@ -202,6 +217,7 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
       ...(session as SessionDetailRow),
       audio_url: sessionAudioUrl,
       ladder_json: (ladderRow?.ladder_json ?? null) as LadderRecord | null,
+      integrity_json: (integrityRow?.integrity_json ?? null) as IntegrityRecord | null,
     },
     turns: turnRows.map((t, i) => ({ ...t, audio_url: turnAudioUrls[i] })),
     evaluations: (evaluations ?? []) as EvaluationRow[],
@@ -313,6 +329,7 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   const pronunciationScores = parseJsonField(form, "pronunciationScores", null);
   const turns = parseJsonField<TurnMeta[]>(form, "turns", []);
   const ladder = sanitizeLadder(parseJsonField<unknown>(form, "ladder", null));
+  const integrity = sanitizeIntegrity(parseJsonField<unknown>(form, "integrity", null));
 
   // This route is public, so the evaluation is kept only if /api/evaluate
   // signed it for these answers (lib/evaluation-signature.ts); level, score
@@ -394,6 +411,7 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
 
   const sessionId = sessionRow.id as string;
   if (ladder) await saveLadder(sessionId, ladder);
+  if (integrity) await saveIntegrity(sessionId, integrity);
 
   if (userId) await upsertProfilePreference(userId, language, cefrLevel);
 
@@ -450,6 +468,12 @@ function sanitizeLadder(raw: unknown): LadderRecord | null {
 async function saveLadder(sessionId: string, ladder: LadderRecord): Promise<void> {
   const { error } = await getSupabaseServer().from("sessions").update({ ladder_json: ladder }).eq("id", sessionId);
   if (error) console.warn("[sessions] ladder_json not saved:", error.message);
+}
+
+/** Response timing + window changes (lib/integrity.ts) — best-effort like saveLadder (migration 0016). */
+async function saveIntegrity(sessionId: string, integrity: IntegrityRecord): Promise<void> {
+  const { error } = await getSupabaseServer().from("sessions").update({ integrity_json: integrity }).eq("id", sessionId);
+  if (error) console.warn("[sessions] integrity_json not saved (run migration 0016?):", error.message);
 }
 
 /**
@@ -514,7 +538,7 @@ export async function startLiveSession(language: string, userId: string | null):
 
 export async function saveLiveProgress(
   id: string,
-  progress: { durationSeconds: number; turns: Array<{ role: string; content: string; pronunciation: unknown | null }>; ladder?: unknown },
+  progress: { durationSeconds: number; turns: Array<{ role: string; content: string; pronunciation: unknown | null }>; ladder?: unknown; integrity?: unknown },
   userId: string | null,
 ): Promise<void> {
   let q = getSupabaseServer()
@@ -532,6 +556,8 @@ export async function saveLiveProgress(
   if (error) throw new Error(error.message);
   const ladder = sanitizeLadder(progress.ladder ?? null);
   if (data && ladder) await saveLadder(id, ladder);
+  const integrity = sanitizeIntegrity(progress.integrity ?? null);
+  if (data && integrity) await saveIntegrity(id, integrity);
 }
 
 /**

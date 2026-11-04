@@ -2,6 +2,7 @@ import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { BoundaryChecks } from "@/lib/cefr-boundary";
 import type { CapabilityConfig } from "@/lib/system-config";
 import type { LadderRecord } from "@/lib/session-length";
+import type { IntegrityRecord } from "@/lib/integrity";
 
 // Domain types shared across API routes, the admin tool, and the eval lab —
 // single source of truth so route handlers and pages don't redeclare the
@@ -83,6 +84,8 @@ export interface SessionSummary {
   speechace_scores: SpeechaceScores | null;
   /** listSessions-only: latest successful eval-lab run, for sessions where evaluation_json is empty — see lib/cefr-score.ts's resolveCefrResult. */
   latest_eval_json?: CefrResult | null;
+  /** Response timing + window changes (lib/integrity.ts) — listSessions reads it on its own, best-effort; the detail row always has it. */
+  integrity_json?: IntegrityRecord | null;
   /** Owning account, set by claimSession(); null until claimed (or for admin-created upload/speechace sessions). */
   user_id: string | null;
   /** 'in_progress' rows are live sessions saved incrementally — see supabase/migrations/0010_session_status.sql. */

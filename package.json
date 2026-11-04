@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-vad-assets.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-vad-assets.mjs",
     "build": "next build",
     "start": "next start",
     "sim:batch": "tsx scripts/sim-batch.ts",
@@ -20,6 +22,7 @@
     "buffer": "^6.0.3",
     "microsoft-cognitiveservices-speech-sdk": "^1.43.0",
     "next": "^15.0.3",
+    "onnxruntime-web": "1.30.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "wawa-lipsync": "^0.0.2"
