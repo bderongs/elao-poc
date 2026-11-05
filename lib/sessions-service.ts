@@ -1007,9 +1007,10 @@ export async function getTurnForAssessment(
  * conversation's transcript and pronunciation_scores are the live flow's
  * actual output and must not be silently overwritten by ad-hoc replay runs.
  *
- * If a turn's latest run failed, that turn drops out of the rollup (rather
- * than falling back to an older successful run) until it's reassessed — a
- * future "pick a different run" action will let you override this.
+ * Each turn uses its latest SUCCESSFUL run: a run that failed (e.g. a
+ * provider rate limit) or is still pending is skipped, so it can't drop a
+ * turn that an earlier run had scored — until 2026-11-05 it did, and the
+ * same session's score moved with whichever call last hit a 429.
  */
 export async function recomputeSessionRollup(sessionId: string): Promise<void> {
   const supabase = getSupabaseServer();
@@ -1038,14 +1039,15 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
     .order("created_at", { ascending: false });
   if (evalsError) throw new Error(evalsError.message);
 
-  // Query is newest-first, so the first row seen per turn_id is that turn's
-  // latest run, regardless of which provider produced it — except
-  // comparison-only providers, which never feed the rollup.
-  const latestByTurn = new Map<string, PronunciationResult | null>();
+  // Query is newest-first, so the first successful row seen per turn_id is
+  // that turn's latest successful run, regardless of which provider produced
+  // it — except comparison-only providers, which never feed the rollup.
+  const latestByTurn = new Map<string, PronunciationResult>();
   for (const row of allEvals ?? []) {
     if (COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS.includes(row.provider_id as string)) continue;
+    if (!row.result_json) continue; // failed or pending
     const turnId = row.turn_id as string;
-    if (!latestByTurn.has(turnId)) latestByTurn.set(turnId, row.result_json as PronunciationResult | null);
+    if (!latestByTurn.has(turnId)) latestByTurn.set(turnId, row.result_json as PronunciationResult);
   }
 
   const results: PronunciationResult[] = [];
@@ -1053,7 +1055,7 @@ export async function recomputeSessionRollup(sessionId: string): Promise<void> {
 
   for (const turn of turns) {
     const latest = latestByTurn.get(turn.id as string);
-    if (!latest) continue; // no run yet, or the latest run failed
+    if (!latest) continue; // no successful run yet
     results.push(latest);
     if (latest.text !== turn.content) contentUpdates.push({ id: turn.id as string, content: latest.text });
   }

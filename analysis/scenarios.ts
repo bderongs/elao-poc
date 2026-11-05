@@ -73,6 +73,31 @@ export const SCENARIOS: Record<string, Scenario> = {
     ref: "calibration 2026-10-14",
     overrides: { pronunciationCurve: [[0, 0], [60, 5], [80, 8], [90, 9.5], [95, 10]] },
   },
+  "before-2026-11-05": {
+    description: "The axis curve before its low end was raised: an axis mean of 3 (the evaluator's \"A1\") is 30, A0, instead of 40.",
+    ref: "client feedback 2026-11-04 (A1 rated A0)",
+    overrides: { axisCurve: [[0, 0], [8, 80], [9.5, 90], [10, 100]] },
+  },
+  "pw-25": {
+    description: "Pronunciation weighs 0.25 while the other axes average ≤ 4 (A1), rising to 1 at 6 (B1) and above.",
+    ref: "client feedback 2026-11-04",
+    overrides: { pronunciationWeight: [[4, 0.25], [6, 1]] },
+  },
+  "pron-lift-1": {
+    description: "Pronunciation counts at most 1 point above the mean of the other axes (it can still pull down).",
+    ref: "2026-11-05: the engines rate French A1s 74–88",
+    overrides: { pronunciationLift: 1 },
+  },
+  "pron-lift-2": {
+    description: "Pronunciation counts at most 2 points above the mean of the other axes (it can still pull down).",
+    ref: "2026-11-05: the engines rate French A1s 74–88",
+    overrides: { pronunciationLift: 2 },
+  },
+  "pron-lift-3": {
+    description: "Pronunciation counts at most 3 points above the mean of the other axes (it can still pull down).",
+    ref: "2026-11-05: the engines rate French A1s 74–88",
+    overrides: { pronunciationLift: 3 },
+  },
   "no-wpm-fluency": {
     description: "Ignore the speaking rate: keep the LLM's fluency axis as it scored it.",
     ref: "AB-07",

@@ -32,6 +32,16 @@ export interface CefrResult {
   c2_answers_well?: number;
   /** Second opinion at the level boundary, by comparison (lib/cefr-boundary.ts) — applied by ScoringRules.boundaryCheck. */
   boundary_checks?: BoundaryChecks;
+  /** The feedback above in French (lib/analysis-translation.ts). Absent before 2026-11-04 until backfilled, or when the translation failed. */
+  analysis_fr?: AnalysisTranslation;
+}
+
+/** The evaluator's written feedback, translated — same items, same order as the original. */
+export interface AnalysisTranslation {
+  summary: string;
+  strengths: string[];
+  areas_for_improvement: string[];
+  notable_errors: string[];
 }
 
 export interface PronunciationAvg {

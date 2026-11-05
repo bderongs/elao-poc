@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { computeSessionMainScore, sessionScoreBreakdown } from "@/lib/cefr-score";
+import { computeSessionMainScore, sessionScoreBreakdown, withLevelFloors, type LevelFloors } from "@/lib/cefr-score";
 import { wordColor, Bar } from "@/components/ScoreDisplay";
 import type { SessionSummary } from "@/lib/types";
 import { adminColors } from "@/lib/admin-theme";
@@ -33,14 +33,14 @@ const CLOSE_DELAY_MS = 150;
  * opens. Click-outside is instead a plain document listener that ignores
  * clicks inside the button or the popover itself.
  */
-export function SessionScoreCell({ session }: { session: SessionSummary }) {
+export function SessionScoreCell({ session, levelFloors }: { session: SessionSummary; levelFloors?: LevelFloors }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const main = computeSessionMainScore(session);
+  const main = computeSessionMainScore(session, withLevelFloors(levelFloors));
   const groups = sessionScoreBreakdown(session);
   const hasMore = groups.length > 0;
 

@@ -190,7 +190,7 @@ export interface PronunciationAvgAttribution {
 /**
  * Which pronunciation provider(s) actually fed the numbers currently sitting
  * in session.pronunciation_scores — mirrors recomputeSessionRollup's own
- * "first row seen per turn_id, newest-first" selection
+ * "first successful row seen per turn_id, newest-first" selection
  * (lib/sessions-service.ts) using the turnEvaluations the caller already
  * fetched (already ordered created_at desc), so no extra query is needed.
  * Only meaningful for upload/speechace sessions: recomputeSessionRollup
@@ -201,9 +201,10 @@ export function pronunciationAvgAttribution(turnEvaluations: TurnEvaluationRow[]
   const latestByTurn = new Map<string, TurnEvaluationRow>();
   for (const row of turnEvaluations) {
     if (COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS.includes(row.provider_id)) continue;
+    if (row.error || !row.result_json) continue;
     if (!latestByTurn.has(row.turn_id)) latestByTurn.set(row.turn_id, row);
   }
-  const contributing = Array.from(latestByTurn.values()).filter((r) => !r.error && r.result_json);
+  const contributing = Array.from(latestByTurn.values());
   if (!contributing.length) return null;
   return { providerIds: Array.from(new Set(contributing.map((r) => r.provider_id))) };
 }

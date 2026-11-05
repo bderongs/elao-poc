@@ -14,6 +14,7 @@ import { logServerEvent } from "@/lib/server-log";
 import { fluencyFromWpm, levelBeforeBoundaryChecks, SCORING_RULES } from "@/lib/cefr-score";
 import { withBoundaryChecks, type Exchange } from "@/lib/cefr-boundary";
 import { EVALUATION_SIGNATURE_HEADER, signEvaluation } from "@/lib/evaluation-signature";
+import { withFrenchAnalysis } from "@/lib/analysis-translation";
 
 interface SttContext {
   pronunciation: number;
@@ -78,6 +79,9 @@ export async function POST(req: Request) {
       exchanges: exchanges?.length ? exchanges : userTurns.map((answer) => ({ question: null, answer })),
       level: levelBeforeBoundaryChecks(evaluation, pronunciationContext ?? null),
     });
+
+    // The feedback in French for the results screen — signed with the rest; never fails the evaluation.
+    evaluation = await withFrenchAnalysis(evaluation, "cefr-eval-fr");
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
     // The browser hands this result to the public final save — the signature

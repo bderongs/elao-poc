@@ -12,7 +12,8 @@
  */
 
 import { createHmac } from "node:crypto";
-import { computeCompositeCefrScore } from "@/lib/cefr-score";
+import { computeCompositeCefrScore, SCORING_RULES, type ScoringRules } from "@/lib/cefr-score";
+import { getLiveScoringRules } from "@/lib/scoring-settings-service";
 import { logServerEvent } from "@/lib/server-log";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
 
@@ -54,9 +55,9 @@ export interface ScoreCallbackSession {
   pronunciation_scores: PronunciationAvg | null;
 }
 
-export function buildScoreCallbackPayload(session: ScoreCallbackSession, reportUrl: string) {
+export function buildScoreCallbackPayload(session: ScoreCallbackSession, reportUrl: string, rules: ScoringRules = SCORING_RULES) {
   const evaluation = session.evaluation_json;
-  const composite = evaluation ? computeCompositeCefrScore(evaluation, session.pronunciation_scores) : null;
+  const composite = evaluation ? computeCompositeCefrScore(evaluation, session.pronunciation_scores, rules) : null;
   return {
     event: "session.completed" as const,
     session_id: session.id,
@@ -91,7 +92,7 @@ export async function sendScoreCallback(session: ScoreCallbackSession, reportUrl
     logServerEvent("score_callback_skipped", { sessionId: session.id, reason: "no_evaluation" });
     return;
   }
-  const body = JSON.stringify(buildScoreCallbackPayload(session, reportUrl));
+  const body = JSON.stringify(buildScoreCallbackPayload(session, reportUrl, await getLiveScoringRules()));
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const secret = process.env.SCORE_CALLBACK_SECRET;
   if (secret) headers[SCORE_CALLBACK.signatureHeader] = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;

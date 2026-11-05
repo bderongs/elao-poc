@@ -22,7 +22,7 @@ import { getProvider as getPronunciationProvider } from "@/lib/pronunciation/reg
 import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG } from "@/lib/pronunciation-rollup";
 import { getProvider as getLlmProvider } from "@/lib/llm/registry";
 import { LIVE_CONVERSATION_MODEL_ID } from "@/lib/llm/live-provider";
-import { mistralChatModel, mistralRealtimeTranscribeModel } from "@/lib/mistral";
+import { mistralChatModel, mistralRealtimeTranscribeModel, mistralTranslationModel } from "@/lib/mistral";
 import { SCORING_RULES } from "@/lib/cefr-score";
 
 const REALTIME_STT_MODEL_LABEL: Record<RealtimeSttProviderId, () => string> = {
@@ -39,7 +39,7 @@ export interface ProviderConfig {
 }
 
 export interface CapabilityConfig extends ProviderConfig {
-  capability: "CONVERSATION" | "TT" | "STT" | "TTS" | "ET" | "EO" | "CEFR_EVAL";
+  capability: "CONVERSATION" | "TT" | "STT" | "TTS" | "ET" | "EO" | "CEFR_EVAL" | "FEEDBACK_FR";
   capabilityLabel: string;
   /** One line on what the step does and when it runs — shown under the label. */
   description?: string;
@@ -158,6 +158,15 @@ export function getSystemConfig(): CapabilityConfig[] {
       providerId: cefrEval.id,
       providerLabel: cefrEval.label,
       modelLabel: cefrEval.modelLabel,
+    },
+    {
+      // lib/analysis-translation.ts — not behind a registry: it calls mistralTranslationModel() directly.
+      capability: "FEEDBACK_FR",
+      capabilityLabel: "Feedback translation (French)",
+      description: "Translates the evaluation's strengths, areas to improve, notable errors and summary into French, for the results screen, the candidate's dashboard and the admin report. The candidate's quoted words are left as spoken.",
+      providerId: "mistral",
+      providerLabel: "Mistral",
+      modelLabel: mistralTranslationModel(),
     },
   ];
 }

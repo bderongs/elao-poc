@@ -8,6 +8,7 @@ import { ClaimResultsForm } from "@/components/ClaimResultsForm";
 import { CandidateTopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
+import type { LevelFloors } from "@/lib/cefr-score";
 
 const SATISFACTION_ENABLED = process.env.NEXT_PUBLIC_SATISFACTION_MODAL === "1";
 // Gives the candidate time to read their grade before the survey opens.
@@ -49,6 +50,8 @@ export function SessionResultsScreen({
   onRestart: () => void;
 }) {
   const [surveyOpen, setSurveyOpen] = useState(false);
+  // The admin's level cut-offs (/api/scoring-settings); undefined while loading, null = defaults.
+  const [levelFloors, setLevelFloors] = useState<LevelFloors | null | undefined>(undefined);
   const surveyShown = useRef(false);
   const restartAfterSurvey = useRef(false);
 
@@ -70,6 +73,17 @@ export function SessionResultsScreen({
     const t = setTimeout(openSurvey, SATISFACTION_DELAY_MS);
     return () => clearTimeout(t);
   }, [sessionId, openSurvey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/scoring-settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => !cancelled && setLevelFloors(d?.levelFloors ?? null))
+      .catch(() => !cancelled && setLevelFloors(null));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const closeSurvey = useCallback(() => {
     setSurveyOpen(false);
@@ -109,8 +123,9 @@ export function SessionResultsScreen({
           <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>Voici votre résultat.</p>
         </div>
 
-        {cefrResult && (
-          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={FR_CEFR_LABELS} theme="light" />
+        {/* Held until the cut-offs are in, so the level never flips under the candidate's eyes. */}
+        {cefrResult && levelFloors !== undefined && (
+          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={FR_CEFR_LABELS} theme="light" levelFloors={levelFloors} feedbackLanguage="fr" />
         )}
 
         {evalFailed && !cefrResult && (

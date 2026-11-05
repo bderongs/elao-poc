@@ -19,6 +19,7 @@
 
 import { buildExaminerPrompt } from "@/lib/examiner-prompt";
 import { CEFR_SYSTEM_PROMPT } from "@/lib/cefr-prompt";
+import { ANALYSIS_TRANSLATION_SYSTEM_PROMPT } from "@/lib/analysis-translation";
 import { SYSTEM_PROMPT as ET_SYSTEM_PROMPT } from "@/lib/level-assessment";
 import { SYSTEM_PROMPT as TT_SYSTEM_PROMPT } from "@/lib/topic-tracking";
 import { JUDGE_SYSTEM as EO_JUDGE_SYSTEM } from "@/lib/pronunciation/providers/azure-ensemble";
@@ -231,6 +232,17 @@ export function estimateCefrEvalCostUsd(providerId: string, modelLabel: string):
   const wrapperChars = 900 + 13 * AVG_SESSION.userTurns;
   const inputChars = CEFR_SYSTEM_PROMPT.length + wrapperChars + AVG_SESSION.userCharsPerSession;
   const outputChars = AVG_SESSION.cefrEvalResultChars;
+  return {
+    usdPerSession: mistralTextCostUsd(modelLabel, inputChars, outputChars),
+    note: `1 call × ~${tokens(inputChars)} tok in / ~${tokens(outputChars)} tok out (${modelLabel})`,
+  };
+}
+
+export function estimateFeedbackTranslationCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
+  if (providerId !== "mistral") return null;
+  // The feedback goes in as JSON and comes back the same size, in French (~15 % longer).
+  const inputChars = ANALYSIS_TRANSLATION_SYSTEM_PROMPT.length + AVG_SESSION.cefrEvalResultChars;
+  const outputChars = Math.round(AVG_SESSION.cefrEvalResultChars * 1.15);
   return {
     usdPerSession: mistralTextCostUsd(modelLabel, inputChars, outputChars),
     note: `1 call × ~${tokens(inputChars)} tok in / ~${tokens(outputChars)} tok out (${modelLabel})`,

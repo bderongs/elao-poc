@@ -4,6 +4,7 @@ import { getProvider } from "@/lib/llm/registry";
 import { CEFR_SYSTEM_PROMPT, CEFR_PROMPT_VERSION, buildEvaluationUserMessage, parseCefrEvaluation, withAnswerEvidence, withC2Evidence } from "@/lib/cefr-prompt";
 import { computeCompositeCefrScore, levelBeforeBoundaryChecks } from "@/lib/cefr-score";
 import { exchangesFromHistory, withBoundaryChecks } from "@/lib/cefr-boundary";
+import { withFrenchAnalysis } from "@/lib/analysis-translation";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { PronunciationAvg, CefrResult, EvaluationRow } from "@/lib/types";
 
@@ -113,13 +114,14 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
         const evaluated = withAnswerEvidence(parseCefrEvaluation(text), userTurns);
         const withEvidence = hasC2Evidence ? withC2Evidence(evaluated, ladderSteps!) : evaluated;
         // Always run in the eval lab (unlike live): the calibration measures the checks even while the scoring ignores them.
-        const resultJson = await withBoundaryChecks(withEvidence, {
+        const checked = await withBoundaryChecks(withEvidence, {
           provider,
           language: detail.session.language ?? "en",
           exchanges: exchangesFromHistory([...detail.turns].sort((a, b) => a.turn_index - b.turn_index)),
           level: levelBeforeBoundaryChecks(withEvidence, detail.session.pronunciation_scores ?? null),
           context: "eval-lab-boundary",
         });
+        const resultJson = await withFrenchAnalysis(checked, "eval-lab-fr");
         const durationMs = Date.now() - startedAt;
 
         const { data: row, error: updateError } = await supabase

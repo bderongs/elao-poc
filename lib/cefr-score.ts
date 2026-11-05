@@ -1,25 +1,57 @@
 import { FLUENCY_WPM_BANDS } from "@/lib/cefr-prompt";
 import type { CefrResult, PronunciationAvg, SpeechaceScores } from "@/lib/types";
 
-/** Derive CEFR level from composite score (5-point bands). */
-export function scoreToLevel(score: number): string {
-  if (score >= 90) return "C2";
-  if (score >= 85) return "C1+";
-  if (score >= 80) return "C1";
-  if (score >= 75) return "B2+";
-  if (score >= 70) return "B2";
-  if (score >= 65) return "B1+";
-  if (score >= 60) return "B1";
-  if (score >= 55) return "A2+";
-  if (score >= 50) return "A2";
-  if (score >= 45) return "A1+";
-  if (score >= 40) return "A1";
+/** The levels the score is labelled with, in ascending order (A0 is everything below A1's floor). */
+export const SCORED_LEVELS = ["A1", "A1+", "A2", "A2+", "B1", "B1+", "B2", "B2+", "C1", "C1+", "C2"] as const;
+export type ScoredLevel = (typeof SCORED_LEVELS)[number];
+
+/** Lowest score (0–100) of each level. */
+export type LevelFloors = Record<ScoredLevel, number>;
+
+/** 5-point bands. Admins can override them (/admin/settings, lib/scoring-settings-service.ts). */
+export const DEFAULT_LEVEL_FLOORS: LevelFloors = {
+  A1: 40, "A1+": 45, A2: 50, "A2+": 55, B1: 60, "B1+": 65, B2: 70, "B2+": 75, C1: 80, "C1+": 85, C2: 90,
+};
+
+/** Top of C1+, the highest score reported (ScoringRules.ceiling). */
+const SCORING_RULES_CEILING_CAP = 89;
+
+/** The levels an admin can move: C2 stays at 90, above the C1+ ceiling (ScoringRules.ceiling), since the test never reports it. */
+export const EDITABLE_LEVELS = SCORED_LEVELS.filter((l) => l !== "C2");
+
+/**
+ * Admin-entered floors, checked: whole numbers from 1 to the ceiling (89),
+ * strictly ascending. Throws with a readable message on anything else;
+ * missing levels take the default.
+ */
+export function parseLevelFloors(input: unknown): LevelFloors {
+  const raw = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const floors = { ...DEFAULT_LEVEL_FLOORS };
+  const cap = SCORING_RULES_CEILING_CAP;
+  for (const level of EDITABLE_LEVELS) {
+    if (raw[level] === undefined) continue;
+    const v = Number(raw[level]);
+    if (!Number.isInteger(v) || v < 1 || v > cap) throw new Error(`${level}: a whole number from 1 to ${cap}`);
+    floors[level] = v;
+  }
+  for (let i = 1; i < SCORED_LEVELS.length; i++) {
+    const [lo, hi] = [SCORED_LEVELS[i - 1], SCORED_LEVELS[i]];
+    if (floors[hi] <= floors[lo]) throw new Error(`${hi} (${floors[hi]}) must be above ${lo} (${floors[lo]})`);
+  }
+  return floors;
+}
+
+/** Derive CEFR level from composite score. */
+export function scoreToLevel(score: number, floors: LevelFloors = DEFAULT_LEVEL_FLOORS): string {
+  for (let i = SCORED_LEVELS.length - 1; i >= 0; i--) {
+    if (score >= floors[SCORED_LEVELS[i]]) return SCORED_LEVELS[i];
+  }
   return "A0";
 }
 
-/** Lowest score of each base level (5-point bands, see scoreToLevel). */
-const LEVEL_FLOOR: Record<string, number> = { A1: 40, A2: 50, B1: 60, B2: 70, C1: 80, C2: 90 };
-const baseLevelOf = (score: number) => scoreToLevel(score).replace("+", "");
+export const isDefaultFloors = (floors: LevelFloors) => SCORED_LEVELS.every((l) => floors[l] === DEFAULT_LEVEL_FLOORS[l]);
+
+const baseLevelOf = (score: number, floors: LevelFloors) => scoreToLevel(score, floors).replace("+", "");
 
 export interface CompositeCefrScore {
   score: number;
@@ -41,6 +73,20 @@ export interface ScoringRules {
   axisCurve: [number, number][] | null;
   /** Pronunciation engine score (0–100) → pronunciation axis (0–10), piecewise linear through these [score, axis] points. The engines squeeze every level into ~65–82, so a weak speaker gets ~8/10; a curve stretches that range. null = score ÷ 10. */
   pronunciationCurve: [number, number][] | null;
+  /**
+   * Weight of the pronunciation axis in the axis mean (the other axes weigh 1), as a function of the
+   * mean of the other axes — piecewise linear through these [mean, weight] points. The engines rate
+   * how clearly the words were said, not how much the speaker can say: a beginner saying five simple
+   * words clearly scores like a B2, so at the low end it should count less. null = weight 1 everywhere.
+   */
+  pronunciationWeight: [number, number][] | null;
+  /**
+   * The most the pronunciation axis may sit above the mean of the other axes (0–10 points); above
+   * that it counts as that mean + `pronunciationLift`. One-sided: it can still pull the score down.
+   * The engines rate a beginner's few clear words like a B2's (2026-11-05: Azure, Voxtral and the
+   * judge all give French A1s 74–88), so pronunciation alone shouldn't lift anyone a level. null = off.
+   */
+  pronunciationLift: number | null;
   /** Speaking rate vs. the LLM's fluency axis (FLUENCY_WPM_BANDS), only when the rate is trustworthy (WPM_RELIABLE) and the answer evidence is there. "cap" = the rate's band caps fluency, never raises it. "band" = clamped into the band, raised or capped (AB-07, 2026-10-08 → 2026-10-14). "off" = the LLM's value as is. */
   fluencyFromWpm: "cap" | "band" | "off";
   /** Excellence bonus: `pct` % on top of the base score when `minAxes` of the axes reach `axisThreshold` (0–10 scale; 8.5 does not count at 9). null = off. */
@@ -90,6 +136,8 @@ export interface ScoringRules {
    * flagged `topOfScale` instead of being lifted to C2. Applied last. null = no ceiling.
    */
   ceiling: null | { cap: number; topOfScale: { minC2AnswersWell: number; minAxisMean: number } };
+  /** Score → level cut-offs. The defaults are 5-point bands; the live value comes from the admin settings (getLiveScoringRules). */
+  levelFloors: LevelFloors;
 }
 
 /**
@@ -101,18 +149,29 @@ export interface ScoringRules {
  * 2026-10-18 (Baptiste): the test no longer reports C2 — scores stop at C1+,
  * with a "top of the scale" flag on C2-type evidence (`ceiling`); the C2 gate
  * and the boundary checks are off.
+ * 2026-11-05 (Baptiste, after an A1 candidate was rated A0): the curve's low
+ * end — an axis mean of 3, the evaluator's "A1", is 40 (A1's floor) instead
+ * of 30; unchanged from 5 (A2) up.
  */
 export const SCORING_RULES: ScoringRules = {
   baseScore: "axis-mean",
-  axisCurve: [[0, 0], [8, 80], [9.5, 90], [10, 100]],
+  axisCurve: [[0, 0], [3, 40], [5, 50], [8, 80], [9.5, 90], [10, 100]],
   pronunciationCurve: null,
+  pronunciationWeight: null,
+  pronunciationLift: null,
   fluencyFromWpm: "cap",
   bonus: null,
   c2Floor: null,
   c2Gate: null,
   boundaryCheck: "off",
-  ceiling: { cap: 89, topOfScale: { minC2AnswersWell: 2, minAxisMean: 8.75 } },
+  ceiling: { cap: SCORING_RULES_CEILING_CAP, topOfScale: { minC2AnswersWell: 2, minAxisMean: 8.75 } },
+  levelFloors: DEFAULT_LEVEL_FLOORS,
 };
+
+/** SCORING_RULES with the admin's level floors — what every display passes in once it has read them. */
+export function withLevelFloors(levelFloors: LevelFloors | null | undefined): ScoringRules {
+  return levelFloors ? { ...SCORING_RULES, levelFloors } : SCORING_RULES;
+}
 
 /**
  * A speaking rate measured on a handful of words is noise (one 7-word answer
@@ -227,7 +286,16 @@ export function scoreWithRules(
     (v): v is number => v !== null,
   );
 
-  const axisMean = present.length ? present.reduce((a, b) => a + b, 0) / present.length : null;
+  const others = [fluency, result.dimensions.vocabulary_grammar, result.dimensions.communication].filter((v): v is number => v !== null);
+  const othersMean = others.length ? others.reduce((a, b) => a + b, 0) / others.length : null;
+  const pronWeight = pronScore !== null && othersMean !== null && rules.pronunciationWeight ? onCurve(othersMean, rules.pronunciationWeight) : 1;
+  const pronAxis =
+    pronScore !== null && othersMean !== null && rules.pronunciationLift !== null ? Math.min(pronScore, othersMean + rules.pronunciationLift) : pronScore;
+  if (pronAxis !== pronScore) notes.push(`pronunciation ${pronScore}→${Math.round(pronAxis! * 100) / 100} (lift capped at +${rules.pronunciationLift})`);
+  const axisMean = present.length
+    ? (others.reduce((a, b) => a + b, 0) + (pronAxis ?? 0) * (pronAxis !== null ? pronWeight : 0)) / (others.length + (pronAxis !== null ? pronWeight : 0))
+    : null;
+  if (pronWeight !== 1) notes.push(`pronunciation weight ${Math.round(pronWeight * 100) / 100}`);
   let baseScore = result.score_percent;
   if (rules.baseScore === "axis-mean" && axisMean !== null) {
     baseScore = Math.round(axisMeanToScore(axisMean, rules.axisCurve));
@@ -252,12 +320,13 @@ export function scoreWithRules(
   }
 
   const bc = result.boundary_checks;
-  if (rules.boundaryCheck !== "off" && bc && baseLevelOf(score) === bc.from) {
+  const floors = rules.levelFloors;
+  if (rules.boundaryCheck !== "off" && bc && baseLevelOf(score, floors) === bc.from) {
     if (bc.up?.decision === "upper") {
-      score = Math.max(score, LEVEL_FLOOR[bc.up.upper]);
+      score = Math.max(score, floors[bc.up.upper as ScoredLevel]);
       notes.push(`boundary check → ${bc.up.upper} (${score})`);
     } else if (rules.boundaryCheck === "both" && bc.down?.decision === "lower") {
-      score = Math.min(score, LEVEL_FLOOR[bc.from] - 1);
+      score = Math.min(score, floors[bc.from as ScoredLevel] - 1);
       notes.push(`boundary check → ${bc.down.lower} (${score})`);
     }
   }
@@ -284,20 +353,21 @@ export function scoreWithRules(
   const c = rules.ceiling;
   if (c) {
     if (score > c.cap) {
-      notes.push(`capped at ${scoreToLevel(c.cap)} (${score} → ${c.cap})`);
+      notes.push(`capped at ${scoreToLevel(c.cap, floors)} (${score} → ${c.cap})`);
       score = c.cap;
     }
     const t = c.topOfScale;
-    if (scoreToLevel(score) === scoreToLevel(c.cap) && evidence.c2AnswersWell !== null && evidence.c2AnswersWell >= t.minC2AnswersWell && axisMean !== null && axisMean >= t.minAxisMean) {
+    if (scoreToLevel(score, floors) === scoreToLevel(c.cap, floors) && evidence.c2AnswersWell !== null && evidence.c2AnswersWell >= t.minC2AnswersWell && axisMean !== null && axisMean >= t.minAxisMean) {
       topOfScale = true;
       notes.push(`top of scale (${evidence.c2AnswersWell} C2 answers "well", axis mean ${Math.round(axisMean * 100) / 100})`);
     }
   }
 
   // The evaluator's own level label is kept only when nothing moved its number
-  // — and never a "C2" label on a score outside the C2 band (the gate's / ceiling's job).
-  const kept = score === result.score_percent ? result.level : undefined;
-  const level = kept && !(kept === "C2" && scoreToLevel(score) !== "C2") ? kept : scoreToLevel(score);
+  // and the bands are the ones it was told (DEFAULT_LEVEL_FLOORS) — and never
+  // a "C2" label on a score outside the C2 band (the gate's / ceiling's job).
+  const kept = score === result.score_percent && isDefaultFloors(floors) ? result.level : undefined;
+  const level = kept && !(kept === "C2" && scoreToLevel(score, floors) !== "C2") ? kept : scoreToLevel(score, floors);
   return { score, level, notes, ...(topOfScale ? { topOfScale } : {}) };
 }
 
@@ -317,8 +387,12 @@ export function levelBeforeBoundaryChecks(result: CefrResult, pronunciationAvg: 
   return scoreWithRules(result, pronunciationAvg as PronunciationAvg | null, { ...SCORING_RULES, boundaryCheck: "off" }).level;
 }
 
-export function computeCompositeCefrScore(result: CefrResult, pronunciationAvg: PronunciationAvg | null): CompositeCefrScore {
-  const { score, level, topOfScale } = scoreWithRules(result, pronunciationAvg, SCORING_RULES);
+export function computeCompositeCefrScore(
+  result: CefrResult,
+  pronunciationAvg: PronunciationAvg | null,
+  rules: ScoringRules = SCORING_RULES,
+): CompositeCefrScore {
+  const { score, level, topOfScale } = scoreWithRules(result, pronunciationAvg, rules);
   return { score, level, ...(topOfScale ? { topOfScale } : {}) };
 }
 
@@ -357,10 +431,10 @@ function resolveCefrResult(session: ScorableSession): CefrResult | null {
  * uploaded recording may only have pronunciation_scores, a Speechace import
  * only has speechace_scores. Returns null when nothing has been scored yet.
  */
-export function computeSessionMainScore(session: ScorableSession): SessionMainScore | null {
+export function computeSessionMainScore(session: ScorableSession, rules: ScoringRules = SCORING_RULES): SessionMainScore | null {
   const cefrResult = resolveCefrResult(session);
   if (cefrResult) {
-    return { ...computeCompositeCefrScore(cefrResult, session.pronunciation_scores), source: "cefr" };
+    return { ...computeCompositeCefrScore(cefrResult, session.pronunciation_scores, rules), source: "cefr" };
   }
   if (session.global_score != null && session.cefr_level) {
     return { score: session.global_score, level: session.cefr_level, source: "cefr" };
@@ -369,11 +443,11 @@ export function computeSessionMainScore(session: ScorableSession): SessionMainSc
     const score = Math.round(session.speechace_scores.overall);
     // The level ELAO actually gave (its export, scripts/calibration-set.ts) — our bands put Speechace's 90 at C2 where ELAO says C1.
     const reference = session.speechace_scores.reference?.oral_level?.replace(/\s*\(.*\)|\.\d+/g, "").trim();
-    return { score, level: reference || scoreToLevel(score), source: "speechace" };
+    return { score, level: reference || scoreToLevel(score, rules.levelFloors), source: "speechace" };
   }
   if (session.pronunciation_scores?.score != null) {
     const score = Math.round(session.pronunciation_scores.score);
-    return { score, level: scoreToLevel(score), source: "pronunciation" };
+    return { score, level: scoreToLevel(score, rules.levelFloors), source: "pronunciation" };
   }
   return null;
 }

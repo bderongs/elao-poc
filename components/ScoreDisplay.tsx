@@ -1,6 +1,6 @@
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
-import type { CefrResult, PronunciationAvg } from "@/lib/types";
-import { scoreToLevel, computeCompositeCefrScore } from "@/lib/cefr-score";
+import type { AnalysisTranslation, CefrResult, PronunciationAvg } from "@/lib/types";
+import { scoreToLevel, computeCompositeCefrScore, withLevelFloors, type LevelFloors } from "@/lib/cefr-score";
 import { adminColors } from "@/lib/admin-theme";
 
 export { scoreToLevel };
@@ -120,6 +120,7 @@ const DEFAULT_CEFR_LABELS = {
   strengths: "Strengths",
   toImprove: "To improve",
   notableErrors: "Notable errors",
+  originalFeedback: "Original feedback (English)",
   confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
   /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). */
   topOfScale:
@@ -137,6 +138,8 @@ export function CefrPanel({
   showAllDetails = false,
   labels,
   theme = "dark",
+  levelFloors,
+  feedbackLanguage = "en",
 }: {
   result: CefrResult;
   pronunciationAvg: PronunciationAvg | null;
@@ -152,6 +155,10 @@ export function CefrPanel({
    *  by SessionResultsScreen. Default "dark" keeps the admin/dashboard
    *  detail pages unchanged. */
   theme?: "dark" | "light";
+  /** The admin's level cut-offs (getLevelFloors) — omitted = the default 5-point bands. */
+  levelFloors?: LevelFloors | null;
+  /** Which version of the written feedback to show: "fr" (falls back to the English when there is no translation), "en", or "both" (French, the English original behind a toggle). */
+  feedbackLanguage?: "en" | "fr" | "both";
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   const light = theme === "light";
@@ -161,7 +168,7 @@ export function CefrPanel({
   const vocabGram  = result.dimensions.vocabulary_grammar;
   const comm       = result.dimensions.communication;
 
-  const { score: compositeScore, level: compositeLevel, topOfScale } = computeCompositeCefrScore(result, pronunciationAvg);
+  const { score: compositeScore, level: compositeLevel, topOfScale } = computeCompositeCefrScore(result, pronunciationAvg, withLevelFloors(levelFloors));
 
   const dim4: [string, number | null][] = [
     ["Pronunciation", pronScore],
@@ -175,6 +182,49 @@ export function CefrPanel({
   const faintColor = light ? "#8A8F9C" : "rgba(255,255,255,0.45)";
   const bodyColor = light ? "#5A5F6E" : "rgba(255,255,255,0.7)";
   const dividerColor = light ? "1px solid #EFEBE2" : "1px solid rgba(255,255,255,0.1)";
+
+  // The evaluator writes the feedback in English; analysis_fr is its French translation (lib/analysis-translation.ts).
+  const primaryFeedback: AnalysisTranslation = feedbackLanguage !== "en" && result.analysis_fr ? result.analysis_fr : result;
+  const renderFeedback = (f: AnalysisTranslation) => (
+    <>
+      {/* Strengths */}
+      {f.strengths?.length > 0 && (
+        <div style={{ marginBottom: light ? 12 : 6 }}>
+          <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.strengths}</div>
+          <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
+            {f.strengths.slice(0, showAllDetails ? undefined : 3).map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Areas for improvement */}
+      {f.areas_for_improvement?.length > 0 && (
+        <div style={{ marginBottom: light ? 12 : 6 }}>
+          <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.toImprove}</div>
+          <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
+            {f.areas_for_improvement.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Notable errors */}
+      {f.notable_errors?.length > 0 && (
+        <div style={{ marginBottom: light ? 12 : 6 }}>
+          <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.notableErrors}</div>
+          <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#B3542E" : "#fca5a5" }}>
+            {f.notable_errors.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Summary */}
+      {f.summary && (
+        <div style={{ fontSize: light ? 14 : 11, color: bodyColor, lineHeight: 1.5, borderTop: dividerColor, paddingTop: light ? 12 : 6 }}>
+          {f.summary}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div
@@ -265,41 +315,12 @@ export function CefrPanel({
 
       {showDetails && (
         <>
-          {/* Strengths */}
-          {result.strengths?.length > 0 && (
-            <div style={{ marginBottom: light ? 12 : 6 }}>
-              <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.strengths}</div>
-              <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
-                {result.strengths.slice(0, showAllDetails ? undefined : 3).map((s, i) => <li key={i}>{s}</li>)}
-              </ul>
-            </div>
-          )}
-
-          {/* Areas for improvement */}
-          {result.areas_for_improvement?.length > 0 && (
-            <div style={{ marginBottom: light ? 12 : 6 }}>
-              <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.toImprove}</div>
-              <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#141D33" : undefined }}>
-                {result.areas_for_improvement.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
-              </ul>
-            </div>
-          )}
-
-          {/* Notable errors */}
-          {result.notable_errors?.length > 0 && (
-            <div style={{ marginBottom: light ? 12 : 6 }}>
-              <div style={{ fontSize: light ? 12 : 10, color: mutedColor, marginBottom: 2 }}>{t.notableErrors}</div>
-              <ul style={{ margin: 0, paddingLeft: light ? 18 : 14, fontSize: light ? 14 : 11, lineHeight: 1.5, color: light ? "#B3542E" : "#fca5a5" }}>
-                {result.notable_errors.slice(0, showAllDetails ? undefined : 2).map((s, i) => <li key={i}>{s}</li>)}
-              </ul>
-            </div>
-          )}
-
-          {/* Summary */}
-          {result.summary && (
-            <div style={{ fontSize: light ? 14 : 11, color: bodyColor, lineHeight: 1.5, borderTop: dividerColor, paddingTop: light ? 12 : 6 }}>
-              {result.summary}
-            </div>
+          {renderFeedback(primaryFeedback)}
+          {feedbackLanguage === "both" && result.analysis_fr && (
+            <details style={{ marginTop: light ? 12 : 6, fontSize: light ? 12 : 10, color: mutedColor }}>
+              <summary style={{ cursor: "pointer" }}>{t.originalFeedback}</summary>
+              <div style={{ marginTop: light ? 10 : 6 }}>{renderFeedback(result)}</div>
+            </details>
           )}
         </>
       )}

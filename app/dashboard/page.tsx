@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/current-user";
 import { listSessions } from "@/lib/sessions-service";
+import { getLevelFloors } from "@/lib/scoring-settings-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { formatDateTime } from "@/lib/format-date";
 import { languageLabel, languageFlag } from "@/lib/languages";
@@ -32,6 +33,7 @@ export default async function DashboardPage({
 
   // Layout already redirects to /login when there's no user; user! is safe here.
   const { sessions, total } = await listSessions({ page, pageSize: PAGE_SIZE, userId: user!.id });
+  const levelFloors = await getLevelFloors();
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -60,7 +62,7 @@ export default async function DashboardPage({
                       {languageFlag(s.language)} {languageLabel(s.language)}
                     </div>
                   </div>
-                  <SessionScoreCell session={s} />
+                  <SessionScoreCell session={s} levelFloors={levelFloors} />
                 </div>
                 <div className={styles.sessionMeta}>
                   {s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : "—"}

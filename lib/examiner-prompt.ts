@@ -69,7 +69,7 @@ export function buildExaminerPrompt(params: {
 
   if (isStart) {
     // Starting at A1/A2 (explicit or the A2 default): a beginner can't catch the
-    // regular warm-up wording, so open with the A1 bank and a very short intro.
+    // regular warm-up wording, so open with the A1 bank and a short intro in simple words.
     const easy = zoneForRung(targetRung) === "foundation";
     const { question, updatedUsedIds } = pickBankQuestion({ rung: easy ? "A1" : "warmup", usedIds: usedQuestions });
     // Kept as the current question (follow-up already "done") so a first C1/C2

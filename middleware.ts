@@ -42,6 +42,8 @@ export async function middleware(req: NextRequest) {
   if (pathname === "/api/sessions/live" && (req.method === "POST" || req.method === "PATCH")) return response;
   // The live page reads the integrity on/off switch; only PATCH is admin.
   if (pathname === "/api/integrity-settings" && req.method === "GET") return response;
+  // The live results screen reads the level cut-offs; only PATCH is admin.
+  if (pathname === "/api/scoring-settings" && req.method === "GET") return response;
 
   if (user && (await isAdmin(user.id))) return response;
 
@@ -81,6 +83,7 @@ export const config = {
     // Only the per-language PATCH/DELETE sub-route is admin-gated.
     "/api/conversation-settings/:language",
     "/api/integrity-settings",
+    "/api/scoring-settings",
     // Rate-limited only (lib/rate-limit.ts's RATE_LIMITED_PATHS) — the matcher
     // must be a static list, so these are repeated here.
     "/api/chat",

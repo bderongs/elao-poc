@@ -49,6 +49,11 @@ export function mistralChatModel(): string {
   return process.env.MISTRAL_CHAT_MODEL ?? process.env.MISTRAL_MODEL ?? "mistral-large-latest";
 }
 
+/** Model that translates the end-of-session feedback into French (lib/analysis-translation.ts) — small by default, it sits on the candidate's wait for results. */
+export function mistralTranslationModel(): string {
+  return process.env.MISTRAL_TRANSLATION_MODEL ?? "mistral-small-latest";
+}
+
 export function mistralPronunciationModel(): string {
   return (
     process.env.MISTRAL_PRONUNCIATION_MODEL ??

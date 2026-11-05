@@ -2,6 +2,8 @@ import { listConversationSettings } from "@/lib/conversation-settings-service";
 import { ConversationSettingsRow } from "@/components/ConversationSettingsRow";
 import { IntegritySettingsForm } from "@/components/IntegritySettingsForm";
 import { getIntegritySettings } from "@/lib/integrity-settings-service";
+import { LevelFloorsForm } from "@/components/LevelFloorsForm";
+import { getLevelFloors } from "@/lib/scoring-settings-service";
 import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
@@ -20,6 +22,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
 export default async function ConversationSettingsPage() {
   const rows = await listConversationSettings();
   const integritySettings = await getIntegritySettings();
+  const levelFloors = await getLevelFloors();
 
   return (
     <div>
@@ -61,6 +64,17 @@ export default async function ConversationSettingsPage() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className={styles.card} style={{ marginTop: 28, maxWidth: 720 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Level thresholds</div>
+        <div style={{ fontSize: 13, color: adminColors.muted, marginBottom: 14, lineHeight: 1.5 }}>
+          The lowest global score (0–100) of each level. Levels are computed when a page is viewed, so
+          a change here also relabels past sessions — in the admin, on the candidate&apos;s dashboard and
+          on the results screen. Scores stop at 89 (C1+, top of the scale), so C2 can&apos;t be set.
+          See <a href="/admin/scoring">Scoring, explained</a> for how the score itself is built.
+        </div>
+        <LevelFloorsForm initial={levelFloors} />
       </div>
 
       <div className={styles.card} style={{ marginTop: 28, maxWidth: 720 }}>

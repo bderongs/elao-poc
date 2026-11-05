@@ -26,7 +26,9 @@ import { latestEvaluationResult, isEvalProviderPending, LIVE_CONVERSATION_MODEL_
 import { sessionDisplayStatus } from "@/lib/session-status";
 import { RECOGNITION_FORGIVENESS, evaluatorAllowance } from "@/lib/recognition-forgiveness";
 import { formatDateTime } from "@/lib/format-date";
-import { computeSessionMainScore, scoreWithRules, SCORING_RULES } from "@/lib/cefr-score";
+import { computeSessionMainScore, scoreWithRules } from "@/lib/cefr-score";
+import { getLiveScoringRules } from "@/lib/scoring-settings-service";
+import { ensureFrenchAnalysis } from "@/lib/analysis-translation";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -50,15 +52,20 @@ export default async function AdminSessionDetailPage({
   // For upload/speechace sessions, `evaluation_json` is never populated (only
   // the live conversation flow writes it) — fall back to the latest eval-lab
   // run so "our own CEFR assessment" still has something to show.
-  const cefrResult =
-    session.evaluation_json ?? evaluations.find((e) => !e.error && e.result_json)?.result_json ?? null;
+  const evalRow = session.evaluation_json ? null : evaluations.find((e) => !e.error && e.result_json) ?? null;
+  const storedResult = session.evaluation_json ?? evalRow?.result_json ?? null;
+  // Evaluations from before the French feedback existed are translated (and saved) on first view.
+  const cefrResult = storedResult
+    ? await ensureFrenchAnalysis({ sessionId: session.id, result: storedResult, evaluationRowId: evalRow?.id })
+    : null;
 
   // The level shown in the header and the ladder panel is the same composite
   // the CefrPanel and the session list show (computed on read with today's
   // SCORING_RULES) — not the stored cefr_level column, which is the
   // evaluator's own label from when the session was saved.
-  const mainScore = computeSessionMainScore({ ...session, latest_eval_json: cefrResult });
-  const scoreNotes = cefrResult ? scoreWithRules(cefrResult, session.pronunciation_scores, SCORING_RULES).notes : [];
+  const scoringRules = await getLiveScoringRules();
+  const mainScore = computeSessionMainScore({ ...session, latest_eval_json: cefrResult }, scoringRules);
+  const scoreNotes = cefrResult ? scoreWithRules(cefrResult, session.pronunciation_scores, scoringRules).notes : [];
 
   const breakdown = buildScoreBreakdown({
     session,
@@ -196,6 +203,8 @@ export default async function AdminSessionDetailPage({
             pronunciationSourceLabel={breakdown.pronunciationSourceLabel ?? undefined}
             showAllDetails
             theme="light"
+            levelFloors={scoringRules.levelFloors}
+            feedbackLanguage="both"
           />
         </div>
       ) : (

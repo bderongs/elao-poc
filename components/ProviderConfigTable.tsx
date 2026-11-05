@@ -9,6 +9,7 @@ import {
   estimateEtCostUsd,
   estimateEoCostUsd,
   estimateCefrEvalCostUsd,
+  estimateFeedbackTranslationCostUsd,
   formatUsd,
   type CostEstimate,
 } from "@/lib/session-cost";
@@ -57,6 +58,8 @@ function costForCapability(c: CapabilityConfig): CostEstimate | null {
       return estimateEtCostUsd(c.providerId, c.modelLabel);
     case "CEFR_EVAL":
       return estimateCefrEvalCostUsd(c.providerId, c.modelLabel);
+    case "FEEDBACK_FR":
+      return estimateFeedbackTranslationCostUsd(c.providerId, c.modelLabel);
     case "STT":
     case "TTS":
     case "EO":

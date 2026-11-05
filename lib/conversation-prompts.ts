@@ -157,7 +157,7 @@ export interface PromptOpts {
    *  "picked" — a C1/C2 directive from buildPickedQuestionText (the code chose the question);
    *  "none"   — no bank this turn (opening and closing turns). */
   bankMode?: "slice" | "picked" | "none";
-  /** Opening turn only, when the session starts at A1/A2: keep the intro and the question very short so a beginner catches them. */
+  /** Opening turn only, when the session starts at A1/A2: a short intro (name, length, "I'll ask questions") and a short question, in simple words, so a beginner catches them. */
   easyOpening?: boolean;
 }
 
@@ -336,9 +336,13 @@ const OPENING_QUESTION_LINE: Record<ConvLang, (question?: string) => string> = {
     : "End with ONE simple, everyday warm-up question.",
 };
 
-const EASY_OPENING_NOTE = (languageName: string) => `
+const EASY_OPENING_NOTE = (languageName: string, durationPhrase: string) => `
 
-EASY OPENING (overrides the OPENING section above where they differ): the speaker may be a beginner who catches only a few words. Say the greeting and your name in ONE very short, natural sentence (e.g. "Hello, my name is ${AVATAR_NAME}."). Do NOT mention the duration of the conversation or the assessment at all. Then ask the opening question — ONE short, simple question of at most 8 words, most common everyday words. If the opening question given above has two parts ("X, and why?" / two questions in a row), ask ONLY its first part. The whole opening must stay under 15 words, in ${languageName}, and sound like a natural spoken greeting.`;
+EASY OPENING (overrides the OPENING section above where they differ): the speaker may be a beginner who catches only a few words, so use very short sentences (at most 8 words each) and only the most common everyday words — but do introduce the conversation, so the first question doesn't come out of nowhere. In this order:
+1. Greet and say your name in one short sentence (e.g. "Hello, my name is ${AVATAR_NAME}.").
+2. Say, in one or two short, simple sentences, that you will talk together for ${durationPhrase} and that you will ask some simple questions (e.g. "We will talk for a few minutes. I will ask you some questions."). No other details about the assessment.
+3. Ask the opening question — ONE short, simple question of at most 8 words. If the opening question given above has two parts ("X, and why?" / two questions in a row), ask ONLY its first part.
+The whole opening stays under 35 words, in ${languageName}, and sounds like a natural spoken greeting.`;
 
 export function getSystemPrompt(
   language: ConvLang,
@@ -347,7 +351,7 @@ export function getSystemPrompt(
   opts: PromptOpts & { openerQuestion?: string } = {}
 ): string {
   const base = buildSystemPrompt(language, rung, bank, opts);
-  return opts.easyOpening ? base + EASY_OPENING_NOTE(LANGUAGE_NAME[language]) : base;
+  return opts.easyOpening ? base + EASY_OPENING_NOTE(LANGUAGE_NAME[language], DURATION_PHRASE[language]) : base;
 }
 
 function buildSystemPrompt(

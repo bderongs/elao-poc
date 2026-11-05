@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { listSessions } from "@/lib/sessions-service";
+import { getLevelFloors } from "@/lib/scoring-settings-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { SessionListFilters } from "@/components/SessionListFilters";
 import { IntegrityBadge } from "@/components/IntegrityPanel";
@@ -74,6 +75,7 @@ export default async function AdminSessionsPage({
     loadError = String(e);
   }
 
+  const levelFloors = await getLevelFloors();
   const integritySettings = sessions.some((s) => s.integrity_json) ? await getIntegritySettings() : null;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -139,7 +141,7 @@ export default async function AdminSessionsPage({
                     </td>
                     <td data-label="Language">{s.language ?? "—"}</td>
                     <td data-label="Score">
-                      <SessionScoreCell session={s} />
+                      <SessionScoreCell session={s} levelFloors={levelFloors} />
                       {s.integrity_json && integritySettings && (
                         <div style={{ marginTop: 4 }}>
                           <IntegrityBadge record={s.integrity_json} settings={integritySettings} />
