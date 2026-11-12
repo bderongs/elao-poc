@@ -3,6 +3,10 @@ const nextConfig = {
   reactStrictMode: true,
   // No ESLint config in this repo — type errors still fail the build.
   eslint: { ignoreDuringBuilds: true },
+  // Public API docs: public/api-docs/index.html (Redoc) at a clean URL.
+  async rewrites() {
+    return [{ source: "/api-docs", destination: "/api-docs/index.html" }];
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Azure Speech SDK uses Node.js built-ins that don't exist in browsers

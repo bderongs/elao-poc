@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "node scripts/copy-vad-assets.mjs",
+    "predev": "node scripts/copy-vad-assets.mjs && node scripts/copy-api-spec.mjs",
     "dev": "next dev",
-    "prebuild": "node scripts/copy-vad-assets.mjs",
+    "prebuild": "node scripts/copy-vad-assets.mjs && node scripts/copy-api-spec.mjs",
     "build": "next build",
     "start": "next start",
     "sim:batch": "tsx scripts/sim-batch.ts",

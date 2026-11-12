@@ -1,0 +1,564 @@
+openapi: 3.1.0
+info:
+  title: ELAO Speaking API
+  version: 1.0.0-draft
+  description: |
+    Order an oral language test, send the candidate to it, then read its status and result.
+
+    **Flow**
+    1. `POST /tests` creates a test and returns its `test_id` and the `test_url` to give the candidate.
+    2. The candidate opens `test_url` and takes the test in the browser (3 to 7 minutes).
+    3. Poll `GET /tests/{test_id}` until `status` is `completed` (or `error`), or wait for the
+       `test.completed` / `test.error` webhook.
+    4. `GET /tests/{test_id}/result` returns the result, at the level of detail asked for.
+
+    **Statuses**
+    | Status | Meaning |
+    |---|---|
+    | `created` | Test created, the candidate has not started yet. |
+    | `in_progress` | The candidate has started. A test the candidate leaves before the end stays `in_progress`. |
+    | `completed` | Finished and evaluated. The result is available and will not change. |
+    | `error` | Finished, but the evaluation failed. No result. |
+
+    **The result is fixed.** It is computed once, when the test is evaluated, and every later call
+    returns the same values, even if the scoring rules change afterwards.
+
+    **The test link** works once: when the candidate has started, opening it again shows a
+    "test already started" page instead of a new test. It does not expire.
+  contact:
+    name: ELAO
+servers:
+  - url: https://{domain}/api/v1
+    variables:
+      domain:
+        default: speaking.elao-test.com
+        description: To be confirmed.
+security:
+  - apiKey: []
+
+paths:
+  /tests:
+    post:
+      operationId: createTest
+      summary: Create a test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTestRequest"
+            example:
+              language: fr
+              start_level: B1
+              external_ref: "candidate-48213"
+              redirect_url: "https://www.elao-test.com/oral/done?ref=candidate-48213"
+              completed_callback_url: "https://www.elao-test.com/api/oral-callback"
+      responses:
+        "201":
+          description: Test created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Test"
+              example:
+                test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                external_ref: "candidate-48213"
+                status: created
+                language: fr
+                start_level: B1
+                test_url: "https://speaking.elao-test.com/?test=6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                created_at: "2026-11-10T09:00:00Z"
+                started_at: null
+                completed_at: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /tests/{test_id}:
+    get:
+      operationId: getTest
+      summary: Get a test's status
+      parameters:
+        - $ref: "#/components/parameters/TestId"
+      responses:
+        "200":
+          description: The test.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Test"
+              example:
+                test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                external_ref: "candidate-48213"
+                status: completed
+                language: fr
+                start_level: B1
+                test_url: "https://speaking.elao-test.com/?test=6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                created_at: "2026-11-10T09:00:00Z"
+                started_at: "2026-11-10T14:02:11Z"
+                completed_at: "2026-11-10T14:07:40Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tests/{test_id}/result:
+    get:
+      operationId: getTestResult
+      summary: Get a test's result
+      description: |
+        Only available once `status` is `completed`. Each level of detail contains everything
+        in the level before it:
+
+        - `summary`: level, score, confidence.
+        - `standard` (default): + the four axes and the written feedback.
+        - `full`: + the transcript, question by question, and the integrity signals.
+      parameters:
+        - $ref: "#/components/parameters/TestId"
+        - name: detail
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [summary, standard, full]
+            default: standard
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestResult"
+              examples:
+                summary:
+                  summary: detail=summary
+                  value:
+                    test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                    external_ref: "candidate-48213"
+                    language: fr
+                    detail: summary
+                    completed_at: "2026-11-10T14:07:40Z"
+                    duration_seconds: 329
+                    answer_count: 9
+                    level: B2
+                    score: 72
+                    confidence: medium
+                    top_of_scale: false
+                standard:
+                  summary: detail=standard
+                  value:
+                    test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                    external_ref: "candidate-48213"
+                    language: fr
+                    detail: standard
+                    completed_at: "2026-11-10T14:07:40Z"
+                    duration_seconds: 329
+                    answer_count: 9
+                    level: B2
+                    score: 72
+                    confidence: medium
+                    top_of_scale: false
+                    axes:
+                      pronunciation: 78
+                      fluency: 70
+                      vocabulary_grammar: 65
+                      communication: 75
+                    feedback:
+                      fr:
+                        summary: "Le candidat s'exprime avec aisance sur des sujets familiers…"
+                        strengths: ["Bonne fluidité sur les sujets du quotidien"]
+                        areas_for_improvement: ["Accord du participe passé"]
+                        notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
+                      en:
+                        summary: "The candidate speaks easily on familiar topics…"
+                        strengths: ["Good fluency on everyday topics"]
+                        areas_for_improvement: ["Past participle agreement"]
+                        notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The test is not `completed` yet (or ended in `error`). The body gives its current status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: result_not_available
+                  message: "The test is in_progress."
+                  status: in_progress
+
+webhooks:
+  test.completed:
+    post:
+      operationId: onTestCompleted
+      summary: A test has been evaluated
+      description: |
+        Sent once, when a test becomes `completed`. Carries the `summary` result; call
+        `GET /tests/{test_id}/result` for more detail.
+
+        Sent to the test's `completed_callback_url` when one was given to `POST /tests`,
+        otherwise to the default URL configured with ELAO. With neither, no webhook is sent.
+
+        Signed with HMAC-SHA256 over the raw body, using the shared secret:
+        `X-Elao-Signature: sha256=<hex>`. Retried up to 3 times (after 1 s, then 2 s) on a
+        network error or a 5xx; a 4xx is not retried. Reply with any 2xx.
+      parameters:
+        - $ref: "#/components/parameters/Signature"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+            example:
+              event: test.completed
+              test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+              external_ref: "candidate-48213"
+              status: completed
+              sent_at: "2026-11-10T14:07:42Z"
+              result:
+                level: B2
+                score: 72
+                confidence: medium
+                top_of_scale: false
+      responses:
+        "2XX":
+          description: Received.
+  test.error:
+    post:
+      operationId: onTestError
+      summary: A test finished but could not be evaluated
+      description: Same URL, delivery and signature as `test.completed`; `result` is null.
+      parameters:
+        - $ref: "#/components/parameters/Signature"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+      responses:
+        "2XX":
+          description: Received.
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: "The API key ELAO gives you: `Authorization: Bearer <key>`."
+
+  parameters:
+    TestId:
+      name: test_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Signature:
+      name: X-Elao-Signature
+      in: header
+      required: true
+      schema:
+        type: string
+        example: "sha256=5d41402abc4b2a76b9719d911017c592…"
+
+  responses:
+    BadRequest:
+      description: Invalid request (a field is missing or has a wrong value).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: invalid_request
+              message: "language: must be one of fr, en, nl-BE, es, it, de"
+    Unauthorized:
+      description: Missing or wrong API key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: unauthorized
+              message: "Missing or invalid API key."
+    NotFound:
+      description: No test with this id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: not_found
+              message: "No test with this id."
+
+  schemas:
+    Language:
+      type: string
+      enum: [fr, en, nl-BE, es, it, de]
+      description: Language tested.
+
+    Level:
+      type: string
+      enum: [A0, A1, A1+, A2, A2+, B1, B1+, B2, B2+, C1, C1+]
+      description: CEFR level reported. C1+ is the highest the test reports (see `top_of_scale`).
+
+    StartLevel:
+      type: string
+      enum: [A1, A2, B1, B2, C1, C2]
+      description: Level of the first questions. When omitted, the default set for the language is used.
+
+    Status:
+      type: string
+      enum: [created, in_progress, completed, error]
+
+    CreateTestRequest:
+      type: object
+      required: [language]
+      properties:
+        language:
+          $ref: "#/components/schemas/Language"
+        start_level:
+          $ref: "#/components/schemas/StartLevel"
+        external_ref:
+          type: string
+          maxLength: 200
+          description: Your own reference for this test or candidate. Returned in every response and webhook.
+        redirect_url:
+          type: string
+          format: uri
+          description: Where the candidate is sent at the end of the test.
+        completed_callback_url:
+          type: string
+          format: uri
+          pattern: "^https://"
+          description: |
+            Where to send this test's `test.completed` and `test.error` webhooks, instead of the
+            default URL configured with ELAO. HTTPS only.
+
+    Test:
+      type: object
+      required: [test_id, status, language, test_url, created_at]
+      properties:
+        test_id:
+          type: string
+          format: uuid
+        external_ref:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/Status"
+        language:
+          $ref: "#/components/schemas/Language"
+        start_level:
+          oneOf:
+            - $ref: "#/components/schemas/StartLevel"
+            - type: "null"
+        test_url:
+          type: string
+          format: uri
+          description: The link to give the candidate.
+        completed_callback_url:
+          type: [string, "null"]
+          format: uri
+          description: As given to `POST /tests`; null when the default URL is used.
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the candidate gave the first answer.
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+
+    Axes:
+      type: object
+      description: Each axis from 0 to 100. Null when there was not enough speech to score it.
+      properties:
+        pronunciation:
+          type: [integer, "null"]
+        fluency:
+          type: [integer, "null"]
+        vocabulary_grammar:
+          type: [integer, "null"]
+        communication:
+          type: [integer, "null"]
+
+    Feedback:
+      type: object
+      properties:
+        summary:
+          type: string
+        strengths:
+          type: array
+          items:
+            type: string
+        areas_for_improvement:
+          type: array
+          items:
+            type: string
+        notable_errors:
+          type: array
+          items:
+            type: string
+          description: Candidate's words and their correction, quoted in the language tested.
+
+    Turn:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: 1 for the first question.
+        question:
+          type: string
+          description: What the examiner said.
+        answer:
+          type: string
+          description: Transcript of the candidate's answer.
+        question_level:
+          oneOf:
+            - $ref: "#/components/schemas/StartLevel"
+            - type: "null"
+          description: Level of the question asked.
+        pronunciation:
+          type: [integer, "null"]
+          description: Pronunciation score of this answer, 0–100.
+        words:
+          type: integer
+        response_delay_seconds:
+          type: [number, "null"]
+          description: Silence between the end of the question and the start of the answer.
+
+    Integrity:
+      type: object
+      description: Signals that the candidate may have had help. Information only, they do not change the score.
+      properties:
+        level:
+          type: string
+          enum: [none, low, high]
+        reasons:
+          type: array
+          items:
+            type: string
+        window_changes:
+          type: integer
+          description: Times the candidate left the test window.
+        away_seconds:
+          type: number
+        long_silences:
+          type: integer
+
+    TestResult:
+      type: object
+      required: [test_id, language, detail, completed_at, level, score, confidence]
+      properties:
+        test_id:
+          type: string
+          format: uuid
+        external_ref:
+          type: [string, "null"]
+        language:
+          $ref: "#/components/schemas/Language"
+        detail:
+          type: string
+          enum: [summary, standard, full]
+        completed_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+        answer_count:
+          type: integer
+        level:
+          $ref: "#/components/schemas/Level"
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: How sure the evaluator is of the level.
+        top_of_scale:
+          type: boolean
+          description: True when the candidate reached the highest level the test reports; the real level may be higher.
+        axes:
+          $ref: "#/components/schemas/Axes"
+          description: "`standard` and `full` only."
+        feedback:
+          type: object
+          description: "`standard` and `full` only. Written feedback in French and in English. `fr` is null if the translation failed."
+          properties:
+            fr:
+              oneOf:
+                - $ref: "#/components/schemas/Feedback"
+                - type: "null"
+            en:
+              $ref: "#/components/schemas/Feedback"
+        turns:
+          type: array
+          items:
+            $ref: "#/components/schemas/Turn"
+          description: "`full` only."
+        integrity:
+          oneOf:
+            - $ref: "#/components/schemas/Integrity"
+            - type: "null"
+          description: "`full` only. Null when integrity tracking was off."
+
+    WebhookEvent:
+      type: object
+      required: [event, test_id, status, sent_at]
+      properties:
+        event:
+          type: string
+          enum: [test.completed, test.error]
+        test_id:
+          type: string
+          format: uuid
+        external_ref:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/Status"
+        sent_at:
+          type: string
+          format: date-time
+        result:
+          description: The `summary` result; null for `test.error`.
+          oneOf:
+            - type: object
+              properties:
+                level:
+                  $ref: "#/components/schemas/Level"
+                score:
+                  type: integer
+                confidence:
+                  type: string
+                  enum: [high, medium, low]
+                top_of_scale:
+                  type: boolean
+            - type: "null"
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [invalid_request, unauthorized, not_found, result_not_available, rate_limited, internal_error]
+            message:
+              type: string
+            status:
+              $ref: "#/components/schemas/Status"
+              description: Only with `result_not_available`.

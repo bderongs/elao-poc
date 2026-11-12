@@ -52,3 +52,6 @@ doc/SpeechAce/
 
 # Copied from node_modules by scripts/copy-vad-assets.mjs
 public/vad/ort-*
+
+# Copied from doc/api/ by scripts/copy-api-spec.mjs
+public/api-docs/openapi.yaml
