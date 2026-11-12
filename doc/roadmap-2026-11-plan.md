@@ -24,11 +24,11 @@ Phase 4 is independent and touches only the server pipeline: do it whenever phas
 ## Phase 0 — quick wins
 
 - [ ] **Q-01** Mistral API key: swap `MISTRAL_API_KEY` in `.env.local` and Vercel when Michel sends it. No code. (Waiting on Michel.)
-- [ ] **Q-02** Remove the 18 questions from `lib/question-bank/{b2,c1,c2}.ts` (ids listed in the roadmap). Check that `usedQuestions` / the admin question-bank page don't reference them by id elsewhere (`grep` the ids).
-- [ ] **Q-03** Add the 4 C2 questions to `lib/question-bank/c2.ts`, each with `simpler` and 2 `followUps`. `L10n` is `Record<ConvLang, string>`, so every one needs all 6 languages: the roadmap gives French only → translate en / nl-BE / es / it / de, have the Dutch reviewed if possible.
-- [ ] **Q-04** Fixed Dutch intro: in `lib/conversation-prompts.ts` (nl-BE opening, ~line 383) replace "Vermeld dat het gesprek … duurt" with the literal sentence « Deze conversatie duurt enkele minuten en helpt ons om uw Nederlands te evalueren. ». Same for nl-NL when it exists (L-06). Check in the simulator that the model keeps it verbatim.
+- [x] **Q-02** Remove the 18 questions from `lib/question-bank/{b2,c1,c2}.ts` (ids listed in the roadmap). Check that `usedQuestions` / the admin question-bank page don't reference them by id elsewhere (`grep` the ids).
+- [x] **Q-03** Add the 4 C2 questions to `lib/question-bank/c2.ts`, each with `simpler` and 2 `followUps`. `L10n` is `Record<ConvLang, string>`, so every one needs all 6 languages: the roadmap gives French only → translate en / nl-BE / es / it / de, have the Dutch reviewed if possible. Done: B2 24→19, C1 16→11, C2 15→11; new ids `c2-home-03`, `c2-hobbies-03`, `c2-other-03`, `c2-work-02`. Translations not yet reviewed by a native speaker.
+- [x] **Q-04** Fixed Dutch intro: in `lib/conversation-prompts.ts` (nl-BE opening, ~line 383) replace "Vermeld dat het gesprek … duurt" with the literal sentence « Deze conversatie duurt enkele minuten en helpt ons om uw Nederlands te evalueren. ». Same for nl-NL when it exists (L-06). Done in both the standard and the beginner opening (exception to its 8-word limit). Still to do: check in the simulator that the model keeps it verbatim.
 - [ ] **Q-05** Put C2 back in evaluation. Today scores stop at C1+ (`SCORING_RULES.ceiling`, cap 89, `topOfScale` flag — `lib/cefr-score.ts`, decision of 2026-10-18). Undo: `ceiling: null` (or cap 90+), C2 floor editable in `LevelFloorsForm`, welcome screen back to "A0 to C2", results screen drops the "may be higher" note.
-  ⚠ The C1/C2 calibration set (commit 9ab2065) was run because the engine couldn't separate C1 from C2. Re-run `analysis/c1c2.ts` on the revised C2 bank before shipping, and tell Michel what the numbers say.
+  ⚠ The ceiling exists because a C1 speaker was rated C2 (2026-10-14…18). `analysis/c1c2.ts` works on Speechace monologues, so it does not depend on our bank. The check that matters is the replay: `npx tsx analysis/scoring-replay.ts --scenario show-c2` (2026-11-12, 80 live sessions): 5 move C1+ → C2 (b20ec7a9, 2f824a75, a87c7133, be998587, 51bcd3a1), none down. Waiting on: does Michel mean *report* C2 as a result, and are those 5 speakers really C2?
 
 ## Phase 1 — interface language
 
@@ -86,3 +86,4 @@ Live STT is already Voxtral (Track O). Deepgram is still used in pronunciation: 
 | Date | Done | Blocked | Next |
 |---|---|---|---|
 | 2026-11-12 | Plan written from the roadmap doc; set up as the tracker; branch `roadmap-nov-2026` | Q-01 (Mistral key from Michel) | Q-02 |
+| 2026-11-12 | Q-02, Q-03, Q-04; C2 replay for Q-05 | Q-01 (key); Q-05 (what "C2 back" means, check the 5 sessions) | Q-05 once decided, else phase 1 (L-01) |
