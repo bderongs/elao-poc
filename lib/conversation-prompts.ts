@@ -25,6 +25,12 @@ const DURATION_PHRASE = {
   de: ADAPTIVE_LENGTH ? "einige Minuten" : `etwa ${MIN} Minuten`,
   en: ADAPTIVE_LENGTH ? "a few minutes" : `about ${MIN} minutes`,
 };
+
+// Client-imposed intro sentence (roadmap Q-04, 2026-11-12): said word for word
+// instead of the model's own wording of the length/purpose line.
+const FIXED_INTRO_SENTENCE: Partial<Record<ConvLang, string>> = {
+  "nl-BE": "Deze conversatie duurt enkele minuten en helpt ons om uw Nederlands te evalueren.",
+};
 import { DOMAIN_LABEL, SWITCH_SEEDS, type TopicDomain } from "@/lib/topic-domain";
 import { bankFor } from "@/lib/question-bank";
 
@@ -336,13 +342,15 @@ const OPENING_QUESTION_LINE: Record<ConvLang, (question?: string) => string> = {
     : "End with ONE simple, everyday warm-up question.",
 };
 
-const EASY_OPENING_NOTE = (languageName: string, durationPhrase: string) => `
+const EASY_OPENING_NOTE = (languageName: string, durationPhrase: string, fixedIntro?: string) => `
 
 EASY OPENING (overrides the OPENING section above where they differ): the speaker may be a beginner who catches only a few words, so use very short sentences (at most 8 words each) and only the most common everyday words — but do introduce the conversation, so the first question doesn't come out of nowhere. In this order:
 1. Greet and say your name in one short sentence (e.g. "Hello, my name is ${AVATAR_NAME}.").
-2. Say, in one or two short, simple sentences, that you will talk together for ${durationPhrase} and that you will ask some simple questions (e.g. "We will talk for a few minutes. I will ask you some questions."). No other details about the assessment.
+${fixedIntro
+  ? `2. Say exactly this sentence, word for word (it is the one exception to the 8-word limit): "${fixedIntro}" — and no other details about the assessment.`
+  : `2. Say, in one or two short, simple sentences, that you will talk together for ${durationPhrase} and that you will ask some simple questions (e.g. "We will talk for a few minutes. I will ask you some questions."). No other details about the assessment.`}
 3. Ask the opening question — ONE short, simple question of at most 8 words. If the opening question given above has two parts ("X, and why?" / two questions in a row), ask ONLY its first part.
-The whole opening stays under 35 words, in ${languageName}, and sounds like a natural spoken greeting.`;
+The whole opening stays under ${fixedIntro ? 45 : 35} words, in ${languageName}, and sounds like a natural spoken greeting.`;
 
 export function getSystemPrompt(
   language: ConvLang,
@@ -351,7 +359,7 @@ export function getSystemPrompt(
   opts: PromptOpts & { openerQuestion?: string } = {}
 ): string {
   const base = buildSystemPrompt(language, rung, bank, opts);
-  return opts.easyOpening ? base + EASY_OPENING_NOTE(LANGUAGE_NAME[language], DURATION_PHRASE[language]) : base;
+  return opts.easyOpening ? base + EASY_OPENING_NOTE(LANGUAGE_NAME[language], DURATION_PHRASE[language], FIXED_INTRO_SENTENCE[language]) : base;
 }
 
 function buildSystemPrompt(
@@ -382,7 +390,7 @@ ${bank}
 
 OPENING — stel je eigen introductie samen, elke sessie anders (hergebruik nooit dezelfde formulering):
 - Groet kort en stel jezelf expliciet voor met « ik ben ${AVATAR_NAME} » (noem niet enkel je voornaam).
-- Vermeld dat het gesprek ${DURATION_PHRASE["nl-BE"]} duurt om het niveau Nederlands te evalueren.
+- Zeg daarna letterlijk, woord voor woord, deze zin: « ${FIXED_INTRO_SENTENCE["nl-BE"]} »
 - ${OPENING_QUESTION_LINE["nl-BE"](opts.openerQuestion)}
 - Houd het geheel kort: maximaal 2-3 zinnen.
 
