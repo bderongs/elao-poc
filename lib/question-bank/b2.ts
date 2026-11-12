@@ -65,30 +65,6 @@ export const B2: BankEntry[] = [
     },
   },
   {
-    id: "b2-work-03",
-    domain: "work_studies",
-    text: {
-      en: "Tell me about a time when you had to make a difficult decision.",
-      fr: "Parlez-moi d'un moment où vous avez dû prendre une décision difficile.",
-      "nl-BE": "Vertel eens over een moment waarop u een moeilijke beslissing moest nemen.",
-      es: "Hábleme de un momento en que tuvo que tomar una decisión difícil.",
-      it: "Mi parli di una volta in cui ha dovuto prendere una decisione difficile.",
-      de: "Erzählen Sie mir von einer Situation, in der Sie eine schwierige Entscheidung treffen mussten.",
-    },
-  },
-  {
-    id: "b2-work-04",
-    domain: "work_studies",
-    text: {
-      en: "Describe a situation where you had to adapt quickly.",
-      fr: "Décrivez une situation où vous avez dû vous adapter rapidement.",
-      "nl-BE": "Beschrijf een situatie waarin u zich snel moest aanpassen.",
-      es: "Describa una situación en la que tuvo que adaptarse rápidamente.",
-      it: "Descriva una situazione in cui ha dovuto adattarsi rapidamente.",
-      de: "Beschreiben Sie eine Situation, in der Sie sich schnell anpassen mussten.",
-    },
-  },
-  {
     id: "b2-home-01",
     domain: "home_city",
     text: {
@@ -173,18 +149,6 @@ export const B2: BankEntry[] = [
     },
   },
   {
-    id: "b2-food-01",
-    domain: "food_daily_life",
-    text: {
-      en: "Describe your ideal way to start the day.",
-      fr: "Décrivez votre façon idéale de commencer la journée.",
-      "nl-BE": "Beschrijf hoe u uw dag idealiter begint.",
-      es: "Describa su manera ideal de empezar el día.",
-      it: "Descriva il suo modo ideale di iniziare la giornata.",
-      de: "Beschreiben Sie, wie Sie Ihren Tag am liebsten beginnen.",
-    },
-  },
-  {
     id: "b2-tech-01",
     domain: "technology",
     text: {
@@ -245,18 +209,6 @@ export const B2: BankEntry[] = [
     },
   },
   {
-    id: "b2-other-04",
-    domain: "opinions_other",
-    text: {
-      en: "Tell me about a time you changed your mind about something important to you.",
-      fr: "Parlez-moi d'un moment où vous avez changé d'avis sur quelque chose d'important pour vous.",
-      "nl-BE": "Vertel eens over een moment waarop u van mening veranderde over iets wat belangrijk voor u was.",
-      es: "Hábleme de un momento en que cambió de opinión sobre algo importante para usted.",
-      it: "Mi parli di una volta in cui ha cambiato idea su qualcosa di importante per lei.",
-      de: "Erzählen Sie mir von einem Moment, in dem Sie Ihre Meinung über etwas Wichtiges geändert haben.",
-    },
-  },
-  {
     id: "b2-other-05",
     domain: "opinions_other",
     text: {
@@ -278,18 +230,6 @@ export const B2: BankEntry[] = [
       es: "Si pudiera cenar con cualquier persona, viva o fallecida, ¿quién sería, y por qué?",
       it: "Se potesse cenare con chiunque, vivo o scomparso, chi sceglierebbe, e perché?",
       de: "Wenn Sie mit irgendeinem Menschen essen gehen könnten, lebend oder verstorben, wer wäre das, und warum?",
-    },
-  },
-  {
-    id: "b2-other-07",
-    domain: "opinions_other",
-    text: {
-      en: "What is something most people don't know about you?",
-      fr: "Qu'est-ce que la plupart des gens ne savent pas sur vous ?",
-      "nl-BE": "Wat weten de meeste mensen niet over u?",
-      es: "¿Qué es algo que la mayoría de la gente no sabe de usted?",
-      it: "Che cosa la maggior parte delle persone non sa di lei?",
-      de: "Was wissen die meisten Menschen nicht über Sie?",
     },
   },
 ];
