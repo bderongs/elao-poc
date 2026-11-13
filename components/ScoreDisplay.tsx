@@ -122,7 +122,7 @@ const DEFAULT_CEFR_LABELS = {
   notableErrors: "Notable errors",
   originalFeedback: "Original feedback (English)",
   confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
-  /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). */
+  /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). Not set by the live rules since 2026-11-13 (ceiling: null). */
   topOfScale:
     "The highest level this test assesses. Your spoken language is at the top of our scale; your level may be higher still (C2), which this short conversation is not designed to measure.",
 };

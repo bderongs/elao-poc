@@ -73,8 +73,8 @@ export function ScoreBreakdownPanel({
         title={<CategoryTitle anchor="score-global" label="Global score" />}
       >
         <p style={cardCopy}>
-          The average of the four dimensions below, on a curve (an average of 9 is 87, C1+). The scale stops at C1+
-          (89); strong C2-question answers add a &quot;top of the scale&quot; note — see the scoring page.
+          The average of the four dimensions below, on a curve (an average of 9 is 87, C1+). Without C2-question
+          evidence the score stops at 89 (C1+); with it, C2 (90) — see the scoring page.
         </p>
         {scoreNotes.length > 0 && (
           <p style={{ ...cardCopy, color: adminColors.faint }}>This session: {scoreNotes.join(" · ")}</p>

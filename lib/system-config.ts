@@ -129,7 +129,7 @@ export function getSystemConfig(): CapabilityConfig[] {
     {
       capability: "ET",
       capabilityLabel: "Per-answer level judge (ET)",
-      description: "Rates each answer as handled well or struggled, to raise or lower the next question's level and decide when the session can end. Its verdicts also decide the 'top of the scale' mark (C2 answers rated well).",
+      description: "Rates each answer as handled well or struggled, to raise or lower the next question's level and decide when the session can end. Its verdicts also feed the C2 gate (C2 answers rated well).",
       providerId: et.id,
       providerLabel: et.label,
       modelLabel: et.modelLabel,

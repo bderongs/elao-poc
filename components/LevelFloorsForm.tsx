@@ -64,7 +64,7 @@ export function LevelFloorsForm({ initial }: { initial: LevelFloors }) {
   // Each level runs from its floor to just below the next one's; A0 is everything under A1.
   const rangeOf = (i: number) => {
     const next = SCORED_LEVELS[i + 1];
-    return next === "C2" ? `– 89 (top of the scale)` : `– ${floors[next] - 1}`;
+    return next === "C2" ? `– 89 (C2 from 90, by evidence)` : `– ${floors[next] - 1}`;
   };
 
   return (

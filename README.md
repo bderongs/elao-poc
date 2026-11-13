@@ -3,7 +3,7 @@
 Test d'expression orale en conversation avec Léa, une examinatrice virtuelle
 (avatar 3D animé). Le candidat parle quelques minutes, l'application adapte la
 difficulté des questions à ses réponses, puis donne un niveau CEFR (de A0 à
-C1+), un score sur 100 et un retour détaillé.
+C2), un score sur 100 et un retour détaillé.
 
 Six langues : anglais, français, néerlandais (Belgique), espagnol, italien,
 allemand.
@@ -51,10 +51,10 @@ des moteurs de prononciation ; fluidité, vocabulaire/grammaire et
 communication viennent de l'évaluation CEFR), plafonne la fluidité selon le
 débit (mots par minute), passe cette moyenne sur 100, puis convertit le
 score en niveau (A1 à partir de 40, A2 à 50, B1 à 60, B2 à 70, C1 à 80, avec
-un « + » à mi-palier). **Le test ne délivre pas C2** : le score est plafonné à
-89 (C1+). Un candidat qui a maîtrisé au moins 2 questions de niveau C2 (selon
-le juge par réponse) avec une moyenne des axes d'au moins 8,75 reçoit la
-mention « haut de l'échelle ». Les règles actives sont dans
+un « + » à mi-palier). **C2 se gagne sur preuves** : sans elles, le score
+s'arrête à 89 (C1+). Un candidat qui a maîtrisé au moins 2 questions de niveau
+C2 (selon le juge par réponse), avec au plus 2 erreurs comptées et une moyenne
+des axes d'au moins 8,75, passe à C2 (90). Les règles actives sont dans
 `SCORING_RULES` (`lib/cefr-score.ts`) et expliquées dans l'admin, page
 **Scoring guide**.
 

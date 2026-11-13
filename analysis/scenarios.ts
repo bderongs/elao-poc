@@ -23,9 +23,9 @@ export const SCENARIOS: Record<string, Scenario> = {
     description: "The rules live 2026-10-08 → 2026-10-14: axis mean × 10, +5 % bonus, C2 floor, WPM band raises fluency, no C2 gate.",
     overrides: { axisCurve: null, fluencyFromWpm: "band", bonus: OLD_BONUS, c2Floor: OLD_FLOOR, c2Gate: null, ceiling: null },
   },
-  "show-c2": {
-    description: "Report C2 again (the 2026-10-14 → 18 rules): no C1+ ceiling; C2 by evidence (≥ 2 C2 answers \"well\", ≤ 2 errors, axis mean ≥ 8.75), held at C1+ without it.",
-    overrides: { ceiling: null, c2Gate: { maxSpeakerErrors: 2, minC2AnswersWell: 2, cap: 89, liftFromAxisMean: 8.75 } },
+  "c1plus-ceiling": {
+    description: "The rules live 2026-10-18 → 2026-11-13: no C2 — scores stop at 89 (C1+), \"top of scale\" note on C2 evidence (≥ 2 C2 answers \"well\", axis mean ≥ 8.75).",
+    overrides: { c2Gate: null, ceiling: { cap: 89, topOfScale: { minC2AnswersWell: 2, minAxisMean: 8.75 } } },
   },
   "llm-base": {
     description: "Go back to the evaluator's holistic score_percent as the base score (what the app did before 2026-10-08).",
