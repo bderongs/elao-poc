@@ -72,7 +72,7 @@ export function EvaluatingScreen({ done, onDone, labels: labelsProp }: Evaluatin
       <style>{`
         @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
       `}</style>
-      <CandidateTopBar />
+      <CandidateTopBar langSwitcher={false} />
       <div className={styles.evalBody}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 56 }}>
           {[0, 0.15, 0.3, 0.45, 0.6].map((delay) => (

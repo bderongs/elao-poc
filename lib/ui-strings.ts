@@ -25,6 +25,20 @@ export function isUiLang(v: unknown): v is UiLang {
   return typeof v === "string" && (UI_LANGS as readonly string[]).includes(v);
 }
 
+/** Each interface language in its own name, for the language switcher. */
+export const UI_LANG_NATIVE_NAME: Record<UiLang, string> = {
+  fr: "Français", en: "English", nl: "Nederlands", es: "Español", it: "Italiano", de: "Deutsch",
+};
+
+/** First supported interface language in a browser preference list ("de-AT", "en-GB;q=0.8", …), or null. */
+export function uiLangFromPreferences(prefs: readonly string[]): UiLang | null {
+  for (const p of prefs) {
+    const base = p.split(";")[0].trim().split("-")[0].toLowerCase();
+    if (isUiLang(base)) return base;
+  }
+  return null;
+}
+
 /** The interface language matching a test language (nl-BE / nl-NL share the Dutch interface). */
 export function uiLangForConvLang(lang: ConvLang | string): UiLang {
   const base = lang.split("-")[0];
@@ -181,6 +195,7 @@ const fr = {
   },
 
   nav: {
+    interfaceLanguage: "Langue de l'interface",
     mySessions: "Mes sessions",
     signIn: "Se connecter",
   },
@@ -404,6 +419,7 @@ const en: UiStrings = {
   },
 
   nav: {
+    interfaceLanguage: "Interface language",
     mySessions: "My sessions",
     signIn: "Sign in",
   },
@@ -625,6 +641,7 @@ const nl: UiStrings = {
   },
 
   nav: {
+    interfaceLanguage: "Taal van de interface",
     mySessions: "Mijn sessies",
     signIn: "Aanmelden",
   },
@@ -846,6 +863,7 @@ const es: UiStrings = {
   },
 
   nav: {
+    interfaceLanguage: "Idioma de la interfaz",
     mySessions: "Mis sesiones",
     signIn: "Iniciar sesión",
   },
@@ -1067,6 +1085,7 @@ const it: UiStrings = {
   },
 
   nav: {
+    interfaceLanguage: "Lingua dell'interfaccia",
     mySessions: "Le mie sessioni",
     signIn: "Accedi",
   },
@@ -1289,6 +1308,7 @@ const de: UiStrings = {
   },
 
   nav: {
+    interfaceLanguage: "Sprache der Oberfläche",
     mySessions: "Meine Sitzungen",
     signIn: "Anmelden",
   },

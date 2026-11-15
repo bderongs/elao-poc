@@ -183,7 +183,7 @@ function computePronunciationAvgFromHistory(history: Msg[]): PronunciationAvg | 
 export default function Home() {
   const [language, setLanguage] = useState<Lang>("fr");
   /** Interface language (roadmap L-02) — independent of the test language. */
-  const uiLang = useUiLangFromBrowser();
+  const [uiLang, setUiLang] = useUiLangFromBrowser();
   const t = UI_STRINGS[uiLang];
   /** For callbacks that may outlive a render (VAD, stream handlers). */
   const tRef = useRef(t);
@@ -2212,7 +2212,7 @@ export default function Home() {
   const dotsFilled = Math.min(answersCount, dotsTotal);
 
   return (
-    <UiLangProvider lang={uiLang}>
+    <UiLangProvider lang={uiLang} setLang={setUiLang}>
     <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
       <style>{`
         @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
@@ -2490,6 +2490,7 @@ export default function Home() {
       {sessionStarted && phase === "active" && (
         <>
           <TopBar
+            langSwitcher={false}
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

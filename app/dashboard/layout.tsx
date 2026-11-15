@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/current-user";
 import { logout } from "@/app/login/actions";
 import { getUiServer } from "@/lib/ui-lang-server";
+import { UiLangSwitcher } from "@/components/UiLangSwitcher";
 import styles from "@/components/dashboard.module.css";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -22,6 +23,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <span className={styles.brandName}>ELAO</span>
         </Link>
         <div className={styles.topbarRight}>
+          <UiLangSwitcher />
           <span className={styles.userEmail}>{user.email}</span>
           <form action={logout}>
             <button type="submit" className={styles.signOut}>
