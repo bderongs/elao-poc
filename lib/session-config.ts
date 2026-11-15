@@ -20,9 +20,7 @@ export const SESSION_LENGTH_MODE: SessionLengthMode = "adaptive";
 export const SESSION_MIN_SECONDS = 3 * 60;
 export const SESSION_MAX_SECONDS = 7 * 60;
 
-/** Length wording for the French landing screen: "quelques minutes" when the length adapts, otherwise "N minutes". */
-export const SESSION_LENGTH_LABEL_FR =
-  SESSION_LENGTH_MODE === "adaptive" ? "quelques minutes" : `${SESSION_DURATION_MINUTES} minutes`;
+/* The landing screens' length wording is per interface language: `sessionLength` in lib/ui-strings.ts. */
 
 /** The examiner's first name — every language's avatar introduces itself with it. */
 export const AVATAR_NAME = "Léa";

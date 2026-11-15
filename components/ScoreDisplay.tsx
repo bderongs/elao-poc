@@ -122,6 +122,8 @@ const DEFAULT_CEFR_LABELS = {
   notableErrors: "Notable errors",
   originalFeedback: "Original feedback (English)",
   confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
+  axes: { pronunciation: "Pronunciation", fluency: "Fluency", vocabGram: "Vocab & Gram.", communication: "Communication" },
+  notAvailable: "n/a",
   /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). Not set by the live rules since 2026-11-13 (ceiling: null). */
   topOfScale:
     "The highest level this test assesses. Your spoken language is at the top of our scale; your level may be higher still (C2), which this short conversation is not designed to measure.",
@@ -171,10 +173,10 @@ export function CefrPanel({
   const { score: compositeScore, level: compositeLevel, topOfScale } = computeCompositeCefrScore(result, pronunciationAvg, withLevelFloors(levelFloors));
 
   const dim4: [string, number | null][] = [
-    ["Pronunciation", pronScore],
-    ["Fluency",       fluency],
-    ["Vocab & Gram.", vocabGram],
-    ["Communication", comm],
+    [t.axes.pronunciation, pronScore],
+    [t.axes.fluency,       fluency],
+    [t.axes.vocabGram,     vocabGram],
+    [t.axes.communication, comm],
   ];
 
   const eyebrowColor = light ? "#8A8F9C" : "rgba(255,255,255,0.6)";
@@ -302,7 +304,7 @@ export function CefrPanel({
           ) : (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: light ? 12 : 11, marginBottom: light ? 5 : 3 }}>
               <span style={{ width: light ? 92 : 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
-              <span style={{ color: light ? "#8A8F9C" : "#4b5563", fontSize: 10 }}>n/a</span>
+              <span style={{ color: light ? "#8A8F9C" : "#4b5563", fontSize: 10 }}>{t.notAvailable}</span>
             </div>
           )
         )}

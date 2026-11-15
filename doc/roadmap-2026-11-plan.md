@@ -34,12 +34,13 @@ Phase 4 is independent and touches only the server pipeline: do it whenever phas
 
 Today the candidate UI is French only, hard-coded in `app/page.tsx` (2 800 lines), and the feedback is translated to French only (`lib/analysis-translation.ts`).
 
-- [ ] **L-01** Decide the list of interface languages (proposal: the 6 test languages + nl-NL). Type `UiLang` in `lib/languages.ts`.
+- [x] **L-01** Interface languages. Decided 2026-11-15 (Baptiste): fr, en, nl, es, it, de — one Dutch interface for nl-BE and nl-NL. Type `UiLang` in `lib/languages.ts`.
 - [ ] **L-02** `lib/ui-strings.ts`: one dictionary `Record<UiLang, …>`, typed so a missing string is a compile error (same trick as `L10n`). Move every candidate-facing string of `app/page.tsx`, `CandidateTopBar`, `EvaluatingScreen`, `SessionResultsScreen`, `SatisfactionModal`, `ClaimResultsForm`, `/results-saved` into it. Admin stays English.
+  Progress 2026-11-15: done for the test flow — `app/page.tsx`, `EvaluatingScreen`, `SessionResultsScreen` (+ the result card's axis names, which were English on the French screen), `SatisfactionModal`, `ClaimResultsForm`, `AuthForm`, `AuthNavLink`. Context: `lib/ui-lang.tsx` (`?ui=` → localStorage → fr). Still to do: `/login` pages, `PasswordResetForms`, `/results-saved`, `/dashboard` (+ detail). Translations by Claude, not yet reviewed by native speakers.
 - [ ] **L-03** Where the language comes from: `?ui=` on the link (read-once, like `?level=`), then the API test row (phase 2), default `fr`. Store `ui_language` on `sessions` (migration, additive).
 - [ ] **L-04** Feedback translation: generalize `analysis-translation.ts` from "French" to "the session's `ui_language`" (skip when it equals the test language… or when it's `en`, the source). Keep the `analysis_fr` column readable for old sessions; new column `analysis_ui jsonb` + `ui_language`.
-- [ ] **L-05** Audio-description of the welcome page: a "listen" button (and/or autoplay after the first click — browsers block autoplay) reading the welcome text through the existing TTS registry in `ui_language`. Cache the audio per language (static files generated once, like `tts-samples/`) rather than calling TTS for every candidate.
-- [ ] **L-06** nl-NL as a test language. `ConvLang` is used in ~30 files and `L10n` would force a Dutch-NL string on every bank question. Proposal: add `nl-NL` to `ConvLang` but let the bank fall back to the `nl-BE` text (standard Dutch, same questions); what differs is the prompt (no Belgian vocabulary rule), the TTS voice, the STT/Azure locale (`nl-NL`) and the label/flag. Go through the 30 files listed by `grep -rl nl-BE lib app components`.
+- [ ] **L-05** Audio-description of the welcome page: a "Listen" button (decided 2026-11-15; no autoplay) reading the welcome text through the existing TTS registry in `ui_language`. Cache the audio per language (static files generated once, like `tts-samples/`) rather than calling TTS for every candidate.
+- [ ] **L-06** nl-NL as a test language. `ConvLang` is used in ~30 files and `L10n` would force a Dutch-NL string on every bank question. Decided 2026-11-15: add `nl-NL` to `ConvLang` and let the bank fall back to the `nl-BE` text (standard Dutch, same questions); what differs is the prompt (no Belgian vocabulary rule), the TTS voice, the STT/Azure locale (`nl-NL`) and the label/flag. Go through the 30 files listed by `grep -rl nl-BE lib app components`.
 
 ## Phase 2 — integrator API
 
@@ -88,3 +89,4 @@ Live STT is already Voxtral (Track O). Deepgram is still used in pronunciation: 
 | 2026-11-12 | Plan written from the roadmap doc; set up as the tracker; branch `roadmap-nov-2026` | Q-01 (Mistral key from Michel) | Q-02 |
 | 2026-11-12 | Q-02, Q-03, Q-04; C2 replay for Q-05 | Q-01 (key); Q-05 (what "C2 back" means, check the 5 sessions) | Q-05 once decided, else phase 1 (L-01) |
 | 2026-11-13 | Q-05: C2 reported again (decision: Baptiste) | Q-01 (key) | Phase 1: L-01 (interface languages list) |
+| 2026-11-15 | Pushed `roadmap-nov-2026`. Phase 1 decisions (UI langs, nl-NL reuses nl-BE, Listen button). L-01; L-02 for the test flow | — | L-02: login, results-saved, dashboard |

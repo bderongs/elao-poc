@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { useUi } from "@/lib/ui-lang";
 
 /**
  * Small corner link on the homepage so a returning logged-in user can find
@@ -10,6 +11,7 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
  * until the client-side auth check resolves, to avoid a wrong flash.
  */
 export function AuthNavLink({ light = false }: { light?: boolean }) {
+  const { t } = useUi();
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -36,7 +38,7 @@ export function AuthNavLink({ light = false }: { light?: boolean }) {
         textDecoration: "none",
       }}
     >
-      {loggedIn ? "Mes sessions" : "Se connecter"}
+      {loggedIn ? t.nav.mySessions : t.nav.signIn}
     </a>
   );
 }
