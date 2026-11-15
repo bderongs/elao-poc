@@ -43,6 +43,7 @@ export const REALTIME_STT_PROVIDER_BY_LANG: Record<ConvLang, RealtimeSttProvider
   de: "mistral",
   es: "mistral",
   "nl-BE": "mistral",
+  "nl-NL": "mistral",
   it: "mistral",
 };
 

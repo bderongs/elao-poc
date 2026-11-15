@@ -30,7 +30,7 @@ const REALTIME_STT_MODEL_LABEL: Record<RealtimeSttProviderId, () => string> = {
   mistral: mistralRealtimeTranscribeModel,
 };
 
-const ALL_LANGUAGES: ConvLang[] = ["en", "fr", "nl-BE", "es", "it", "de"];
+const ALL_LANGUAGES: ConvLang[] = ["en", "fr", "nl-BE", "nl-NL", "es", "it", "de"];
 
 export interface ProviderConfig {
   providerId: string;

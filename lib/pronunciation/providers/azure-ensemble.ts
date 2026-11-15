@@ -48,7 +48,7 @@ export async function deepgramVerbatim(
   if (!key) return null;
   const lang =
     langCode === "fr" ? "fr" :
-    langCode === "nl-BE" ? "nl" :
+    langCode === "nl-BE" || langCode === "nl-NL" ? "nl" :
     langCode === "es" ? "es" :
     langCode === "it" ? "it" :
     langCode === "de" ? "de" :
@@ -116,7 +116,7 @@ export async function azureAcoustic(
   referenceText = "",
 ): Promise<AzEvidence | null> {
   const langMap: Record<string, string> = {
-    fr: "fr-FR", en: "en-US", "nl-BE": "nl-BE", es: "es-ES", it: "it-IT", de: "de-DE",
+    fr: "fr-FR", en: "en-US", "nl-BE": "nl-BE", "nl-NL": "nl-NL", es: "es-ES", it: "it-IT", de: "de-DE",
   };
   const pronConfigB64 = Buffer.from(
     JSON.stringify({
@@ -278,7 +278,7 @@ const VERDICT_MAP: Record<string, { confidence: number; accuracyScore: number; e
 };
 
 export const LANG_LABELS: Record<string, string> = {
-  fr: "French", "nl-BE": "Dutch (Belgian)", es: "Spanish", it: "Italian", de: "German", en: "English",
+  fr: "French", "nl-BE": "Dutch (Belgian)", "nl-NL": "Dutch (Netherlands)", es: "Spanish", it: "Italian", de: "German", en: "English",
 };
 
 async function assess({

@@ -54,6 +54,7 @@ const LANGUAGE_NAME: Record<ConvLang, string> = {
   fr: "French",
   en: "English",
   "nl-BE": "Dutch (Belgian)",
+  "nl-NL": "Dutch (Netherlands)",
   es: "Spanish",
   it: "Italian",
   de: "German",

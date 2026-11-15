@@ -99,7 +99,7 @@ const tokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN).toLocaleSt
 
 // ─── Prompt sizes, measured from the prompts themselves ────────────────────
 
-const LANGS: ConvLang[] = ["en", "fr", "nl-BE", "es", "it", "de"];
+const LANGS: ConvLang[] = ["en", "fr", "nl-BE", "nl-NL", "es", "it", "de"];
 const RUNGS: CefrRung[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
 /** The examiner's system prompt varies by language and level — use the average. */
 const EXAMINER_SYSTEM_CHARS = (() => {

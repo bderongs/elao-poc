@@ -20,6 +20,7 @@ const ADAPTIVE_LENGTH = SESSION_LENGTH_MODE === "adaptive";
 const DURATION_PHRASE = {
   fr: ADAPTIVE_LENGTH ? "quelques minutes" : `environ ${MIN} minutes`,
   "nl-BE": ADAPTIVE_LENGTH ? "enkele minuten" : `ongeveer ${MIN} minuten`,
+  "nl-NL": ADAPTIVE_LENGTH ? "enkele minuten" : `ongeveer ${MIN} minuten`,
   es: ADAPTIVE_LENGTH ? "unos minutos" : `unos ${MIN} minutos`,
   it: ADAPTIVE_LENGTH ? "qualche minuto" : `circa ${MIN} minuti`,
   de: ADAPTIVE_LENGTH ? "einige Minuten" : `etwa ${MIN} Minuten`,
@@ -28,8 +29,10 @@ const DURATION_PHRASE = {
 
 // Client-imposed intro sentence (roadmap Q-04, 2026-11-12): said word for word
 // instead of the model's own wording of the length/purpose line.
+const NL_INTRO = "Deze conversatie duurt enkele minuten en helpt ons om uw Nederlands te evalueren.";
 const FIXED_INTRO_SENTENCE: Partial<Record<ConvLang, string>> = {
-  "nl-BE": "Deze conversatie duurt enkele minuten en helpt ons om uw Nederlands te evalueren.",
+  "nl-BE": NL_INTRO,
+  "nl-NL": NL_INTRO,
 };
 import { DOMAIN_LABEL, SWITCH_SEEDS, type TopicDomain } from "@/lib/topic-domain";
 import { bankFor } from "@/lib/question-bank";
@@ -80,7 +83,7 @@ export function buildQuestionBank(
   }
   const chosen = shuffle(pool).slice(0, sliceSize);
   return {
-    bankText: `${label}:\n${chosen.map((q) => `- ${q.text[language]}`).join("\n")}`,
+    bankText: `${label}:\n${chosen.map((q) => `- ${q.text[bankLang(language)]}`).join("\n")}`,
     updatedUsedQuestions: [...carriedUsed, ...chosen.map((q) => q.id)],
   };
 }
@@ -108,6 +111,7 @@ export function buildQuestionBank(
 export const PIVOT_WORDS: Record<ConvLang, string> = {
   fr: `"D'accord." / "Je vois." / "Entendu." / "Très bien." / "Bien sûr." / "En effet." / "Effectivement." / "Je comprends." / "Voilà."`,
   "nl-BE": `"Juist." / "Inderdaad." / "Ik snap het." / "Uiteraard." / "Oké." / "Duidelijk." / "Goed zo." / "Zeker."`,
+  "nl-NL": `"Juist." / "Inderdaad." / "Ik snap het." / "Uiteraard." / "Oké." / "Duidelijk." / "Goed zo." / "Zeker."`,
   es: `"Ya veo." / "De acuerdo." / "Entendido." / "Por supuesto." / "En efecto." / "Claro." / "Muy bien." / "Comprendo."`,
   it: `"Capisco." / "D'accordo." / "Certo." / "Infatti." / "Va bene." / "Chiaro." / "Ho capito."`,
   de: `"Verstehe." / "In Ordnung." / "Klar." / "Genau." / "Gut." / "Ach so." / "Natürlich."`,
@@ -116,6 +120,7 @@ export const PIVOT_WORDS: Record<ConvLang, string> = {
 export const BRIDGE_PHRASES: Record<ConvLang, string> = {
   fr: `"Passons à autre chose." / "Autre chose :" / "Parlons d'autre chose." / "Et sinon," / "Dites-moi," / "Changeons un peu de sujet."`,
   "nl-BE": `"Laten we iets anders bespreken." / "Iets anders:" / "En verder," / "Vertel eens," / "Even iets anders:"`,
+  "nl-NL": `"Laten we iets anders bespreken." / "Iets anders:" / "En verder," / "Vertel eens," / "Even iets anders:"`,
   es: `"Pasemos a otra cosa." / "Otra cosa:" / "Hablemos de otra cosa." / "Y por otro lado," / "Cuénteme,"`,
   it: `"Passiamo ad altro." / "Un'altra cosa:" / "Parliamo d'altro." / "E invece," / "Mi dica,"`,
   de: `"Kommen wir zu etwas anderem." / "Etwas anderes:" / "Sprechen wir über etwas anderes." / "Und sonst," / "Sagen Sie mal,"`,
@@ -125,6 +130,7 @@ export const BRIDGE_PHRASES: Record<ConvLang, string> = {
 const FORMAL_ADDRESS: Record<ConvLang, string> = {
   fr: `"vous", never "tu"`,
   "nl-BE": `"u", never "je"/"jij"`,
+  "nl-NL": `"u", never "je"/"jij"`,
   es: `"usted", never "tú"`,
   it: `"Lei", never "tu"`,
   de: `"Sie", never "du"`,
@@ -133,6 +139,7 @@ const FORMAL_ADDRESS: Record<ConvLang, string> = {
 const FOLLOWUP_PROMPTS: Record<ConvLang, string> = {
   fr: `"Pourquoi cela ?" / "Donnez-moi un exemple." / "Pouvez-vous en dire plus ?"`,
   "nl-BE": `"Waarom is dat?" / "Geef me een voorbeeld." / "Kunt u daar meer over vertellen?"`,
+  "nl-NL": `"Waarom is dat?" / "Geef me een voorbeeld." / "Kunt u daar meer over vertellen?"`,
   es: `"¿Por qué?" / "Deme un ejemplo." / "¿Puede contarme más?"`,
   it: `"Perché?" / "Mi faccia un esempio." / "Può dirmi di più?"`,
   de: `"Warum?" / "Geben Sie mir ein Beispiel." / "Können Sie mehr dazu sagen?"`,
@@ -141,6 +148,7 @@ const FOLLOWUP_PROMPTS: Record<ConvLang, string> = {
 const CLOSING_EXAMPLES: Record<ConvLang, string> = {
   fr: `"Merci, j'ai maintenant assez d'éléments pour évaluer votre niveau. Ceci conclut notre échange."`,
   "nl-BE": `"Bedankt, ik heb nu genoeg informatie om uw niveau te beoordelen. Dit besluit ons gesprek."`,
+  "nl-NL": `"Bedankt, ik heb nu genoeg informatie om uw niveau te beoordelen. Dit besluit ons gesprek."`,
   es: `"Gracias, ya tengo suficiente información para evaluar su nivel. Esto concluye nuestra conversación."`,
   it: `"Grazie, ora ho abbastanza informazioni per valutare il suo livello. Questo conclude la nostra conversazione."`,
   de: `"Danke, ich habe jetzt genug Informationen, um Ihr Niveau zu beurteilen. Damit ist unser Gespräch beendet."`,
@@ -309,6 +317,7 @@ Question bank for this rung:` : ""}`;
 const LANGUAGE_NAME: Record<ConvLang, string> = {
   fr: "French",
   "nl-BE": "Dutch (Belgian)",
+  "nl-NL": "Dutch (Netherlands)",
   es: "Spanish",
   it: "Italian",
   de: "German",
@@ -327,6 +336,9 @@ const OPENING_QUESTION_LINE: Record<ConvLang, (question?: string) => string> = {
     : "Termine par UNE question de mise en route simple et quotidienne.",
   "nl-BE": (q) => q
     ? `Eindig met deze opwarmvraag, zoals ze is of licht aangepast: « ${q} »`
+    : "Eindig met ÉÉN eenvoudige, alledaagse opwarmvraag.",
+  "nl-NL": (q) => q
+    ? `Eindig met deze opwarmvraag, zoals ze is of licht aangepast: "${q}"`
     : "Eindig met ÉÉN eenvoudige, alledaagse opwarmvraag.",
   es: (q) => q
     ? `Termina con esta pregunta de calentamiento, tal cual o apenas reformulada: «${q}»`
@@ -385,19 +397,23 @@ ${bank}
 - Les questions de la banque sont déjà rédigées en français : utilise-les telles qu'elles sont écrites.`;
   }
 
-  if (language === "nl-BE") {
+  if (language === "nl-BE" || language === "nl-NL") {
+    const belgian = language === "nl-BE";
     return `Je bent ${AVATAR_NAME}. Jouw doel is om je gesprekspartner zo veel mogelijk te laten spreken door vragen te stellen. Je bent direct en professioneel — niet hier om hen op hun gemak te stellen.
 
 OPENING — stel je eigen introductie samen, elke sessie anders (hergebruik nooit dezelfde formulering):
 - Groet kort en stel jezelf expliciet voor met « ik ben ${AVATAR_NAME} » (noem niet enkel je voornaam).
-- Zeg daarna letterlijk, woord voor woord, deze zin: « ${FIXED_INTRO_SENTENCE["nl-BE"]} »
-- ${OPENING_QUESTION_LINE["nl-BE"](opts.openerQuestion)}
+- Zeg daarna letterlijk, woord voor woord, deze zin: « ${NL_INTRO} »
+- ${OPENING_QUESTION_LINE[language](opts.openerQuestion)}
 - Houd het geheel kort: maximaal 2-3 zinnen.
 
 ${COMMON_RULES}
 ${bank}
-- Antwoord ALTIJD in het Nederlands (Belgische variant), ongeacht welke taal de gesprekspartner gebruikt.
-- Gebruik waar mogelijk Belgisch-Nederlandse uitdrukkingen en woordenschat.
+${belgian
+  ? `- Antwoord ALTIJD in het Nederlands (Belgische variant), ongeacht welke taal de gesprekspartner gebruikt.
+- Gebruik waar mogelijk Belgisch-Nederlandse uitdrukkingen en woordenschat.`
+  : `- Antwoord ALTIJD in het Nederlands zoals het in Nederland gesproken wordt, ongeacht welke taal de gesprekspartner gebruikt.
+- Gebruik geen typisch Belgisch-Nederlandse uitdrukkingen of woordenschat.`}
 - De vragen uit de vragenbank zijn al in het Nederlands geschreven: gebruik ze zoals ze er staan.`;
   }
 
@@ -460,9 +476,19 @@ ${bank}
 - Always reply in English regardless of what language the speaker uses.`;
 }
 
-export type ConvLang = "fr" | "en" | "nl-BE" | "es" | "it" | "de";
+export type ConvLang = "fr" | "en" | "nl-BE" | "nl-NL" | "es" | "it" | "de";
 
-const CONV_LANGS: ConvLang[] = ["fr", "en", "nl-BE", "es", "it", "de"];
+const CONV_LANGS: ConvLang[] = ["fr", "en", "nl-BE", "nl-NL", "es", "it", "de"];
+
+/**
+ * The languages the question bank is written in. nl-NL has no texts of its
+ * own: it asks the nl-BE ones (standard Dutch, same questions — roadmap L-06).
+ */
+export type BankLang = Exclude<ConvLang, "nl-NL">;
+
+export function bankLang(lang: ConvLang): BankLang {
+  return lang === "nl-NL" ? "nl-BE" : lang;
+}
 
 export function isConvLang(value: unknown): value is ConvLang {
   return typeof value === "string" && (CONV_LANGS as string[]).includes(value);

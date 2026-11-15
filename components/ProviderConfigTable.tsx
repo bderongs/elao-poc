@@ -17,7 +17,7 @@ import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
 const LANGUAGE_LABELS: Record<string, string> = {
-  en: "English", fr: "Français", "nl-BE": "Nederlands (BE)", es: "Español", it: "Italiano", de: "Deutsch",
+  en: "English", fr: "Français", "nl-BE": "Nederlands (BE)", "nl-NL": "Nederlands (NL)", es: "Español", it: "Italiano", de: "Deutsch",
 };
 
 // Shown as a hover tooltip on the CEFR_EVAL row — this is the only step

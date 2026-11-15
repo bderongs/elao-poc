@@ -17,7 +17,7 @@ export interface ConversationSettingsListItem extends ConversationSettingsValues
   isOverridden: boolean; // false = following 'default'; always true for 'default' itself
 }
 
-const LANGUAGES: ConvLang[] = ["fr", "en", "nl-BE", "es", "it", "de"];
+const LANGUAGES: ConvLang[] = ["fr", "en", "nl-BE", "nl-NL", "es", "it", "de"];
 
 // Defensive fallback if even the 'default' row is somehow missing — matches
 // today's pre-existing hardcoded behavior ("A2" starting rung, step 1).

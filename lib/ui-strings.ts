@@ -52,7 +52,7 @@ const fr = {
   /** How long the conversation lasts, as it reads inside a sentence. */
   sessionLength: ADAPTIVE ? "quelques minutes" : `${MIN} minutes`,
   /** Test languages, as named in this interface (CTA, language select). */
-  langName: { fr: "français", en: "anglais", "nl-BE": "néerlandais", es: "espagnol", it: "italien", de: "allemand" } as Record<ConvLang, string>,
+  langName: { fr: "français", en: "anglais", "nl-BE": "néerlandais", "nl-NL": "néerlandais", es: "espagnol", it: "italien", de: "allemand" } as Record<ConvLang, string>,
 
   welcome: {
     eyebrow: "Évaluation orale · CECRL",
@@ -276,7 +276,7 @@ export type UiStrings = typeof fr;
 const en: UiStrings = {
   htmlLang: "en",
   sessionLength: ADAPTIVE ? "a few minutes" : `${MIN} minutes`,
-  langName: { fr: "French", en: "English", "nl-BE": "Dutch", es: "Spanish", it: "Italian", de: "German" },
+  langName: { fr: "French", en: "English", "nl-BE": "Dutch", "nl-NL": "Dutch", es: "Spanish", it: "Italian", de: "German" },
 
   welcome: {
     eyebrow: "Speaking assessment · CEFR",
@@ -498,7 +498,7 @@ const en: UiStrings = {
 const nl: UiStrings = {
   htmlLang: "nl",
   sessionLength: ADAPTIVE ? "enkele minuten" : `${MIN} minuten`,
-  langName: { fr: "Frans", en: "Engels", "nl-BE": "Nederlands", es: "Spaans", it: "Italiaans", de: "Duits" },
+  langName: { fr: "Frans", en: "Engels", "nl-BE": "Nederlands", "nl-NL": "Nederlands", es: "Spaans", it: "Italiaans", de: "Duits" },
 
   welcome: {
     eyebrow: "Mondelinge evaluatie · ERK",
@@ -720,7 +720,7 @@ const nl: UiStrings = {
 const es: UiStrings = {
   htmlLang: "es",
   sessionLength: ADAPTIVE ? "unos minutos" : `${MIN} minutos`,
-  langName: { fr: "francés", en: "inglés", "nl-BE": "neerlandés", es: "español", it: "italiano", de: "alemán" },
+  langName: { fr: "francés", en: "inglés", "nl-BE": "neerlandés", "nl-NL": "neerlandés", es: "español", it: "italiano", de: "alemán" },
 
   welcome: {
     eyebrow: "Evaluación oral · MCER",
@@ -942,7 +942,7 @@ const es: UiStrings = {
 const it: UiStrings = {
   htmlLang: "it",
   sessionLength: ADAPTIVE ? "qualche minuto" : `${MIN} minuti`,
-  langName: { fr: "francese", en: "inglese", "nl-BE": "neerlandese", es: "spagnolo", it: "italiano", de: "tedesco" },
+  langName: { fr: "francese", en: "inglese", "nl-BE": "neerlandese", "nl-NL": "neerlandese", es: "spagnolo", it: "italiano", de: "tedesco" },
 
   welcome: {
     eyebrow: "Valutazione orale · QCER",
@@ -1165,7 +1165,7 @@ const de: UiStrings = {
   htmlLang: "de",
   /** Dative: reads after "in" / "von". */
   sessionLength: ADAPTIVE ? "wenigen Minuten" : `${MIN} Minuten`,
-  langName: { fr: "Französisch", en: "Englisch", "nl-BE": "Niederländisch", es: "Spanisch", it: "Italienisch", de: "Deutsch" },
+  langName: { fr: "Französisch", en: "Englisch", "nl-BE": "Niederländisch", "nl-NL": "Niederländisch", es: "Spanisch", it: "Italienisch", de: "Deutsch" },
 
   welcome: {
     eyebrow: "Mündliche Prüfung · GER",

@@ -14,6 +14,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   fr: "Français",
   en: "English",
   "nl-BE": "Nederlands (BE)",
+  "nl-NL": "Nederlands (NL)",
   es: "Español",
   it: "Italiano",
   de: "Deutsch",

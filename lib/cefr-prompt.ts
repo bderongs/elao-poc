@@ -209,6 +209,7 @@ export function buildEvaluationUserMessage(
   const langLabel =
     language === "fr" ? "French" :
     language === "nl-BE" ? "Dutch (Belgian)" :
+    language === "nl-NL" ? "Dutch (Netherlands)" :
     language === "es" ? "Spanish" :
     language === "it" ? "Italian" :
     language === "de" ? "German" :

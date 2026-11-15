@@ -7,6 +7,7 @@ import { SileroVad } from "@/lib/silero-vad";
 import { IntegrityTracker } from "@/lib/integrity-tracker";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
+import type { ConvLang } from "@/lib/conversation-prompts";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
@@ -47,12 +48,13 @@ const TalkingHeadAvatar = dynamic(
   { ssr: false }
 );
 
-type Lang = "fr" | "en" | "nl-BE" | "es" | "it" | "de";
+type Lang = ConvLang;
 
 const LANGUAGES: Array<{ code: Lang; label: string; meta: string }> = [
   { code: "fr", label: "Français", meta: "FR · FRANCE" },
   { code: "en", label: "English", meta: "EN · UK" },
   { code: "nl-BE", label: "Nederlands", meta: "NL · BELGIË" },
+  { code: "nl-NL", label: "Nederlands", meta: "NL · NEDERLAND" },
   { code: "es", label: "Español", meta: "ES · ESPAÑA" },
   { code: "it", label: "Italiano", meta: "IT · ITALIA" },
   { code: "de", label: "Deutsch", meta: "DE · DEUTSCHLAND" },
@@ -63,6 +65,7 @@ const SKIP_TEXT: Record<Lang, string> = {
   fr: "Je préfère passer cette question.",
   en: "I'd rather skip this question.",
   "nl-BE": "Ik sla deze vraag liever over.",
+  "nl-NL": "Ik sla deze vraag liever over.",
   es: "Prefiero saltarme esta pregunta.",
   it: "Preferisco saltare questa domanda.",
   de: "Ich überspringe diese Frage lieber.",
@@ -82,6 +85,7 @@ const CLARIFY_TEXT: Record<Lang, string> = {
   fr: "Je n'ai pas compris la question.",
   en: "I didn't understand the question.",
   "nl-BE": "Ik heb de vraag niet begrepen.",
+  "nl-NL": "Ik heb de vraag niet begrepen.",
   es: "No he entendido la pregunta.",
   it: "Non ho capito la domanda.",
   de: "Ich habe die Frage nicht verstanden.",

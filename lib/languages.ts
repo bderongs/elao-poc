@@ -3,6 +3,7 @@ const LANGUAGE_LABELS: Record<string, { label: string; flag: string }> = {
   fr: { label: "Français", flag: "🇫🇷" },
   en: { label: "English", flag: "🇬🇧" },
   "nl-BE": { label: "Nederlands (BE)", flag: "🇧🇪" },
+  "nl-NL": { label: "Nederlands (NL)", flag: "🇳🇱" },
   es: { label: "Español", flag: "🇪🇸" },
   it: { label: "Italiano", flag: "🇮🇹" },
   de: { label: "Deutsch", flag: "🇩🇪" },
