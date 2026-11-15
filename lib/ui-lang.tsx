@@ -4,33 +4,23 @@
  * The candidate's interface language (roadmap L-02/L-03), shared with every
  * candidate component through context.
  *
- * Source, in order: `?ui=<lang>` on the link (remembered in localStorage so
- * the dashboard and later visits keep it), then what was remembered, then
- * French. The API test row will become a source too (phase 2).
+ * Source, in order: `?ui=<lang>` on the link (remembered in a cookie so the
+ * dashboard, the account pages — server-rendered, see lib/ui-lang-server.ts —
+ * and later visits keep it), then the cookie, then French. The API test row
+ * will become a source too (phase 2).
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { DEFAULT_UI_LANG, UI_STRINGS, isUiLang, type UiLang, type UiStrings } from "@/lib/ui-strings";
-
-const STORAGE_KEY = "elao_ui_lang";
+import { DEFAULT_UI_LANG, UI_LANG_COOKIE, UI_STRINGS, isUiLang, type UiLang, type UiStrings } from "@/lib/ui-strings";
 
 export function readUiLang(): UiLang {
   if (typeof window === "undefined") return DEFAULT_UI_LANG;
   const fromUrl = new URLSearchParams(window.location.search).get("ui");
   if (isUiLang(fromUrl)) {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, fromUrl);
-    } catch {
-      /* storage blocked: the URL still wins for this page */
-    }
+    document.cookie = `${UI_LANG_COOKIE}=${fromUrl}; path=/; max-age=31536000; SameSite=Lax`;
     return fromUrl;
   }
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (isUiLang(stored)) return stored;
-  } catch {
-    /* storage blocked */
-  }
-  return DEFAULT_UI_LANG;
+  const stored = document.cookie.split("; ").find((c) => c.startsWith(`${UI_LANG_COOKIE}=`))?.split("=")[1];
+  return isUiLang(stored) ? stored : DEFAULT_UI_LANG;
 }
 
 /** Reads the interface language after mount (the server render is always French, so no hydration mismatch). */

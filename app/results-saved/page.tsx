@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getSupabaseAuthServer } from "@/lib/supabase-auth-server";
 import { claimSession } from "@/lib/sessions-service";
 import { CandidateTopBar } from "@/components/CandidateTopBar";
+import { getUiServer } from "@/lib/ui-lang-server";
 import styles from "@/components/candidate.module.css";
 
 /**
@@ -16,6 +17,7 @@ export default async function ResultsSavedPage({
   searchParams: Promise<{ claim?: string }>;
 }) {
   const { claim } = await searchParams;
+  const { t } = await getUiServer();
 
   if (claim) {
     const supabase = await getSupabaseAuthServer();
@@ -71,10 +73,10 @@ export default async function ResultsSavedPage({
             ✓
           </div>
           <h1 style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontSize: 28, fontWeight: 400, letterSpacing: "-0.02em" }}>
-            Votre compte est prêt
+            {t.account.savedTitle}
           </h1>
           <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
-            Votre résultat a été sauvegardé. Vous pourrez le retrouver la prochaine fois que vous vous connecterez.
+            {t.account.savedLead}
           </p>
           <Link
             href="/dashboard"
@@ -92,13 +94,13 @@ export default async function ResultsSavedPage({
               textDecoration: "none",
             }}
           >
-            Voir mes sessions
+            {t.account.seeSessions}
           </Link>
           <Link
             href="/"
             style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, textDecoration: "none" }}
           >
-            Repasser un test
+            {t.account.retake}
           </Link>
         </div>
       </div>

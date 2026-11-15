@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { authButtonStyle, authErrorMessage, authInputStyle, validateNewPassword } from "@/components/AuthForm";
+import { useUi } from "@/lib/ui-lang";
 
 /**
  * Step 1 (/login/forgot): emails a Supabase reset link that comes back
@@ -11,6 +12,7 @@ import { authButtonStyle, authErrorMessage, authInputStyle, validateNewPassword 
  * have an account.
  */
 export function ForgotPasswordForm({ next }: { next: string }) {
+  const { t } = useUi();
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export function ForgotPasswordForm({ next }: { next: string }) {
     // account exists, so it gets the same "sent" screen.
     if (error && error.code?.startsWith("over_")) {
       setStatus("error");
-      setErrorMessage(authErrorMessage(error));
+      setErrorMessage(authErrorMessage(error, t.authForm));
       return;
     }
     setStatus("sent");
@@ -36,8 +38,7 @@ export function ForgotPasswordForm({ next }: { next: string }) {
   if (status === "sent") {
     return (
       <div style={{ color: "#5A5F6E", fontSize: 14, textAlign: "center", lineHeight: 1.5 }}>
-        Si un compte existe pour <strong>{email}</strong>, un e-mail vous a été envoyé avec un lien pour choisir un
-        nouveau mot de passe.
+        {t.account.forgotSent[0]}<strong>{email}</strong>{t.account.forgotSent[1]}
       </div>
     );
   }
@@ -49,14 +50,14 @@ export function ForgotPasswordForm({ next }: { next: string }) {
         required
         autoFocus
         autoComplete="email"
-        placeholder="toi@exemple.com"
+        placeholder={t.authForm.emailPlaceholder}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         style={authInputStyle(true)}
       />
       {status === "error" && errorMessage && <div style={{ color: "#B3542E", fontSize: 13 }}>{errorMessage}</div>}
       <button type="submit" disabled={status === "sending"} style={authButtonStyle(true, status === "sending")}>
-        {status === "sending" ? "Envoi…" : "Recevoir le lien"}
+        {status === "sending" ? t.account.sending : t.account.getLink}
       </button>
     </form>
   );
@@ -64,6 +65,7 @@ export function ForgotPasswordForm({ next }: { next: string }) {
 
 /** Step 2 (/login/reset): the reset link already logged the user in — set the new password. */
 export function ResetPasswordForm({ next }: { next: string }) {
+  const { t } = useUi();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "error">("idle");
@@ -77,11 +79,11 @@ export function ResetPasswordForm({ next }: { next: string }) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    const invalid = validateNewPassword(password, confirm);
+    const invalid = validateNewPassword(password, confirm, t.authForm);
     if (invalid) return fail(invalid);
     setStatus("sending");
     const { error } = await getSupabaseBrowser().auth.updateUser({ password });
-    if (error) return fail(authErrorMessage(error));
+    if (error) return fail(authErrorMessage(error, t.authForm));
     window.location.href = next;
   };
 
@@ -92,7 +94,7 @@ export function ResetPasswordForm({ next }: { next: string }) {
         required
         autoFocus
         autoComplete="new-password"
-        placeholder="Nouveau mot de passe"
+        placeholder={t.account.newPassword}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         style={authInputStyle(true)}
@@ -101,14 +103,14 @@ export function ResetPasswordForm({ next }: { next: string }) {
         type="password"
         required
         autoComplete="new-password"
-        placeholder="Confirmer le mot de passe"
+        placeholder={t.authForm.confirmPassword}
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         style={authInputStyle(true)}
       />
       {status === "error" && errorMessage && <div style={{ color: "#B3542E", fontSize: 13 }}>{errorMessage}</div>}
       <button type="submit" disabled={status === "sending"} style={authButtonStyle(true, status === "sending")}>
-        {status === "sending" ? "Enregistrement…" : "Enregistrer le mot de passe"}
+        {status === "sending" ? t.account.saving : t.account.savePassword}
       </button>
     </form>
   );

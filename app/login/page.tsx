@@ -1,6 +1,7 @@
 import { LoginForm } from "@/components/LoginForm";
 import { AuthPageShell } from "@/components/AuthPageShell";
 import { safeNext } from "@/lib/safe-next";
+import { getUiServer } from "@/lib/ui-lang-server";
 
 export default async function LoginPage({
   searchParams,
@@ -8,15 +9,16 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; error?: string }>;
 }) {
   const { next, error } = await searchParams;
+  const { t } = await getUiServer();
 
   return (
     <AuthPageShell
-      title="Se connecter"
+      title={t.account.signInTitle}
       subtitle={
         error === "link" ? (
-          <span style={{ color: "#B3542E" }}>Ce lien a expiré ou a déjà été utilisé. Reconnectez-vous ou demandez un nouveau lien.</span>
+          <span style={{ color: "#B3542E" }}>{t.account.linkExpiredLead}</span>
         ) : (
-          "Connectez-vous ou créez un compte pour retrouver vos sessions."
+          t.account.signInLead
         )
       }
     >

@@ -2,11 +2,13 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/current-user";
 import { logout } from "@/app/login/actions";
+import { getUiServer } from "@/lib/ui-lang-server";
 import styles from "@/components/dashboard.module.css";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
   if (!user) redirect(`/login?next=${encodeURIComponent("/dashboard")}`);
+  const { t } = await getUiServer();
 
   return (
     <div className={styles.shell}>
@@ -23,7 +25,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <span className={styles.userEmail}>{user.email}</span>
           <form action={logout}>
             <button type="submit" className={styles.signOut}>
-              Se déconnecter
+              {t.dashboard.signOut}
             </button>
           </form>
         </div>
