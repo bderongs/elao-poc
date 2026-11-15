@@ -65,6 +65,7 @@ const CHARS_PER_TOKEN = 4;
 
 const MISTRAL_TEXT_PRICE_PER_M: Record<string, { in: number; out: number }> = {
   "mistral-large-latest": { in: 0.5, out: 1.5 },
+  "mistral-large-2512": { in: 0.5, out: 1.5 },
   "mistral-small-latest": { in: 0.15, out: 0.6 },
 };
 const MISTRAL_TEXT_PRICE_FALLBACK = MISTRAL_TEXT_PRICE_PER_M["mistral-large-latest"];
@@ -214,7 +215,7 @@ export function estimateEoCostUsd(providerId: string, modelLabel: string): CostE
   const evidenceChars = 150 + userCharsPerTurn * 2 + userWordsPerTurn * (12 + 15);
   const inputChars = EO_JUDGE_SYSTEM.length + evidenceChars;
   const outputChars = userWordsPerTurn * 26 + 100;
-  const judgeModel = modelLabel.match(/\+ (\S+) judge/)?.[1] ?? "mistral-large-latest";
+  const judgeModel = modelLabel.match(/\+ (\S+) judge/)?.[1] ?? "mistral-large-2512";
   const mistralUsd = mistralTextCostUsd(judgeModel, inputChars, outputChars) * AVG_SESSION.userTurns;
 
   return {

@@ -34,8 +34,18 @@ export function requireApiKey(): string {
   return key;
 }
 
+/**
+ * The large text model, pinned. "mistral-large-latest" moved to Mistral
+ * Large 4 (a reasoning model) around 2026-11-15: its replies became
+ * thinking + text blocks, and the thinking used up the token budgets
+ * (pronunciation judge, CEFR evaluation) so the text came back empty.
+ * mistral-large-2512 is the non-reasoning model every prompt and scoring
+ * rule was tuned on. Move to Large 4 only after a scoring replay.
+ */
+export const MISTRAL_LARGE_MODEL = "mistral-large-2512";
+
 export function mistralModel(override?: string): string {
-  return override ?? process.env.MISTRAL_MODEL ?? "mistral-large-latest";
+  return override ?? process.env.MISTRAL_MODEL ?? MISTRAL_LARGE_MODEL;
 }
 
 /**
@@ -43,10 +53,10 @@ export function mistralModel(override?: string): string {
  * separate from MISTRAL_MODEL so it can be tuned/tested (e.g. mistral-small-latest
  * for latency) without also changing the end-of-session CEFR evaluation, which
  * reads mistralModel() directly and stays on the default/large model.
- * Falls back to MISTRAL_MODEL, then the same "mistral-large-latest" default.
+ * Falls back to MISTRAL_MODEL, then the same pinned large model.
  */
 export function mistralChatModel(): string {
-  return process.env.MISTRAL_CHAT_MODEL ?? process.env.MISTRAL_MODEL ?? "mistral-large-latest";
+  return process.env.MISTRAL_CHAT_MODEL ?? process.env.MISTRAL_MODEL ?? MISTRAL_LARGE_MODEL;
 }
 
 /** Model that translates the end-of-session feedback into French (lib/analysis-translation.ts) — small by default, it sits on the candidate's wait for results. */
@@ -58,7 +68,7 @@ export function mistralPronunciationModel(): string {
   return (
     process.env.MISTRAL_PRONUNCIATION_MODEL ??
     process.env.MISTRAL_MODEL ??
-    "mistral-large-latest"
+    MISTRAL_LARGE_MODEL
   );
 }
 
@@ -199,6 +209,22 @@ async function postWithRetry(body: Record<string, unknown>, context: string): Pr
   throw lastError ?? new Error(`Mistral API: ${context} failed`);
 }
 
+/**
+ * The answer text of a message (or stream delta). Reasoning models
+ * (mistral-large-latest since mid-November 2026) send a list of blocks — a
+ * "thinking" block, then "text" blocks — instead of a string: keep the text
+ * blocks, drop the thinking. null when there is no text at all.
+ */
+export function contentText(content: unknown): string | null {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter((b): b is { type: "text"; text: string } => !!b && typeof b === "object" && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string")
+    .map((b) => b.text)
+    .join("");
+  return text || (content.length ? "" : null);
+}
+
 export async function mistralComplete(params: {
   model?: string;
   system?: string;
@@ -221,10 +247,10 @@ export async function mistralComplete(params: {
     );
 
     const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: unknown } }>;
     };
-    const content = data.choices?.[0]?.message?.content;
-    if (typeof content !== "string") throw new Error("Mistral: empty response");
+    const content = contentText(data.choices?.[0]?.message?.content);
+    if (content === null) throw new Error("Mistral: empty response");
     return content;
   });
 }
@@ -353,10 +379,10 @@ export async function* mistralStreamText(params: {
         if (payload === "[DONE]") return;
         try {
           const parsed = JSON.parse(payload) as {
-            choices?: Array<{ delta?: { content?: string } }>;
+            choices?: Array<{ delta?: { content?: unknown } }>;
           };
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (typeof delta === "string" && delta) yield delta;
+          const delta = contentText(parsed.choices?.[0]?.delta?.content);
+          if (delta) yield delta;
         } catch {
           // skip malformed SSE chunk
         }
