@@ -1,3 +1,4 @@
+import type { VerbatimEngine } from "@/lib/pronunciation/verbatim";
 export interface WordScore {
   word: string;
   /** AccuracyScore / 100  →  0–1 */
@@ -43,6 +44,8 @@ export interface PronunciationAssessParams {
    *  threaded through so this call's logs (labeled EO{n}, see lib/turn-labels.ts)
    *  are correlatable with the rest of that turn's timeline. */
   turnLogId?: string;
+  /** Second-hearing engine (lib/pronunciation/verbatim.ts) — replays only; live uses LIVE_VERBATIM_ENGINE. */
+  verbatimEngine?: VerbatimEngine;
 }
 
 export interface PronunciationProvider {
