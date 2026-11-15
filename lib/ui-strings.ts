@@ -66,6 +66,8 @@ const fr = {
     ],
     start: "Commencer",
     quietPlace: "Prévoyez un endroit calme et un micro.",
+    listen: "Écouter cette page",
+    stopListening: "Arrêter la lecture",
   },
 
   auth: {
@@ -290,6 +292,8 @@ const en: UiStrings = {
     ],
     start: "Start",
     quietPlace: "You'll need a quiet place and a microphone.",
+    listen: "Listen to this page",
+    stopListening: "Stop",
   },
 
   auth: {
@@ -512,6 +516,8 @@ const nl: UiStrings = {
     ],
     start: "Beginnen",
     quietPlace: "Zorg voor een rustige plek en een microfoon.",
+    listen: "Deze pagina beluisteren",
+    stopListening: "Stoppen",
   },
 
   auth: {
@@ -734,6 +740,8 @@ const es: UiStrings = {
     ],
     start: "Empezar",
     quietPlace: "Busque un lugar tranquilo y tenga un micrófono.",
+    listen: "Escuchar esta página",
+    stopListening: "Detener",
   },
 
   auth: {
@@ -956,6 +964,8 @@ const it: UiStrings = {
     ],
     start: "Inizia",
     quietPlace: "Serve un posto tranquillo e un microfono.",
+    listen: "Ascolta questa pagina",
+    stopListening: "Interrompi",
   },
 
   auth: {
@@ -1179,6 +1189,8 @@ const de: UiStrings = {
     ],
     start: "Starten",
     quietPlace: "Sie brauchen einen ruhigen Ort und ein Mikrofon.",
+    listen: "Diese Seite anhören",
+    stopListening: "Anhalten",
   },
 
   auth: {

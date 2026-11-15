@@ -8,6 +8,7 @@ import { IntegrityTracker } from "@/lib/integrity-tracker";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
 import type { ConvLang } from "@/lib/conversation-prompts";
+import { WelcomeListenButton } from "@/components/WelcomeListenButton";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
@@ -2262,6 +2263,7 @@ export default function Home() {
               <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.55, maxWidth: 540 }}>
                 {t.welcome.lead(t.sessionLength, AVATAR_NAME)}
               </p>
+              <WelcomeListenButton />
             </div>
             <div className={styles.welcomeSteps}>
               {t.welcome.steps(AVATAR_NAME).map(([title, desc], i) => (
