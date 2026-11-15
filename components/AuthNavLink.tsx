@@ -31,12 +31,22 @@ export function AuthNavLink({ light = false }: { light?: boolean }) {
   return (
     <a
       href={loggedIn ? "/dashboard" : "/login"}
-      style={{
-        fontSize: 14,
-        color: light ? "#6B6F7D" : "#94a3b8",
-        fontFamily: light ? "'DM Sans',system-ui,sans-serif" : undefined,
-        textDecoration: "none",
-      }}
+      // A real button (navy, like the main call to action) so it reads apart from the language menu next to it.
+      style={
+        light
+          ? {
+              padding: "8px 16px",
+              borderRadius: 8,
+              background: "#141D33",
+              color: "#FFFFFF",
+              fontFamily: "'Outfit',sans-serif",
+              fontSize: 14,
+              fontWeight: 500,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }
+          : { fontSize: 14, color: "#94a3b8", textDecoration: "none" }
+      }
     >
       {loggedIn ? t.nav.mySessions : t.nav.signIn}
     </a>

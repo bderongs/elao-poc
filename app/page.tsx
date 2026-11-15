@@ -2397,6 +2397,8 @@ export default function Home() {
           <TopBar
             right={
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#6B6F7D" }}>
+                {/* Divider: the interface-language menu sits just left of this one. */}
+                <span aria-hidden="true" style={{ width: 1, height: 18, background: "#DDD9D0", marginRight: 8 }} />
                 {/* Lets a misclicked language be fixed without going back to the picker. */}
                 <select
                   aria-label={t.instructions.changeLanguageAria}
@@ -2419,7 +2421,7 @@ export default function Home() {
                     </option>
                   ))}
                 </select>
-                {t.instructions.topBarSuffix}
+                <span className={styles.hideMobile}>{t.instructions.topBarSuffix}</span>
               </span>
             }
           />

@@ -23,9 +23,9 @@ export function CandidateTopBar({ right, langSwitcher = true }: { right?: React.
     <div className={styles.topbar}>
       <Logo />
       {langSwitcher ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {right}
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <UiLangSwitcher />
+          {right}
         </div>
       ) : (
         right
