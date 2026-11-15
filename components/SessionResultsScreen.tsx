@@ -117,7 +117,7 @@ export function SessionResultsScreen({
 
         {/* Held until the cut-offs are in, so the level never flips under the candidate's eyes. */}
         {cefrResult && levelFloors !== undefined && (
-          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={t.cefr} theme="light" levelFloors={levelFloors} feedbackLanguage={lang === "fr" ? "fr" : "en"} />
+          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={t.cefr} theme="light" levelFloors={levelFloors} feedbackLanguage={lang} />
         )}
 
         {evalFailed && !cefrResult && (

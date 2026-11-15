@@ -13,9 +13,9 @@ export const runtime = "nodejs";
  */
 export async function POST(req: Request) {
   try {
-    const { language } = (await req.json()) as { language?: string };
+    const { language, uiLanguage } = (await req.json()) as { language?: string; uiLanguage?: string };
     const user = await getCurrentUser();
-    return Response.json(await startLiveSession(language ?? "en", user?.id ?? null));
+    return Response.json(await startLiveSession(language ?? "en", user?.id ?? null, uiLanguage ?? null));
   } catch (e) {
     console.error("[sessions/live] start failed:", e);
     return Response.json({ error: String(e) }, { status: 500 });

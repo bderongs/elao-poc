@@ -1,6 +1,8 @@
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import type { AnalysisTranslation, CefrResult, PronunciationAvg } from "@/lib/types";
 import { scoreToLevel, computeCompositeCefrScore, withLevelFloors, type LevelFloors } from "@/lib/cefr-score";
+import { analysisFor } from "@/lib/analysis-pick";
+import type { UiLang } from "@/lib/ui-strings";
 import { adminColors } from "@/lib/admin-theme";
 
 export { scoreToLevel };
@@ -159,8 +161,8 @@ export function CefrPanel({
   theme?: "dark" | "light";
   /** The admin's level cut-offs (getLevelFloors) — omitted = the default 5-point bands. */
   levelFloors?: LevelFloors | null;
-  /** Which version of the written feedback to show: "fr" (falls back to the English when there is no translation), "en", or "both" (French, the English original behind a toggle). */
-  feedbackLanguage?: "en" | "fr" | "both";
+  /** Which version of the written feedback to show: an interface language (falls back to the English when that translation is missing, lib/analysis-pick.ts), or "both" (French, the English original behind a toggle — admin). */
+  feedbackLanguage?: UiLang | "both";
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   const light = theme === "light";
@@ -186,7 +188,7 @@ export function CefrPanel({
   const dividerColor = light ? "1px solid #EFEBE2" : "1px solid rgba(255,255,255,0.1)";
 
   // The evaluator writes the feedback in English; analysis_fr is its French translation (lib/analysis-translation.ts).
-  const primaryFeedback: AnalysisTranslation = feedbackLanguage !== "en" && result.analysis_fr ? result.analysis_fr : result;
+  const primaryFeedback: AnalysisTranslation = analysisFor(result, feedbackLanguage === "both" ? "fr" : feedbackLanguage);
   const renderFeedback = (f: AnalysisTranslation) => (
     <>
       {/* Strengths */}

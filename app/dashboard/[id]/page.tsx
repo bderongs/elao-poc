@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/current-user";
 import { getSessionDetail } from "@/lib/sessions-service";
 import { getLevelFloors } from "@/lib/scoring-settings-service";
-import { ensureFrenchAnalysis } from "@/lib/analysis-translation";
+import { ensureAnalysis } from "@/lib/analysis-translation";
 import { CefrPanel, UserWords, UtteranceBadges } from "@/components/ScoreDisplay";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { AudioPlayer } from "@/components/AudioPlayer";
@@ -36,9 +36,9 @@ export default async function DashboardSessionDetailPage({
   const { lang, t } = await getUiServer();
   const evalRow = session.evaluation_json ? null : evaluations.find((e) => !e.error && e.result_json) ?? null;
   const storedResult = session.evaluation_json ?? evalRow?.result_json ?? null;
-  // Evaluations from before the French feedback existed are translated (and saved) on first view.
+  // Feedback missing in this interface language (older evaluations, or the candidate switched language) is translated and saved on first view.
   const cefrResult = storedResult
-    ? await ensureFrenchAnalysis({ sessionId: session.id, result: storedResult, evaluationRowId: evalRow?.id })
+    ? await ensureAnalysis({ sessionId: session.id, result: storedResult, evaluationRowId: evalRow?.id, lang })
     : null;
 
   return (
@@ -65,7 +65,7 @@ export default async function DashboardSessionDetailPage({
 
       {cefrResult ? (
         <div className={adminStyles.scoreCardWrap}>
-          <CefrPanel result={cefrResult} pronunciationAvg={session.pronunciation_scores} labels={t.cefr} theme="light" levelFloors={levelFloors} feedbackLanguage={lang === "fr" ? "fr" : "en"} />
+          <CefrPanel result={cefrResult} pronunciationAvg={session.pronunciation_scores} labels={t.cefr} theme="light" levelFloors={levelFloors} feedbackLanguage={lang} />
         </div>
       ) : (
         <div className={adminStyles.emptyState}>{t.dashboard.noEvaluation}</div>

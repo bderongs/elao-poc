@@ -15,6 +15,7 @@ import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEval
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { LadderRecord } from "@/lib/session-length";
 import { sanitizeIntegrity, type IntegrityRecord } from "@/lib/integrity";
+import { isUiLang } from "@/lib/ui-strings";
 import type { SimulationRecord } from "@/lib/simulation-record";
 
 // Single source of truth for reading/writing sessions — used by both the
@@ -169,6 +170,10 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
   if (sessionError || !session) return null;
   if (turnsError) throw new Error(turnsError.message);
   if (evalError) throw new Error(evalError.message);
+
+  // Read on its own so a missing column (migration 0018 not run) can't break the page.
+  const { data: uiRow } = await supabase.from("sessions").select("ui_language").eq("id", id).maybeSingle();
+  (session as { ui_language?: string | null }).ui_language = (uiRow?.ui_language as string | null | undefined) ?? null;
 
   const turnIds = (turns ?? []).map((t) => t.id);
   let turnEvaluations: TurnEvaluationRow[] = [];
@@ -412,6 +417,7 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   const sessionId = sessionRow.id as string;
   if (ladder) await saveLadder(sessionId, ladder);
   if (integrity) await saveIntegrity(sessionId, integrity);
+  await saveUiLanguage(sessionId, form.get("uiLanguage") as string | null);
 
   if (userId) await upsertProfilePreference(userId, language, cefrLevel);
 
@@ -470,6 +476,13 @@ async function saveLadder(sessionId: string, ladder: LadderRecord): Promise<void
   if (error) console.warn("[sessions] ladder_json not saved:", error.message);
 }
 
+/** The interface language the candidate saw (roadmap L-03) — best-effort like saveLadder (migration 0018). */
+async function saveUiLanguage(sessionId: string, uiLanguage: string | null): Promise<void> {
+  if (!isUiLang(uiLanguage)) return;
+  const { error } = await getSupabaseServer().from("sessions").update({ ui_language: uiLanguage }).eq("id", sessionId);
+  if (error) console.warn("[sessions] ui_language not saved (run migration 0018?):", error.message);
+}
+
 /** Response timing + window changes (lib/integrity.ts) — best-effort like saveLadder (migration 0016). */
 async function saveIntegrity(sessionId: string, integrity: IntegrityRecord): Promise<void> {
   const { error } = await getSupabaseServer().from("sessions").update({ integrity_json: integrity }).eq("id", sessionId);
@@ -526,13 +539,14 @@ export async function saveSimulationSession(record: SimulationRecord): Promise<{
  * createSessionFromForm. Both are public (a guest has no account) and only
  * ever touch 'in_progress' conversation rows the caller may own.
  */
-export async function startLiveSession(language: string, userId: string | null): Promise<{ id: string }> {
+export async function startLiveSession(language: string, userId: string | null, uiLanguage: string | null = null): Promise<{ id: string }> {
   const { data, error } = await getSupabaseServer()
     .from("sessions")
     .insert({ language, duration_seconds: 0, status: "in_progress", transcript: [], user_id: userId })
     .select("id")
     .single();
   if (error || !data) throw new Error(error?.message ?? "live session insert failed");
+  await saveUiLanguage(data.id as string, uiLanguage);
   return { id: data.id as string };
 }
 

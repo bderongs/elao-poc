@@ -34,6 +34,8 @@ export interface CefrResult {
   boundary_checks?: BoundaryChecks;
   /** The feedback above in French (lib/analysis-translation.ts). Absent before 2026-11-04 until backfilled, or when the translation failed. */
   analysis_fr?: AnalysisTranslation;
+  /** The feedback in the other interface languages (nl, es, it, de — roadmap L-04): written at evaluation time for the session's interface language, or on first view in another one. English is the original, French is analysis_fr. */
+  analysis_i18n?: Partial<Record<"nl" | "es" | "it" | "de", AnalysisTranslation>>;
 }
 
 /** The evaluator's written feedback, translated — same items, same order as the original. */
@@ -96,6 +98,8 @@ export interface SessionSummary {
   latest_eval_json?: CefrResult | null;
   /** Response timing + window changes (lib/integrity.ts) — listSessions reads it on its own, best-effort; the detail row always has it. */
   integrity_json?: IntegrityRecord | null;
+  /** Interface language the candidate saw (lib/ui-strings.ts, migration 0018) — null before it, or for non-live sessions. */
+  ui_language?: string | null;
   /** Owning account, set by claimSession(); null until claimed (or for admin-created upload/speechace sessions). */
   user_id: string | null;
   /** 'in_progress' rows are live sessions saved incrementally — see supabase/migrations/0010_session_status.sql. */

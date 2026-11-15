@@ -188,6 +188,8 @@ export default function Home() {
   /** For callbacks that may outlive a render (VAD, stream handlers). */
   const tRef = useRef(t);
   tRef.current = t;
+  const uiLangRef = useRef(uiLang);
+  uiLangRef.current = uiLang;
   const [sessionStarted, setSessionStarted] = useState(false);
   /** Pre-session onboarding: "welcome" (what the test is) -> "auth" (sign in / sign up / continue as guest)
    *  -> "language" (today's picker) -> "instructions" (mic check, doc/new_design screen 2). A returning
@@ -446,7 +448,7 @@ export default function Home() {
           liveSessionStartRef.current = fetch("/api/sessions/live", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ language }),
+            body: JSON.stringify({ language, uiLanguage: uiLangRef.current }),
           })
             .then((r) => (r.ok ? r.json() : null))
             .then((j: { id?: string } | null) => {
@@ -684,6 +686,7 @@ export default function Home() {
     const form = new FormData();
     if (liveSessionIdRef.current) form.append("sessionId", liveSessionIdRef.current);
     form.append("language", language);
+    form.append("uiLanguage", uiLangRef.current);
     form.append("durationSeconds", String(elapsed));
     // Level, score and dimensions are read server-side from the (verified) evaluation itself.
     form.append("evaluation", JSON.stringify(result ?? null));
@@ -2100,6 +2103,7 @@ export default function Home() {
           pronunciationContext: finalPronunciationAvg,
           ladderSteps: ladderStepsRef.current,
           exchanges: exchangesFromHistory(historyRef.current),
+          uiLanguage: uiLangRef.current,
         }),
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);

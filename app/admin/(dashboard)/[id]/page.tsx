@@ -169,6 +169,7 @@ export default async function AdminSessionDetailPage({
       </div>
       <div className={styles.detailMeta}>
         Duration: {session.duration_seconds ? `${Math.round(session.duration_seconds / 60)} min` : "—"}
+        {session.ui_language && <> · Interface: {session.ui_language.toUpperCase()}</>}
       </div>
 
       {session.status === "in_progress" && (
