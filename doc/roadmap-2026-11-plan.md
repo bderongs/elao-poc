@@ -49,7 +49,7 @@ Today the candidate UI is French only, hard-coded in `app/page.tsx` (2 800 lines
 Follow [`api-plan.md`](api-plan.md), with these additions from the roadmap:
 
 - [ ] **API-02b** Add to the spec (`doc/api/openapi.yaml`) and to the questions for the integrator: `interface_language` and `test_profile` (client or domain, phase 3) in `POST /tests`; `report_url` and the detailed scores in the result. Republish `/api-docs`.
-- [ ] **API-04b** Migration: `ui_language`, `test_profile` on `sessions` (fold into `0019_api_tests.sql`).
+- [ ] **API-04b** Migration: `test_profile` on `sessions` (fold into `0019_api_tests.sql`; `ui_language` is already added by 0018).
 - [ ] **API-06b** The result snapshot carries `report_url` (phase 5) and the feedback in the interface language (L-04).
 - [ ] **Open question for Michel**: where the "receive the call" screen lives — ELAO or ELAO Speaking. The current spec assumes ELAO Speaking (the candidate opens our `test_url`); if ELAO wants its own screen, we only need the API and a link straight into the test.
 
