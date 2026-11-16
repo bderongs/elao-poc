@@ -1,5 +1,5 @@
 /**
- * Player audio pour les chunks PCM 16-bit 24kHz reçus de Deepgram Aura via SSE.
+ * Player audio pour les chunks PCM 16-bit 24kHz reçus du TTS via SSE.
  * Gère une queue : on enchaîne les chunks au fur et à mesure qu'ils arrivent.
  *
  * Session recording: every TTS chunk is routed to both the speakers
@@ -84,7 +84,7 @@ export class StreamingAudioPlayer {
    * Route a microphone MediaStream into the recording destination.
    * The mic audio goes to recordingDest only — NOT to ctx.destination —
    * so it is captured in the session recording without feeding back to speakers.
-   * Call once after Deepgram starts (which provides the mic stream).
+   * Call once the live recognizer has opened the mic stream.
    */
   addMicStream(micStream: MediaStream) {
     const ctx = this.ensureContext();

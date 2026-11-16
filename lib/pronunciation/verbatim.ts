@@ -4,12 +4,15 @@
  * as possible to what was acoustically said, so a mispronounced word shows
  * up as a different word. Used by azure-ensemble (live) and azure-intended.
  *
- * Roadmap phase 4 (A-01): Deepgram goes away. Three engines are wired, picked
- * by PRONUNCIATION_VERBATIM_ENGINE (default below) so the replay can compare
- * them on stored audio before the live switch (A-02):
- *   - "deepgram"          — nova-3, per-word confidence (today's live engine).
- *   - "voxtral-transcribe" — Mistral's transcription endpoint. Fast and cheap,
- *     but a cleaned-up transcript and no confidence.
+ * Roadmap phase 4: Deepgram goes away. Three engines are wired, picked by
+ * PRONUNCIATION_VERBATIM_ENGINE (default below):
+ *   - "voxtral-transcribe" — Mistral's transcription endpoint. LIVE since
+ *     2026-11-16: the A-02 replay on stored audio (66 turns, 6 languages)
+ *     scored within the judge's own run-to-run noise of Deepgram, so the
+ *     level floors were left alone (doc/roadmap-2026-11-plan.md, A-02).
+ *     A cleaned-up transcript and no per-word confidence.
+ *   - "deepgram"          — nova-3, per-word confidence. Live until
+ *     2026-11-16; kept for rollback only (needs DEEPGRAM_API_KEY).
  *   - "voxtral-chat"      — Voxtral (audio chat model) told to write exactly
  *     what it hears, errors and non-words included. No confidence either.
  * Engines without confidence leave it out; the judge prompts say what to do then.
@@ -24,10 +27,10 @@ export type VerbatimEngine = (typeof VERBATIM_ENGINES)[number];
 
 const isVerbatimEngine = (v: unknown): v is VerbatimEngine => (VERBATIM_ENGINES as readonly unknown[]).includes(v);
 
-/** The live engine. Stays on Deepgram until the A-02 replay says otherwise. */
+/** The live engine: Voxtral transcription unless the env var says otherwise (rollback). */
 export const LIVE_VERBATIM_ENGINE: VerbatimEngine = isVerbatimEngine(process.env.PRONUNCIATION_VERBATIM_ENGINE)
   ? process.env.PRONUNCIATION_VERBATIM_ENGINE
-  : "deepgram";
+  : "voxtral-transcribe";
 
 export interface VerbatimEvidence {
   engine: VerbatimEngine;
@@ -43,6 +46,7 @@ function baseLang(langCode: string): string {
 
 const LANG_NAME: Record<string, string> = { fr: "French", en: "English", nl: "Dutch", es: "Spanish", it: "Italian", de: "German" };
 
+/** Rollback only (PRONUNCIATION_VERBATIM_ENGINE=deepgram) and scripts/asr-disagreement.ts. */
 export async function deepgramVerbatim(audio: ArrayBuffer, contentType: string, langCode: string): Promise<VerbatimEvidence | null> {
   const key = process.env.DEEPGRAM_API_KEY;
   if (!key) return null;
@@ -127,9 +131,9 @@ async function voxtralChatVerbatim(audio: ArrayBuffer, contentType: string, lang
 
 /** The second hearing with the live engine, or the one asked for (replays). */
 export function verbatimHearing(audio: ArrayBuffer, contentType: string, langCode: string, engine: VerbatimEngine = LIVE_VERBATIM_ENGINE): Promise<VerbatimEvidence | null> {
-  if (engine === "voxtral-transcribe") return voxtralTranscribeVerbatim(audio, contentType, langCode);
   if (engine === "voxtral-chat") return voxtralChatVerbatim(audio, contentType, langCode);
-  return deepgramVerbatim(audio, contentType, langCode);
+  if (engine === "deepgram") return deepgramVerbatim(audio, contentType, langCode);
+  return voxtralTranscribeVerbatim(audio, contentType, langCode);
 }
 
 /** The confidence line of the judge's evidence, or the note that this engine gives none. */

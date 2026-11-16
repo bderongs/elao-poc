@@ -5,7 +5,7 @@
  * this route and the admin pronunciation-lab replay path share one
  * implementation. Provider is picked per-language (see
  * lib/pronunciation-rollup.ts's LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG).
- * AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, MISTRAL_API_KEY never leave the server.
+ * AZURE_SPEECH_KEY and MISTRAL_API_KEY never leave the server.
  */
 
 import { getProvider } from "@/lib/pronunciation/registry";

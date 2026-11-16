@@ -1392,7 +1392,7 @@ export default function Home() {
     // inside the click handler before any await, otherwise Chrome's autoplay
     // policy will block the AudioContext when the first TTS chunk arrives.
     // The MediaStreamDestinationNode (for session recording) is also created
-    // here so it's ready when we connect the mic stream after Deepgram starts.
+    // here so it's ready when we connect the mic stream once the live recognizer opens the mic.
     playerRef.current = new StreamingAudioPlayer((amp) => {
       const wasSpeaking = isSpeakingRef.current;
       isSpeakingRef.current = amp > 0;

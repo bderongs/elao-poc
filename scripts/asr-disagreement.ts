@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 for (const f of [".env", ".env.local"]) if (existsSync(f)) process.loadEnvFile(f);
 
 import { getSupabaseServer } from "../lib/supabase-server";
-import { deepgramVerbatim } from "../lib/pronunciation/providers/azure-ensemble";
+import { deepgramVerbatim } from "../lib/pronunciation/verbatim";
 import { recordingPath } from "../lib/recordings";
 
 const args = process.argv.slice(2);

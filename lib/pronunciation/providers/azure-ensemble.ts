@@ -7,10 +7,11 @@
  * the same recognition stack. This provider replaces the single-engine score
  * with TRIANGULATION:
  *
- *   1. Deepgram nova-3 (prerecorded REST) — an independent engine that
- *      transcribes closer to what was acoustically said, with per-word
- *      confidence. A mispronounced word shows up as a DIFFERENT word or a
- *      low-confidence word here.
+ *   1. A second, independent hearing (lib/pronunciation/verbatim.ts —
+ *      Voxtral transcription since 2026-11-16, Deepgram nova-3 before) that
+ *      transcribes closer to what was acoustically said. A mispronounced
+ *      word shows up as a DIFFERENT word here (or, with Deepgram, a
+ *      low-confidence one).
  *   2. Azure free-speech assessment — kept as a second, acoustic signal:
  *      per-word accuracy + phoneme scores + error flags.
  *   3. Mistral as judge — receives the live transcript (what the UI shows),
@@ -19,24 +20,23 @@
  *      → good; engines disagree on a word ("think" vs "sink") → work out the
  *      intended word from context and rate the substitution.
  *
- * Fallbacks: if the judge or Deepgram fail, the Azure acoustic result is
+ * Fallbacks: if the judge or the second hearing fail, the Azure acoustic result is
  * returned (worst case = previous behaviour, never worse).
  *
- * AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, MISTRAL_API_KEY never leave the server.
+ * AZURE_SPEECH_KEY and MISTRAL_API_KEY never leave the server.
  */
 
 import { mistralComplete, mistralPronunciationModel } from "@/lib/mistral";
 import { discreteWordConfidence, wordAccuracy } from "@/lib/pronunciation-scoring";
 import { applyPronunciationForgiveness } from "@/lib/recognition-forgiveness";
 import type { PronunciationProvider, PronunciationAssessParams } from "@/lib/pronunciation/types";
-import { confidenceLine, deepgramVerbatim, verbatimEngineLabel, verbatimHearing, type VerbatimEvidence } from "@/lib/pronunciation/verbatim";
+import { confidenceLine, verbatimEngineLabel, verbatimHearing, type VerbatimEvidence } from "@/lib/pronunciation/verbatim";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 
 // ─── Evidence collectors ──────────────────────────────────────────────────────
 
-/** The second, independent hearing — lib/pronunciation/verbatim.ts (Deepgram, or Voxtral after A-01/A-02). */
+/** The second, independent hearing — lib/pronunciation/verbatim.ts. */
 export type DgEvidence = VerbatimEvidence;
-export { deepgramVerbatim };
 
 export interface AzWord {
   word: string;

@@ -138,7 +138,7 @@ export function getSystemConfig(): CapabilityConfig[] {
       capability: "EO",
       capabilityLabel: "Pronunciation assessment (EO)",
       description: "Scores each answer's pronunciation from its audio; the session average feeds the final score.",
-      // azure-ensemble (Azure + Deepgram, judged by Mistral) for every
+      // azure-ensemble (Azure + Voxtral second hearing, judged by Mistral) for every
       // language as of 2026-09-09 — see LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG
       // in lib/pronunciation-rollup.ts for why Voxtral was pulled back to an
       // on-demand comparison provider. Kept as a perLanguage table (not

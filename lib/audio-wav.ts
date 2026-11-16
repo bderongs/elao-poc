@@ -10,7 +10,7 @@
  * Conditioning steps (all cheap, all offline):
  *   1. High-pass filter at 70 Hz — removes desk/handling rumble and HVAC hum
  *      that pollute the engines' low bands.
- *   2. Resample to 16 kHz mono (what both Deepgram and Azure expect).
+ *   2. Resample to 16 kHz mono (what Azure and the second hearing expect).
  *   3. Trim leading/trailing silence — the clip starts while the avatar is
  *      still asking its question (echo-cancelled to near-silence on the mic
  *      track); cutting it gives the engines a clean utterance with no dead

@@ -6,7 +6,7 @@
  *     produced by StreamingAudioPlayer.getRecordingStream(). This is the
  *     normal path: both sides of the conversation are captured.
  *   new SessionRecorder() — opens its own getUserMedia as a fallback
- *     (HeyGen mode, or if Deepgram fails to start). Mic-only.
+ *     (HeyGen mode, or if the live recognizer fails to start). Mic-only.
  *
  * Quality: Opus at 128 kbps (AAC in MP4 on Safari — see pickRecorderMimeType). No DSP constraints on the combined stream
  * (echo cancellation / AGC are applied upstream by the mic's getUserMedia).
@@ -41,7 +41,7 @@ export class SessionRecorder {
       if (!this.stream) {
         // Fallback: open a plain mic-only stream.
         // Use audio:true without extra constraints to avoid conflicts with
-        // Deepgram's concurrent getUserMedia in the same browser context.
+        // the live recognizer's concurrent getUserMedia in the same browser context.
         this.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       }
 
@@ -68,7 +68,7 @@ export class SessionRecorder {
   stop(): Promise<Blob | null> {
     return new Promise((resolve) => {
       if (!this.mediaRecorder || this.mediaRecorder.state === "inactive") {
-        // Only stop tracks we own (not tracks managed by AudioContext or Deepgram).
+        // Only stop tracks we own (not tracks managed by AudioContext or the live recognizer).
         if (!this.externalStream) {
           this.stream?.getTracks().forEach((t) => t.stop());
         }

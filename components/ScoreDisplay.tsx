@@ -373,10 +373,10 @@ export function UtteranceBadges({ p, showForgiven = false }: { p: PronunciationR
       <span
         title={
           p.source === "azure"
-            ? "Scored by Azure + Deepgram, judged by Mistral"
+            ? "Scored by Azure + a second hearing (Voxtral; Deepgram before 2026-11-16), judged by Mistral"
             : p.source === "voxtral"
             ? "Scored by Voxtral (Mistral direct-audio judge)"
-            : "Scored by Deepgram confidence — Azure assessment pending"
+            : "Scored by Deepgram confidence (historical) — Azure assessment pending"
         }
         style={{
           background: p.source === "azure" ? "#60a5fa" : p.source === "voxtral" ? "#c084fc" : "#475569",

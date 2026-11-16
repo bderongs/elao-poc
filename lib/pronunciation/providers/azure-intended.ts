@@ -9,8 +9,8 @@
  * error is masked. Here the reference is the INTENDED sentence instead, so a
  * mispronounced word is graded against the word the speaker was aiming for:
  *
- *   1. Three hearings of the audio: the live transcript, Deepgram nova-3
- *      (with per-word confidence) and Azure's own free-speech recognizer.
+ *   1. Three hearings of the audio: the live transcript, the second hearing
+ *      (lib/pronunciation/verbatim.ts) and Azure's own free-speech recognizer.
  *   2. Mistral reconstructs the intended sentence from them plus the
  *      examiner's question. It may ONLY undo sound-alike substitutions —
  *      never fix grammar or word choice, or Azure would flag grammar errors
