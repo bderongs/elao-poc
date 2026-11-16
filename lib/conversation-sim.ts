@@ -426,7 +426,7 @@ export async function* runConversationSimulation(
         model: provider.modelLabel,
         system: CEFR_SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildEvaluationUserMessage(language, userTurns, proxy) }],
-        maxTokens: 1500,
+        maxTokens: 1800,
         json: true,
         context: `${runId}:${tag}`,
       });

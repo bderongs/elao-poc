@@ -22,6 +22,7 @@ interface SttContext {
   wpm: number;
   count: number;
   shortTurns?: number;
+  weakWords?: string[];
 }
 
 interface EvalRequest {
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
           content: buildEvaluationUserMessage(language, userTurns, pronunciationContext ?? undefined),
         },
       ],
-      maxTokens: 1500,
+      maxTokens: 1800,
       json: true,
       context: "cefr-eval",
     });

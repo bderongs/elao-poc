@@ -20,7 +20,7 @@ import { mistralComplete, mistralTranslationModel } from "@/lib/mistral";
 import { logServerEvent } from "@/lib/server-log";
 import { getSupabaseServer } from "@/lib/supabase-server";
 import { hasAnalysisIn } from "@/lib/analysis-pick";
-import type { AnalysisTranslation, CefrResult } from "@/lib/types";
+import { AXIS_FEEDBACK_KEYS, type AnalysisTranslation, type AxisFeedback, type CefrResult } from "@/lib/types";
 import type { UiLang } from "@/lib/ui-strings";
 
 type TargetLang = Exclude<UiLang, "en">;
@@ -38,8 +38,8 @@ export function analysisTranslationSystemPrompt(lang: TargetLang): string {
   const { name, thirdPerson } = TARGET[lang];
   return `You translate feedback on a spoken language test into ${name}, for the candidate and their training organisation.
 
-Input: a JSON object with "summary" (string), "strengths", "areas_for_improvement" and "notable_errors" (arrays of strings), written in English.
-Output: the same JSON object, same keys, same number of items in each array, in the same order, every text translated into natural, professional ${name}. Address nobody directly: keep the third person as the original does. "The candidate" becomes ${thirdPerson} (use the feminine form only if the original says "she"); never write two forms side by side.
+Input: a JSON object with "summary" (string), "strengths", "areas_for_improvement" and "notable_errors" (arrays of strings), and sometimes "axis_feedback" (an object of four strings), written in English.
+Output: the same JSON object, same keys (axis_feedback keeps its four keys untranslated), same number of items in each array, in the same order, every text translated into natural, professional ${name}. Address nobody directly: keep the third person as the original does. "The candidate" becomes ${thirdPerson} (use the feminine form only if the original says "she"); never write two forms side by side.
 
 Tokens like ⟦1⟧, ⟦2⟧ stand for the candidate's own words, kept aside: copy every token exactly once, unchanged, where it belongs in the sentence, and add nothing next to it — no translation, no explanation. Keep CEFR levels (A1, B2+…) and numbers as they are.
 
@@ -91,6 +91,9 @@ export async function translateAnalysis(result: CefrResult, lang: TargetLang, co
     strengths: (result.strengths ?? []).map(protect),
     areas_for_improvement: (result.areas_for_improvement ?? []).map(protect),
     notable_errors: (result.notable_errors ?? []).map(protect),
+    ...(result.axis_feedback
+      ? { axis_feedback: Object.fromEntries(AXIS_FEEDBACK_KEYS.map((k) => [k, protect(result.axis_feedback![k] ?? "")])) as unknown as AxisFeedback }
+      : {}),
   };
   if (!source.summary && !source.strengths.length && !source.areas_for_improvement.length && !source.notable_errors.length) return null;
   // One retry: a list split or merged now and then (seen on Spanish), and a second call usually comes back whole.
@@ -100,7 +103,7 @@ export async function translateAnalysis(result: CefrResult, lang: TargetLang, co
         model: mistralTranslationModel(),
         system: analysisTranslationSystemPrompt(lang),
         messages: [{ role: "user", content: JSON.stringify(source) }],
-        maxTokens: 1500,
+        maxTokens: 2000,
         json: true,
         context,
       });
@@ -111,6 +114,12 @@ export async function translateAnalysis(result: CefrResult, lang: TargetLang, co
         areas_for_improvement: pickStrings(parsed.areas_for_improvement) ?? [],
         notable_errors: pickStrings(parsed.notable_errors) ?? [],
       };
+      if (source.axis_feedback) {
+        const af = parsed.axis_feedback as Record<string, unknown> | undefined;
+        if (!af || typeof af !== "object" || !AXIS_FEEDBACK_KEYS.every((k) => typeof af[k] === "string" && (!source.axis_feedback![k] || (af[k] as string).trim())))
+          throw new Error("axis_feedback missing or incomplete in the translation");
+        out.axis_feedback = Object.fromEntries(AXIS_FEEDBACK_KEYS.map((k) => [k, af[k] as string])) as unknown as AxisFeedback;
+      }
       // A list that came back shorter or longer can't be shown item for item — keep the English one rather than a partial translation.
       const sameShape = (["strengths", "areas_for_improvement", "notable_errors"] as const).every((k) => out[k].length === source[k].length);
       if (!sameShape || (source.summary && !out.summary)) throw new Error("translation does not match the original's shape");
@@ -126,6 +135,9 @@ export async function translateAnalysis(result: CefrResult, lang: TargetLang, co
         strengths: out.strengths.map(restore),
         areas_for_improvement: out.areas_for_improvement.map(restore),
         notable_errors: out.notable_errors.map(restore),
+        ...(out.axis_feedback
+          ? { axis_feedback: Object.fromEntries(AXIS_FEEDBACK_KEYS.map((k) => [k, restore(out.axis_feedback![k])])) as unknown as AxisFeedback }
+          : {}),
       };
       if (seen.size !== kept.length) throw new Error("a quoted passage was lost");
       return restored;

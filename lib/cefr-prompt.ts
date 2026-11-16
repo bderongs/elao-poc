@@ -5,14 +5,14 @@
  */
 
 import type { ConvLang } from "@/lib/conversation-prompts";
-import type { CefrResult } from "@/lib/types";
+import { AXIS_FEEDBACK_KEYS, type AxisFeedback, type CefrResult } from "@/lib/types";
 import { countC2AnswersWell, type LadderStep } from "@/lib/session-length";
 import { buildEvaluatorForgivenessNote } from "@/lib/recognition-forgiveness";
 
 // Bump this whenever CEFR_SYSTEM_PROMPT's text changes — the eval lab tags
 // every session_evaluations row with it, so scoring drift across prompt
 // edits stays distinguishable from drift across models.
-export const CEFR_PROMPT_VERSION = "v9"; // v9: candidate-facing text never names a CEFR level (the shown level is computed, capped at C1+); v8: native spoken norms are not speaker_errors (a native's "ne" dropping and fillers were counted against them); v7: generosity below C1 removed (higher-band bias, tie-break up, length floor, B2 floor), axis↔CEFR anchors — calibration set 2026-10-14; v6: top-band strictness with 2 jokers, speaker_errors, WPM caps fluency only (2026-10-14); v5: C2 description no longer says "five dimensions"; v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
+export const CEFR_PROMPT_VERSION = "v10"; // v10: axis_feedback, a few words per axis for the report (2026-11-16); v9: candidate-facing text never names a CEFR level (the shown level is computed, capped at C1+); v8: native spoken norms are not speaker_errors (a native's "ne" dropping and fillers were counted against them); v7: generosity below C1 removed (higher-band bias, tie-break up, length floor, B2 floor), axis↔CEFR anchors — calibration set 2026-10-14; v6: top-band strictness with 2 jokers, speaker_errors, WPM caps fluency only (2026-10-14); v5: C2 description no longer says "five dimensions"; v4: recognition-error allowance for strong speakers (Track AD); v3: dimensions in half points (Track AE)
 
 // Single source of truth for the WPM → fluency mapping baked into
 // CEFR_SYSTEM_PROMPT below — each band's top value is the most fluency that
@@ -45,7 +45,8 @@ OUTPUT RULES:
 - Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
 - All string values in English, regardless of the transcript language.
 - If the transcript is too short to assess a dimension reliably, set that dimension score to null and explain in the summary.
-- summary, strengths, areas_for_improvement and notable_errors are shown to the candidate: describe the performance, never name a CEFR level or score in them (the level shown is computed separately).
+- summary, strengths, areas_for_improvement, notable_errors and axis_feedback are shown to the candidate: describe the performance, never name a CEFR level or score in them (the level shown is computed separately).
+- axis_feedback is written AFTER scoring and changes no score: a few words of appreciation per axis, one short sentence each (about 15 words at most), specific to this candidate and consistent with the score you gave that axis, in the third person like the summary (\"The candidate…\", \"Their delivery…\"), never \"you\". pronunciation: how clear and accurate the speech sounded, from the speech recognition data below (pronunciation confidence, words often mispronounced) — "" if no such data is given. Never repeat the summary.
 
 OUTPUT SCHEMA:
 {
@@ -63,7 +64,13 @@ OUTPUT SCHEMA:
   "areas_for_improvement": [string], // 3-5 specific observations with examples where possible
   "notable_errors": [string],    // up to 3 concrete error examples quoted from transcript
   "speaker_errors": [string],    // EVERY genuine vocabulary/grammar error counted against the speaker, quoted with its correction, jokers included (see TOP-BAND STRICTNESS); [] if none. NEVER native spoken norms: no dropped "ne", contraction, colloquial word, filler or repetition
-  "summary": string              // 2-3 sentence overall assessment
+  "summary": string,             // 2-3 sentence overall assessment
+  "axis_feedback": {             // a few words per axis, one short sentence each (see OUTPUT RULES)
+    "pronunciation": string,
+    "fluency": string,
+    "vocabulary_grammar": string,
+    "communication": string
+  }
 }
 
 CEFR PERCENTAGE SCALE (5-point bands):
@@ -199,6 +206,17 @@ interface SttContext {
   count: number;
   /** Turns with < 6 words — deduct 0.5 from fluency per incomplete turn. */
   shortTurns?: number;
+  /** Words most often scored as mispronounced over the session (weakPronunciationWords) — for the pronunciation line of axis_feedback only. */
+  weakWords?: string[];
+}
+
+/** Caps and cleans the client-sent word list before it goes into the prompt. */
+function weakWordsLine(words: unknown): string {
+  if (!Array.isArray(words)) return "";
+  const clean = words.filter((w): w is string => typeof w === "string").map((w) => w.trim().slice(0, 40)).filter(Boolean).slice(0, 8);
+  return clean.length
+    ? `\n  Words most often heard as mispronounced: ${clean.join(", ")}. (For the pronunciation line of axis_feedback only — they change no score.)`
+    : "";
 }
 
 export function buildEvaluationUserMessage(
@@ -223,7 +241,7 @@ export function buildEvaluationUserMessage(
     ? `\nSpeech recognition data (averaged over ${pronunciationContext.count} turn${pronunciationContext.count > 1 ? "s" : ""}):
   Pronunciation confidence: ${Math.round(pronunciationContext.pronunciation)}/100
   Speaking rate:            ${Math.round(pronunciationContext.wpm)} WPM
-  (Use the WPM figure to anchor the fluency dimension score per the mapping table above.)${shortPenalty}\n`
+  (Use the WPM figure to anchor the fluency dimension score per the mapping table above.)${shortPenalty}${weakWordsLine(pronunciationContext.weakWords)}\n`
     : "";
 
   const wordCounts = userTurns.map((t) => t.trim().split(/\s+/).filter(Boolean).length);
@@ -274,6 +292,11 @@ export function parseCefrEvaluation(raw: string): CefrResult {
   // A missing or malformed list stays absent: the C2 gate then has no error count and holds the session below C2.
   if (Array.isArray(result.speaker_errors)) result.speaker_errors = result.speaker_errors.map(String);
   else delete result.speaker_errors;
+  // axis_feedback: kept only as four strings; anything else is dropped (the report then shows no axis lines).
+  const af = result.axis_feedback as unknown as Record<string, unknown> | undefined;
+  if (af && typeof af === "object" && AXIS_FEEDBACK_KEYS.every((k) => typeof af[k] === "string")) {
+    result.axis_feedback = Object.fromEntries(AXIS_FEEDBACK_KEYS.map((k) => [k, (af[k] as string).trim()])) as unknown as AxisFeedback;
+  } else delete result.axis_feedback;
   return result;
 }
 

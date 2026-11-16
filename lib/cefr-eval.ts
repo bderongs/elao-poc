@@ -108,7 +108,7 @@ export async function runCefrEvaluation(sessionId: string, providerIds: string[]
           model: provider.modelLabel,
           system: CEFR_SYSTEM_PROMPT,
           messages: [{ role: "user", content: userMessage }],
-          maxTokens: 1500,
+          maxTokens: 1800,
           json: true,
         });
         const evaluated = withAnswerEvidence(parseCefrEvaluation(text), userTurns);

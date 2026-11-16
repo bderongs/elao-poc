@@ -67,22 +67,24 @@ Live STT is already Voxtral (Track O). Deepgram is still used in pronunciation: 
 - [x] **A-01** Replace `deepgramVerbatim` with a Voxtral verbatim transcription (`lib/stt/providers/voxtral.ts`), keeping Azure Pronunciation Assessment on top. Prompt Voxtral for a verbatim (non-cleaned) transcript, since that hearing is there to catch mispronunciations. Done 2026-11-15: `lib/pronunciation/verbatim.ts` holds the second hearing with three engines — `deepgram` (still live), `voxtral-transcribe` (transcription endpoint) and `voxtral-chat` (Voxtral told to write what it hears, errors included). Picked by `PRONUNCIATION_VERBATIM_ENGINE`; neither Voxtral engine gives per-word confidence, and the judge prompts now say what to do without it. Switching live waits for A-02.
 - [x] **A-02** Before switching live: run the replay over stored sessions (`scripts/asr-disagreement.ts` / `stt-replay.ts`) and compare pronunciation scores old vs new on the same audio, per language. Note the shift for the level floors. Run 2026-11-15 (`scripts/verbatim-replay.ts`, reports in `sim-runs/verbatim-replay-*`): 66 turns, fresh Deepgram as the reference, run-to-run noise of the judge itself |Δ| 3.7. `voxtral-transcribe`: mean −0.7 overall (fr +0.4, en +2.1, es −2.6, de +2.0, it +2.5 on 2 turns); nl-BE −5.3 on 2 sessions, then −1.8 (|Δ| 2.9) on the 3 nl-BE sessions with audio. `voxtral-chat`: −2.7, less stable (es −6.2, de |Δ| 10.3) — dropped. **Recommendation: `voxtral-transcribe`, no level-floor change needed.** Switch = `LIVE_VERBATIM_ENGINE` default in `lib/pronunciation/verbatim.ts` (or `PRONUNCIATION_VERBATIM_ENGINE` on Vercel). Go from Baptiste 2026-11-16: `voxtral-transcribe` is the code default (env var unset on Vercel); `deepgram` stays as a rollback engine.
 - [x] **A-03** Clean up: `DEEPGRAM_API_KEY` out of `.env.example`, `session-cost.ts` (Deepgram line → Voxtral), labels in `system-config.ts`, stale comments (`audio-player.ts`, `session-recorder.ts`). Done 2026-11-16: `.env.example` documents `PRONUNCIATION_VERBATIM_ENGINE` instead; the cost line follows the live engine; comments, labels and README updated. `DEEPGRAM_API_KEY` can come off Vercel once the switch has run a few days without a rollback.
-- [ ] **A-04** Noise suppression, Silero + Volume vs current: compare in the VAD lab (`/admin/vad-lab`) on a handful of real recordings and send Michel the result. Kept small on purpose — the replay harness and device checks of Feature 1 were dropped on 2026-11-03, don't reopen them.
+- [x] ~~**A-04**~~ Dropped 2026-11-16 (Baptiste): Silero stays the live turn detection (`LIVE_TURN_VAD_MODE` in `lib/turn-vad.ts`, already the default); Michel agreed. No comparison.
 
 ## Phase 5 — end-of-test report
 
-- [ ] **R-01** Framing: put an ELAO report and a real Speechace report (from the imported ones, `/admin/import-speechace`) side by side; list the gap section by section. Send the list to Michel before building.
-- [ ] **R-02** Report page `app/report/[id]` reachable without an account through a signed token (the link returned to ELAO); the same component replaces the end-of-test results screen.
-- [ ] **R-03** Content, per the roadmap: shortened detailed analysis; scores on 100 (7.1 → 71, display only); every text in `ui_language` (L-04); per-answer replay with its transcript (recordings are private since 0015 → signed URLs via `/api/sessions/audio-urls`); words coloured yellow / orange / red from the pronunciation word verdicts; pronunciation and fluency scores.
-- [ ] **R-04** Copy the Speechace layout as-is (Michel: copy, don't approximate).
+Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Speechace-style report. He wants the API to give his own platform enough data to build its report. Our results screen is the test bench: try what is worth showing there first, then decide what the API sends.
+
+- [x] **R-01** Framing: ELAO vs Speechace side by side. Gap list written 2026-11-16 (Claude Doc "Rapport de fin de test : écarts avec Speechace", https://claude.ai/artifact/ELzL8PZHVUToXbhAnq4KHU) — now background only; Baptiste took the decisions below instead of Michel.
+- [x] **R-03a** Scores: keep the 4 axes, shown on 100 (display only, 7.5 → 75; the composite is unchanged). Done 2026-11-16 in `CefrPanel`.
+- [x] **R-03b** Analysis: a few words per axis above the existing feedback — `axis_feedback` (4 strings) from the final evaluator, prompt v10; the pronunciation line gets the session's most-missed words (`weakPronunciationWords`). Translated with the rest. The general appreciation (`summary`) stays; it becomes `general_summary` in the API. Done 2026-11-16.
+- [ ] ~~**R-03c**~~ Per-answer assessment: not done (Baptiste, 2026-11-16). Per-answer facts we already store (pronunciation score, WPM, question level, level-judge verdict, response time, help buttons) stay available for the API.
+- [ ] **R-02** Report page `app/report/[id]` reachable without an account through a signed token — only if the API needs a report link; to decide with the API output.
+- [ ] **R-05** API output for the report: map what the results screen shows (4 axes on 100, `axis_feedback`, `general_summary`, strengths / to improve / errors, in the interface language) into the result snapshot (`doc/api/openapi.yaml`, API-06b).
 
 ## Waiting on Michel
 
 1. Mistral API key (Q-01).
 2. Where the call-reception screen lives (phase 2).
 3. Forced-question rules when the candidate doesn't reach the question's rung (P-02).
-4. Noise suppression choice after the comparison (A-04).
-5. The report gap list (R-01).
 
 ## Log
 
@@ -99,3 +101,6 @@ Live STT is already Voxtral (Track O). Deepgram is still used in pronunciation: 
 | 2026-11-15 | L-05 — phase 1 done | Native review of the 6 interface languages and the narrations | Phase 2 (API) / phase 4 (Voxtral) |
 | 2026-11-15 | Mistral model pin (hotfix), A-01, A-02 replay | Production: `mistral-large-latest` became a reasoning model and broke evaluation + pronunciation judge; fix `25bc1ba` not on master yet; check `MISTRAL_MODEL` on Vercel | Go for `voxtral-transcribe`, then A-03 |
 | 2026-11-16 | Model pin cherry-picked to master (`3faccb0`, pushed: `MISTRAL_MODEL` unset on Vercel, so prod was on the reasoning model). Go for Voxtral: `voxtral-transcribe` is the code default (A-02). A-03 | Voxtral reaches production only when this branch is merged (needs migrations 0018 + 0019 first) | A-04 (VAD lab comparison) |
+| 2026-11-16 | Branch merged to master (`daef876`, build OK). Migrations 0018 + 0019 applied to the shared DB (constraints checked) | — | Prod smoke test; A-04; R-01 |
+| 2026-11-16 | A-04 dropped (Silero stays). R-01 gap list written for Michel | Michel's decisions A–F on the report | R-02 (report page + signed link) can start; content waits for A–F |
+| 2026-11-16 | Phase 5 reframed (report = test bench for the API). R-03a (axes on 100), R-03b (`axis_feedback`, prompt v10) | — | R-05 (report fields in the API spec) |
