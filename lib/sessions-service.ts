@@ -15,6 +15,7 @@ import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEval
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { LadderRecord } from "@/lib/session-length";
 import { sanitizeIntegrity, type IntegrityRecord } from "@/lib/integrity";
+import { isProfileId } from "@/lib/test-profile-types";
 import { isUiLang } from "@/lib/ui-strings";
 import type { SimulationRecord } from "@/lib/simulation-record";
 
@@ -174,6 +175,9 @@ export async function getSessionDetail(id: string): Promise<SessionWithTurns | n
   // Read on its own so a missing column (migration 0018 not run) can't break the page.
   const { data: uiRow } = await supabase.from("sessions").select("ui_language").eq("id", id).maybeSingle();
   (session as { ui_language?: string | null }).ui_language = (uiRow?.ui_language as string | null | undefined) ?? null;
+  // Same best-effort read for the client profile (migration 0020).
+  const { data: profileRow } = await supabase.from("sessions").select("test_profile").eq("id", id).maybeSingle();
+  (session as { test_profile?: string | null }).test_profile = (profileRow?.test_profile as string | null | undefined) ?? null;
 
   const turnIds = (turns ?? []).map((t) => t.id);
   let turnEvaluations: TurnEvaluationRow[] = [];
@@ -418,6 +422,7 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   if (ladder) await saveLadder(sessionId, ladder);
   if (integrity) await saveIntegrity(sessionId, integrity);
   await saveUiLanguage(sessionId, form.get("uiLanguage") as string | null);
+  await saveTestProfile(sessionId, form.get("testProfile") as string | null);
 
   if (userId) await upsertProfilePreference(userId, language, cefrLevel);
 
@@ -477,6 +482,13 @@ async function saveLadder(sessionId: string, ladder: LadderRecord): Promise<void
 }
 
 /** The interface language the candidate saw (roadmap L-03) — best-effort like saveLadder (migration 0018). */
+/** The client profile the test ran with (`?profile=`) — best-effort like saveUiLanguage (migration 0020). */
+async function saveTestProfile(sessionId: string, testProfile: string | null): Promise<void> {
+  if (!isProfileId(testProfile)) return;
+  const { error } = await getSupabaseServer().from("sessions").update({ test_profile: testProfile }).eq("id", sessionId);
+  if (error) console.warn("[sessions] test_profile not saved (run migration 0020?):", error.message);
+}
+
 async function saveUiLanguage(sessionId: string, uiLanguage: string | null): Promise<void> {
   if (!isUiLang(uiLanguage)) return;
   const { error } = await getSupabaseServer().from("sessions").update({ ui_language: uiLanguage }).eq("id", sessionId);
@@ -539,7 +551,7 @@ export async function saveSimulationSession(record: SimulationRecord): Promise<{
  * createSessionFromForm. Both are public (a guest has no account) and only
  * ever touch 'in_progress' conversation rows the caller may own.
  */
-export async function startLiveSession(language: string, userId: string | null, uiLanguage: string | null = null): Promise<{ id: string }> {
+export async function startLiveSession(language: string, userId: string | null, uiLanguage: string | null = null, testProfile: string | null = null): Promise<{ id: string }> {
   const { data, error } = await getSupabaseServer()
     .from("sessions")
     .insert({ language, duration_seconds: 0, status: "in_progress", transcript: [], user_id: userId })
@@ -547,6 +559,7 @@ export async function startLiveSession(language: string, userId: string | null, 
     .single();
   if (error || !data) throw new Error(error?.message ?? "live session insert failed");
   await saveUiLanguage(data.id as string, uiLanguage);
+  await saveTestProfile(data.id as string, testProfile);
   return { id: data.id as string };
 }
 

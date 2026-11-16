@@ -49,15 +49,15 @@ Today the candidate UI is French only, hard-coded in `app/page.tsx` (2 800 lines
 Follow [`api-plan.md`](api-plan.md), with these additions from the roadmap:
 
 - [ ] **API-02b** Add to the spec (`doc/api/openapi.yaml`) and to the questions for the integrator: `interface_language` and `test_profile` (client or domain, phase 3) in `POST /tests`; `report_url` and the detailed scores in the result. Republish `/api-docs`.
-- [ ] **API-04b** Migration: `test_profile` on `sessions` (fold into `0020_api_tests.sql`; `ui_language` is already added by 0018).
+- [ ] **API-04b** Migration: `test_profile` on `sessions` — done in 0020 (`sessions.test_profile`); the API migration is now `0021_api_tests.sql`.
 - [ ] **API-06b** The result snapshot carries `report_url` (phase 5) and the feedback in the interface language (L-04).
 - [ ] **Open question for Michel**: where the "receive the call" screen lives — ELAO or ELAO Speaking. The current spec assumes ELAO Speaking (the candidate opens our `test_url`); if ELAO wants its own screen, we only need the API and a link straight into the test.
 
 ## Phase 3 — per-client questions (Safran)
 
-- [ ] **P-01** Test profiles in code first (one client; a DB table when there are several): `lib/question-bank/profiles/safran.ts` with the 12 questions (English only, they are for English tests), each tagged with a rung (most look B1–B2) and a domain.
-- [ ] **P-02** Forced questions: the session picks ≥ 3 profile questions and asks them at their rung when the ladder reaches it; the rest comes from the standard bank. Today only A1/C1/C2 are code-picked (`isCodePickedRung`); B1/B2 are written by the examiner → add a "pinned question" path to the chat prompt for those turns. To settle with Michel: what if the candidate never reaches the rung (ask anyway at the nearest one?).
-- [ ] **P-03** `test_profile` comes from the API call (phase 2) or `?profile=` for manual tests; stored on the session, shown in the admin.
+- [x] **P-01** Test profiles, decided 2026-11-16 (Baptiste): in the database and editable in `/admin/profiles` (migration 0020: `test_profiles`, `test_profile_questions`), not in code. A question has a level RANGE (min–max) instead of one level; English only for now (the profile's language field). Safran seeded with the 12 questions, ranges proposed in the chat and approved in principle: A2–B2 (know Safran), B1–B2 (aerospace interest, international company, difficult problem, innovative product, first weeks), B1–C1 (why Safran, skills), B2–C1 (explain the business, multicultural teams, convince a candidate, industry challenges).
+- [x] **P-02** Forced questions: at least `min_questions` per test (3 for Safran, editable per profile). A profile question is asked when the turn's target level is inside its range, in the profile's order, at most one every other turn; from `SESSION_MIN_SECONDS − 60 s` a missing one is asked even out of range (closest range first), and the session does not close before they are all asked (up to `SESSION_MAX_SECONDS`). Rules: `lib/test-profile-types.ts`, examiner hookup: `lib/examiner-prompt.ts`. The reply on a profile turn is built by code (pivot + the question word for word, `profileQuestionReply`): asked through the prompt, the model (mistral-small) skipped it in 29 of 36 tries. A "didn't understand" re-asks it (simpler version if written).
+- [x] **P-03** `?profile=<id>` on the test link; stored in `sessions.test_profile`, shown on the admin session page. From the API later (API-02b).
 - [ ] **P-04** Domain profiles (medicine, architecture, IT, call-centre): same mechanism, content to write later — not in this round.
 
 ## Phase 4 — audio pipeline
@@ -84,7 +84,6 @@ Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Spe
 
 1. Mistral API key (Q-01).
 2. Where the call-reception screen lives (phase 2).
-3. Forced-question rules when the candidate doesn't reach the question's rung (P-02).
 
 ## Log
 
@@ -105,3 +104,4 @@ Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Spe
 | 2026-11-16 | A-04 dropped (Silero stays). R-01 gap list written for Michel | Michel's decisions A–F on the report | R-02 (report page + signed link) can start; content waits for A–F |
 | 2026-11-16 | Phase 5 reframed (report = test bench for the API). R-03a (axes on 100), R-03b (`axis_feedback`, prompt v10) | — | R-05 (report fields in the API spec) |
 | 2026-11-16 | R-05: API spec carries the report details (axis feedback, general summary, interface language, per-answer words / rate / help) | Phase 2 code still waits on the integrator (API-02) | Send the updated spec to the integrator |
+| 2026-11-16 | P-01 to P-03: test profiles in the DB + `/admin/profiles`, Safran seeded (migration 0020 applied), forced questions with level ranges, `?profile=` | Safran ranges to confirm with Michel; the examiner model also skips standard C1 bank questions half the time in a synthetic check (mistral-small) | Test a Safran session (`/?profile=safran`, English) |

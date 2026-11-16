@@ -1,4 +1,5 @@
-import { getSystemPrompt, buildQuestionBank, buildPickedQuestionText, bankLang, type ConvLang, type PromptOpts } from "@/lib/conversation-prompts";
+import { getSystemPrompt, buildQuestionBank, buildPickedQuestionText, buildProfileQuestionText, bankLang, type ConvLang, type PromptOpts } from "@/lib/conversation-prompts";
+import { pickProfileQuestion, profileRemaining, type TestProfile } from "@/lib/test-profile-types";
 import { isCefrRung, zoneForRung, type CefrRung } from "@/lib/cefr-rung";
 import { isTopicDomain } from "@/lib/topic-domain";
 import { isCodePickedRung, pickBankQuestion, questionById } from "@/lib/question-bank";
@@ -12,6 +13,10 @@ import { CLARIFY_GIVE_UP_ATTEMPT } from "@/lib/comprehension";
 export interface BankState {
   currentId?: string;
   followUpDone?: boolean;
+  /** Client-profile questions asked so far (lib/test-profile-types.ts). */
+  profileAsked?: string[];
+  /** The profile question asked on the turn just before, if it was one. */
+  profileCurrent?: string;
 }
 
 /**
@@ -45,7 +50,11 @@ export function buildExaminerPrompt(params: {
   clarify?: boolean;
   /** How many "didn't understand" in a row on this question, this one included (default 1). From CLARIFY_GIVE_UP_ATTEMPT on, the question is dropped instead of re-asked. */
   clarifyAttempt?: number;
-}): { system: string; targetRung: CefrRung; updatedUsedQuestions: string[]; bankState: BankState } {
+  /** The client profile of this test (`?profile=`, lib/test-profiles.ts) — ignored when its language is not the test's. */
+  profile?: TestProfile | null;
+  /** The end of the test is near: a missing profile question is asked even out of its level range (lib/test-profile-types.ts). */
+  profileUrgent?: boolean;
+}): { system: string; targetRung: CefrRung; updatedUsedQuestions: string[]; bankState: BankState; profileRemaining: number | null; profileQuestion?: string } {
   const { language, rung, isStart, isEnd } = params;
   // First "didn't understand": re-ask the same question simpler. Again after
   // that: drop it and move on (a new question, picked like any other turn).
@@ -60,12 +69,22 @@ export function buildExaminerPrompt(params: {
   const switchToDomain = avoidDomain && isTopicDomain(params.switchToDomain) ? params.switchToDomain : undefined;
   const domainOpts: PromptOpts = { ...(avoidDomain ? { avoidDomain } : {}), ...(switchToDomain ? { switchToDomain } : {}) };
 
-  const build = (bank: string, opts: PromptOpts & { openerQuestion?: string }, used: string[], state: BankState) => ({
-    system: getSystemPrompt(language, targetRung, bank, opts),
-    targetRung,
-    updatedUsedQuestions: used,
-    bankState: state,
-  });
+  const profile = params.profile && params.profile.active && params.profile.language === language ? params.profile : null;
+  const profileAsked = bankState.profileAsked ?? [];
+
+  // Every turn carries the profile questions asked so far; profileCurrent
+  // only survives when the state passed in sets it (a profile turn, or a
+  // clarify that re-asks one).
+  const build = (bank: string, opts: PromptOpts & { openerQuestion?: string }, used: string[], state: BankState) => {
+    const asked = state.profileAsked ?? profileAsked;
+    return {
+      system: getSystemPrompt(language, targetRung, bank, opts),
+      targetRung,
+      updatedUsedQuestions: used,
+      bankState: { ...state, ...(asked.length ? { profileAsked: asked } : {}) },
+      profileRemaining: profile ? profileRemaining(profile, asked) : null,
+    };
+  };
 
   if (isStart) {
     // Starting at A1/A2 (explicit or the A2 default): a beginner can't catch the
@@ -78,6 +97,30 @@ export function buildExaminerPrompt(params: {
   }
   if (isEnd) {
     return build("", { bankMode: "none" }, usedQuestions, bankState);
+  }
+
+  // Client-profile questions (roadmap phase 3) come before the standard bank.
+  if (profile) {
+    const current = bankState.profileCurrent ? profile.questions.find((q) => q.id === bankState.profileCurrent) : undefined;
+    if (clarify && current) {
+      // Re-ask the profile question just asked, simpler — state unchanged.
+      return build("", { bankMode: "none", clarify: true, ...(current.simpler ? { simplerQuestion: current.simpler } : {}) }, usedQuestions, bankState);
+    }
+    if (!clarify) {
+      const pick = pickProfileQuestion({ profile, rung: targetRung, askedIds: profileAsked, lastWasProfile: !!current, urgent: params.profileUrgent === true });
+      if (pick) {
+        // followUpDone: a C1/C2 bank turn after it starts a fresh bank question, no follow-up on this one.
+        // profileQuestion: the chat route speaks it as written (profileQuestionReply) instead of asking the model.
+        return {
+          ...build(buildProfileQuestionText(pick.text), { bankMode: "picked", ...(giveUp ? { dropQuestion: true } : {}) }, usedQuestions, {
+            profileAsked: [...profileAsked, pick.id],
+            profileCurrent: pick.id,
+            followUpDone: true,
+          }),
+          profileQuestion: pick.text,
+        };
+      }
+    }
   }
 
   if (isCodePickedRung(targetRung)) {

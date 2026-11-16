@@ -31,7 +31,7 @@ Contract: [`api/openapi.yaml`](api/openapi.yaml) (draft, to validate with the in
 
 ### 2. Database
 
-One migration (`0020_api_tests.sql`; 0018 is the interface language, 0019 nl-NL), additive only — the DB is shared between dev and prod.
+One migration (`0021_api_tests.sql`; 0018 is the interface language, 0019 nl-NL, 0020 the test profiles), additive only — the DB is shared between dev and prod.
 
 - [ ] **API-03** `sessions.status` check: add `'created'`.
 - [ ] **API-04** New columns on `sessions`: `external_ref text`, `redirect_url text`, `completed_callback_url text`, `start_level text`, `via_api boolean not null default false`, `started_at timestamptz`, `completed_at timestamptz`, `result_snapshot jsonb`.

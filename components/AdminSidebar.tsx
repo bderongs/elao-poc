@@ -102,6 +102,18 @@ const NAV_ITEMS: NavItem[] = [
     isActive: (p) => p.startsWith("/admin/question-bank"),
   },
   {
+    href: "/admin/profiles",
+    label: "Test profiles",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <rect x="3" y="7" width="18" height="13" rx="2" />
+        <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        <path d="M3 13h18" />
+      </svg>
+    ),
+    isActive: (p) => p.startsWith("/admin/profiles"),
+  },
+  {
     href: "/admin/users",
     label: "Users",
     icon: (

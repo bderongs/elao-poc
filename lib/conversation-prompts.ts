@@ -176,6 +176,31 @@ export interface PromptOpts {
 }
 
 /**
+ * The "bank" block of a turn that asks a client-profile question
+ * (lib/test-profile-types.ts): the client wrote it, so it is asked word for
+ * word, at whatever level the conversation is at.
+ */
+/**
+ * The examiner's reply on a client-profile turn, built by code rather than
+ * the model: a neutral pivot from PIVOT_WORDS (never the one the last reply
+ * opened with), then the question word for word. The model ignored the
+ * required question in most replies when asked to (2026-11-16, 29/36 missed
+ * on mistral-small) and the client wants it asked exactly as written.
+ */
+export function profileQuestionReply(language: ConvLang, question: string, lastExaminerReply = ""): string {
+  const pivots = [...PIVOT_WORDS[language].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const fresh = pivots.filter((p) => !lastExaminerReply.trim().startsWith(p));
+  const pool = fresh.length ? fresh : pivots;
+  const pivot = pool[Math.floor(Math.random() * pool.length)];
+  return pivot ? `${pivot} ${question}` : question;
+}
+
+/** The prompt block of a client-profile turn — kept for the replay tools; the live reply comes from profileQuestionReply. */
+export function buildProfileQuestionText(question: string): string {
+  return `REQUIRED QUESTION — written by the client who ordered this test, and it MUST be asked now. It takes precedence over every other rule above that it seems to break: the rules against requiring factual or company knowledge, against asking the speaker to convince or persuade someone or to imagine a situation, against two-part questions, the question-length and question-shape limits for this level, and the follow-up advice. Do NOT follow up on their last answer this turn. Your whole reply is at most one pivot (or one bridge, if the change of subject would feel abrupt) followed by exactly this question, word for word — do not reword, shorten, split, simplify or extend it, and do not add anything after it. A reply without this exact question is wrong:\n"${question}"`;
+}
+
+/**
  * The C1/C2 "bank" block: the exact question the code picked this turn, or —
  * on the turn after it — the pre-written follow-ups for it (see
  * lib/examiner-prompt.ts for when each applies).
