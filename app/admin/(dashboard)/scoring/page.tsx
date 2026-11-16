@@ -117,13 +117,13 @@ export default function ScoringGuidePage() {
           {composite.score}, {composite.level}.
         </p>
         <p style={{ ...label, marginBottom: 0 }}>
-          <strong>The scale stops at C1+ (89).</strong> A short conversation can&apos;t reliably tell C1 from C2 — the
-          AI scores a strong C1 speaker and a native speaker about the same — so the test doesn&apos;t report C2.
-          When a C1+ candidate also answered at least 2 of the C2 questions well, with an average of 8.75 or more, the
-          result says they are at the top of what the test measures and may be higher still. The C2 questions are
-          still asked: they separate C1 from C1+ and trigger that message. History: until 2026-10-14 a +5% bonus and a
-          &quot;C2 floor&quot; lifted C1 speakers into C2; from 2026-10-14 to 2026-10-18 C2 needed C2-question
-          evidence and at most 2 counted errors, which proved too noisy (false errors on natives).
+          <strong>C2 needs evidence, not just a high average.</strong> The AI scores a strong C1 speaker and a
+          native speaker about the same, so the average alone stops at 89 (C1+). A candidate reaches C2 (90) only
+          when they answered at least 2 of the C2 questions well, made at most 2 counted errors, and have an average
+          of 8.75 or more. History: until 2026-10-14 a +5% bonus and a &quot;C2 floor&quot; lifted C1 speakers into
+          C2; from 2026-10-14 to 2026-10-18 the same evidence rule as today was live, then dropped for false errors on
+          natives (fixed since in the evaluator prompt); from 2026-10-18 to 2026-11-13 the test stopped at C1+ with a
+          &quot;top of the scale&quot; note. C2 is reported again since 2026-11-13, at the client&apos;s request.
         </p>
       </ExplainerCard>
 

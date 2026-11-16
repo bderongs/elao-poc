@@ -30,7 +30,7 @@ const REALTIME_STT_MODEL_LABEL: Record<RealtimeSttProviderId, () => string> = {
   mistral: mistralRealtimeTranscribeModel,
 };
 
-const ALL_LANGUAGES: ConvLang[] = ["en", "fr", "nl-BE", "es", "it", "de"];
+const ALL_LANGUAGES: ConvLang[] = ["en", "fr", "nl-BE", "nl-NL", "es", "it", "de"];
 
 export interface ProviderConfig {
   providerId: string;
@@ -129,7 +129,7 @@ export function getSystemConfig(): CapabilityConfig[] {
     {
       capability: "ET",
       capabilityLabel: "Per-answer level judge (ET)",
-      description: "Rates each answer as handled well or struggled, to raise or lower the next question's level and decide when the session can end. Its verdicts also decide the 'top of the scale' mark (C2 answers rated well).",
+      description: "Rates each answer as handled well or struggled, to raise or lower the next question's level and decide when the session can end. Its verdicts also feed the C2 gate (C2 answers rated well).",
       providerId: et.id,
       providerLabel: et.label,
       modelLabel: et.modelLabel,
@@ -138,7 +138,7 @@ export function getSystemConfig(): CapabilityConfig[] {
       capability: "EO",
       capabilityLabel: "Pronunciation assessment (EO)",
       description: "Scores each answer's pronunciation from its audio; the session average feeds the final score.",
-      // azure-ensemble (Azure + Deepgram, judged by Mistral) for every
+      // azure-ensemble (Azure + Voxtral second hearing, judged by Mistral) for every
       // language as of 2026-09-09 — see LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG
       // in lib/pronunciation-rollup.ts for why Voxtral was pulled back to an
       // on-demand comparison provider. Kept as a perLanguage table (not

@@ -3,6 +3,10 @@
 import { useState } from "react";
 import type { AuthError } from "@supabase/supabase-js";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { useUi } from "@/lib/ui-lang";
+import { UI_STRINGS, type UiStrings } from "@/lib/ui-strings";
+
+type AuthStrings = UiStrings["authForm"];
 
 export const MIN_PASSWORD_LENGTH = 8;
 
@@ -11,30 +15,28 @@ export const MIN_PASSWORD_LENGTH = 8;
 const GOOGLE_ENABLED = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
 
 /** Client-side checks shared by sign-up and /login/reset. Null = valid. */
-export function validateNewPassword(password: string, confirm: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`;
-  }
-  if (password !== confirm) return "Les deux mots de passe ne correspondent pas.";
+export function validateNewPassword(password: string, confirm: string, t: AuthStrings = UI_STRINGS.fr.authForm): string | null {
+  if (password.length < MIN_PASSWORD_LENGTH) return t.tooShort;
+  if (password !== confirm) return t.mismatch;
   return null;
 }
 
-/** Supabase's English auth errors, in French for the candidate UI. */
-export function authErrorMessage(error: AuthError): string {
+/** Supabase's English auth errors, in the candidate's interface language. */
+export function authErrorMessage(error: AuthError, t: AuthStrings = UI_STRINGS.fr.authForm): string {
   switch (error.code) {
     case "invalid_credentials":
       // Accounts created before the switch from magic links have no password yet.
-      return "E-mail ou mot de passe incorrect. Première connexion depuis le changement ? Utilisez « Mot de passe oublié ».";
+      return t.invalidCredentials;
     case "user_already_exists":
     case "email_exists":
-      return "Un compte existe déjà avec cet e-mail — connectez-vous.";
+      return t.exists;
     case "weak_password":
-      return `Mot de passe trop faible (au moins ${MIN_PASSWORD_LENGTH} caractères).`;
+      return t.weak;
     case "same_password":
-      return "Le nouveau mot de passe doit être différent de l'ancien.";
+      return t.same;
     case "over_request_rate_limit":
     case "over_email_send_rate_limit":
-      return "Trop de tentatives, réessayez dans quelques minutes.";
+      return t.rateLimit;
     default:
       return error.message;
   }
@@ -86,6 +88,8 @@ export function AuthForm({
   defaultMode: "signin" | "signup";
   light?: boolean;
 }) {
+  const { t: ui } = useUi();
+  const t = ui.authForm;
   const [mode, setMode] = useState(defaultMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -116,16 +120,16 @@ export function AuthForm({
     if (mode === "signin") {
       setStatus("sending");
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) return fail(authErrorMessage(error));
+      if (error) return fail(authErrorMessage(error, t));
       window.location.href = resolveNext();
       return;
     }
 
-    const invalid = validateNewPassword(password, confirm);
+    const invalid = validateNewPassword(password, confirm, t);
     if (invalid) return fail(invalid);
     setStatus("sending");
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return fail(authErrorMessage(error));
+    if (error) return fail(authErrorMessage(error, t));
     // Only happens if "Confirm email" gets switched back on in Supabase.
     if (!data.session) {
       setStatus("confirm-email");
@@ -140,13 +144,13 @@ export function AuthForm({
       provider: "google",
       options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(resolveNext())}` },
     });
-    if (error) fail(authErrorMessage(error));
+    if (error) fail(authErrorMessage(error, t));
   };
 
   if (status === "confirm-email") {
     return (
       <div style={{ color: muted, fontSize: 14, textAlign: "center", lineHeight: 1.5 }}>
-        Vérifiez vos emails (<strong>{email}</strong>) pour confirmer votre compte.
+        {t.checkEmail[0]}<strong>{email}</strong>{t.checkEmail[1]}
       </div>
     );
   }
@@ -177,8 +181,8 @@ export function AuthForm({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", borderBottom: `1px solid ${light ? "#E4E0D7" : "#334155"}` }}>
-        {tab("signin", "Se connecter")}
-        {tab("signup", "Créer un compte")}
+        {tab("signin", t.signIn)}
+        {tab("signup", t.signUp)}
       </div>
 
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -186,7 +190,7 @@ export function AuthForm({
           type="email"
           required
           autoComplete="email"
-          placeholder="toi@exemple.com"
+          placeholder={t.emailPlaceholder}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           style={authInputStyle(light)}
@@ -195,7 +199,7 @@ export function AuthForm({
           type="password"
           required
           autoComplete={mode === "signin" ? "current-password" : "new-password"}
-          placeholder="Mot de passe"
+          placeholder={t.password}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={authInputStyle(light)}
@@ -205,7 +209,7 @@ export function AuthForm({
             type="password"
             required
             autoComplete="new-password"
-            placeholder="Confirmer le mot de passe"
+            placeholder={t.confirmPassword}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             style={authInputStyle(light)}
@@ -215,18 +219,18 @@ export function AuthForm({
           <div style={{ color: light ? "#B3542E" : "#f87171", fontSize: 13, lineHeight: 1.4 }}>{errorMessage}</div>
         )}
         <button type="submit" disabled={busy} style={authButtonStyle(light, busy)}>
-          {busy ? "Un instant…" : mode === "signin" ? "Se connecter" : "Créer mon compte"}
+          {busy ? t.busy : mode === "signin" ? t.signIn : t.submitSignUp}
         </button>
         {mode === "signin" && (
           <a href={forgotHref} style={{ color: muted, fontSize: 13, textAlign: "center" }}>
-            Mot de passe oublié ?
+            {t.forgot}
           </a>
         )}
       </form>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, color: muted, fontSize: 12 }}>
         <div style={{ flex: 1, height: 1, background: light ? "#E4E0D7" : "#334155" }} />
-        ou
+        {t.or}
         <div style={{ flex: 1, height: 1, background: light ? "#E4E0D7" : "#334155" }} />
       </div>
 
@@ -234,7 +238,7 @@ export function AuthForm({
         type="button"
         onClick={signInWithGoogle}
         disabled={!GOOGLE_ENABLED}
-        title={GOOGLE_ENABLED ? undefined : "Bientôt disponible"}
+        title={GOOGLE_ENABLED ? undefined : t.soon}
         style={{
           padding: light ? "12px 12px" : "10px 12px",
           borderRadius: light ? 10 : 6,
@@ -248,7 +252,7 @@ export function AuthForm({
           opacity: GOOGLE_ENABLED ? 1 : 0.55,
         }}
       >
-        Continuer avec Google{GOOGLE_ENABLED ? "" : " — bientôt disponible"}
+        {t.google}{GOOGLE_ENABLED ? "" : t.soonSuffix}
       </button>
     </div>
   );

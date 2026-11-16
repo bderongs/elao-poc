@@ -23,6 +23,7 @@ import { ANALYSIS_TRANSLATION_SYSTEM_PROMPT } from "@/lib/analysis-translation";
 import { SYSTEM_PROMPT as ET_SYSTEM_PROMPT } from "@/lib/level-assessment";
 import { SYSTEM_PROMPT as TT_SYSTEM_PROMPT } from "@/lib/topic-tracking";
 import { JUDGE_SYSTEM as EO_JUDGE_SYSTEM } from "@/lib/pronunciation/providers/azure-ensemble";
+import { LIVE_VERBATIM_ENGINE } from "@/lib/pronunciation/verbatim";
 import { SYSTEM_PROMPT as VOXTRAL_SYSTEM_PROMPT } from "@/lib/pronunciation/providers/voxtral";
 import type { ConvLang } from "@/lib/conversation-prompts";
 import type { CefrRung } from "@/lib/cefr-rung";
@@ -58,7 +59,7 @@ const assistantCharsPerTurn = AVG_SESSION.assistantCharsPerSession / AVG_SESSION
 //   small → mistral-small-2603, voxtral-mini → voxtral-mini-2602).
 // Voxtral transcription: mistral.ai/news/voxtral-transcribe-2.
 // Azure: prices.azure.com retail API, region germanywestcentral, pay as you go.
-// Deepgram: deepgram.com/pricing, pay as you go.
+// Deepgram (rollback engine only): deepgram.com/pricing, pay as you go.
 // Gradium: gradium.ai/pricing (1 TTS character = 1 credit).
 
 const CHARS_PER_TOKEN = 4;
@@ -100,7 +101,7 @@ const tokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN).toLocaleSt
 
 // ─── Prompt sizes, measured from the prompts themselves ────────────────────
 
-const LANGS: ConvLang[] = ["en", "fr", "nl-BE", "es", "it", "de"];
+const LANGS: ConvLang[] = ["en", "fr", "nl-BE", "nl-NL", "es", "it", "de"];
 const RUNGS: CefrRung[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
 /** The examiner's system prompt varies by language and level — use the average. */
 const EXAMINER_SYSTEM_CHARS = (() => {
@@ -208,7 +209,15 @@ export function estimateEoCostUsd(providerId: string, modelLabel: string): CostE
 
   if (providerId !== "azure-ensemble") return null;
 
-  const deepgramUsd = userSpeechMinutes * DEEPGRAM_NOVA3_PRERECORDED_PER_MIN;
+  // Second hearing (lib/pronunciation/verbatim.ts): Voxtral batch transcription
+  // live; Deepgram / Voxtral chat only after a switch.
+  const hearing =
+    LIVE_VERBATIM_ENGINE === "deepgram"
+      ? { label: "Deepgram", perMin: DEEPGRAM_NOVA3_PRERECORDED_PER_MIN }
+      : LIVE_VERBATIM_ENGINE === "voxtral-chat"
+      ? { label: "Voxtral chat", perMin: VOXTRAL_SMALL_AUDIO_INPUT_PER_MIN }
+      : { label: "Voxtral", perMin: MISTRAL_TRANSCRIBE_PER_MIN };
+  const hearingUsd = userSpeechMinutes * hearing.perMin;
   const azureUsd = (userSpeechMinutes / 60) * (AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR);
   // Mistral judge, per answer: both transcripts, per-word confidences and
   // acoustic scores in; one small JSON entry per word out.
@@ -219,9 +228,9 @@ export function estimateEoCostUsd(providerId: string, modelLabel: string): CostE
   const mistralUsd = mistralTextCostUsd(judgeModel, inputChars, outputChars) * AVG_SESSION.userTurns;
 
   return {
-    usdPerSession: deepgramUsd + azureUsd + mistralUsd,
+    usdPerSession: hearingUsd + azureUsd + mistralUsd,
     note:
-      `${userSpeechMinutes.toFixed(2)} min audio × (Deepgram $${DEEPGRAM_NOVA3_PRERECORDED_PER_MIN}/min + Azure $${(AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR).toFixed(2)}/h)` +
+      `${userSpeechMinutes.toFixed(2)} min audio × (${hearing.label} $${hearing.perMin}/min + Azure $${(AZURE_STT_PER_HOUR + AZURE_PRONUNCIATION_ASSESSMENT_ADDON_PER_HOUR).toFixed(2)}/h)` +
       ` + ${AVG_SESSION.userTurns.toFixed(1)} judge calls × ~${tokens(inputChars)} tok in (${judgeModel})`,
   };
 }

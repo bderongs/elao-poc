@@ -5,6 +5,7 @@ import { getLevelFloors } from "@/lib/scoring-settings-service";
 import { SessionScoreCell } from "@/components/SessionScoreCell";
 import { formatDateTime } from "@/lib/format-date";
 import { languageLabel, languageFlag } from "@/lib/languages";
+import { getUiServer } from "@/lib/ui-lang-server";
 import styles from "@/components/dashboard.module.css";
 
 export const dynamic = "force-dynamic";
@@ -34,22 +35,23 @@ export default async function DashboardPage({
   // Layout already redirects to /login when there's no user; user! is safe here.
   const { sessions, total } = await listSessions({ page, pageSize: PAGE_SIZE, userId: user!.id });
   const levelFloors = await getLevelFloors();
+  const { t } = await getUiServer();
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div>
       <div className={styles.hero}>
-        <h1 className={styles.heroTitle}>Bonjour</h1>
-        <p className={styles.heroSubtitle}>Passez un nouveau test ou retrouvez vos résultats précédents.</p>
+        <h1 className={styles.heroTitle}>{t.dashboard.hello}</h1>
+        <p className={styles.heroSubtitle}>{t.dashboard.lead}</p>
         <Link href="/" className={styles.heroCta}>
-          Passer un nouveau test
+          {t.dashboard.newTest}
         </Link>
       </div>
 
-      <h2 className={styles.sectionTitle}>Mes sessions · {total}</h2>
+      <h2 className={styles.sectionTitle}>{t.dashboard.mySessions} · {total}</h2>
 
       {sessions.length === 0 ? (
-        <div className={styles.empty}>Aucune session pour l&apos;instant — lancez votre premier test !</div>
+        <div className={styles.empty}>{t.dashboard.empty}</div>
       ) : (
         <>
           <div className={styles.grid}>
@@ -73,11 +75,11 @@ export default async function DashboardPage({
 
           <div className={styles.pagination}>
             <span className={styles.pageInfo}>
-              Page {page} / {totalPages}
+              {t.dashboard.page} {page} / {totalPages}
             </span>
             <div className={styles.pageLinks}>
-              <PageLink page={page - 1} disabled={page <= 1}>&larr; Précédent</PageLink>
-              <PageLink page={page + 1} disabled={page >= totalPages}>Suivant &rarr;</PageLink>
+              <PageLink page={page - 1} disabled={page <= 1}>{t.dashboard.previous}</PageLink>
+              <PageLink page={page + 1} disabled={page >= totalPages}>{t.dashboard.next}</PageLink>
             </div>
           </div>
         </>

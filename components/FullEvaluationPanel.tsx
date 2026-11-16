@@ -25,7 +25,7 @@ interface TurnResult {
  * a "scored" badge (already has a result for this session — not selectable
  * by default, avoids an accidental re-billed re-run) with a small "re-run"
  * link that unlocks it back into a checkbox for a deliberate re-run (e.g.
- * after adding DEEPGRAM_API_KEY, to redo a provider that silently ran
+ * after fixing a missing API key, to redo a provider that silently ran
  * degraded without it). Pending always wins over already-scored — the two
  * are mutually exclusive by construction (see
  * pronunciationProviderPending/isEvalProviderPending), but pending is the

@@ -1,5 +1,7 @@
 # ELAO Speaking — development plan
 
+> **Current work (from 2026-11-12):** [`roadmap-2026-11-plan.md`](roadmap-2026-11-plan.md) is the tracker. The open items below predate it and are kept for reference.
+
 Updated 2026-10-14. **Open work only**, grouped by theme. The history, findings and finished tasks are in [`client-feedback-plan.md`](client-feedback-plan.md); the old task ID is given in brackets (e.g. *was Z-10*) so each item can be traced back there.
 
 ★ = priority.

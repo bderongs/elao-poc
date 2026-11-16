@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { useUi } from "@/lib/ui-lang";
 
 /**
  * Small corner link on the homepage so a returning logged-in user can find
@@ -10,6 +11,7 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
  * until the client-side auth check resolves, to avoid a wrong flash.
  */
 export function AuthNavLink({ light = false }: { light?: boolean }) {
+  const { t } = useUi();
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -29,14 +31,24 @@ export function AuthNavLink({ light = false }: { light?: boolean }) {
   return (
     <a
       href={loggedIn ? "/dashboard" : "/login"}
-      style={{
-        fontSize: 14,
-        color: light ? "#6B6F7D" : "#94a3b8",
-        fontFamily: light ? "'DM Sans',system-ui,sans-serif" : undefined,
-        textDecoration: "none",
-      }}
+      // A real button (navy, like the main call to action) so it reads apart from the language menu next to it.
+      style={
+        light
+          ? {
+              padding: "8px 16px",
+              borderRadius: 8,
+              background: "#141D33",
+              color: "#FFFFFF",
+              fontFamily: "'Outfit',sans-serif",
+              fontSize: 14,
+              fontWeight: 500,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }
+          : { fontSize: 14, color: "#94a3b8", textDecoration: "none" }
+      }
     >
-      {loggedIn ? "Mes sessions" : "Se connecter"}
+      {loggedIn ? t.nav.mySessions : t.nav.signIn}
     </a>
   );
 }

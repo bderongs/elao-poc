@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CandidateTopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
+import { useUi } from "@/lib/ui-lang";
 
 interface EvaluatingScreenProps {
   /** Flips true once /api/evaluate + saveSession have both settled (success or failure). */
@@ -11,13 +12,6 @@ interface EvaluatingScreenProps {
   onDone: () => void;
   labels?: string[];
 }
-
-const DEFAULT_LABELS = [
-  "ANALYSE EN COURS",
-  "ANALYSE DE LA PRONONCIATION",
-  "ANALYSE DU VOCABULAIRE",
-  "ANALYSE DE LA GRAMMAIRE",
-];
 
 const MIN_VISIBLE_MS = 2500;
 const LABEL_INTERVAL_MS = 2200;
@@ -32,7 +26,9 @@ const COMPLETE_ANIM_MS = 400;
  * jumps to 100% once the caller flips `done` — with a minimum visible
  * duration so it never just flashes.
  */
-export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: EvaluatingScreenProps) {
+export function EvaluatingScreen({ done, onDone, labels: labelsProp }: EvaluatingScreenProps) {
+  const { t } = useUi();
+  const labels = labelsProp ?? t.evaluating.labels;
   const [progress, setProgress] = useState(6);
   const [labelIndex, setLabelIndex] = useState(0);
   const mountedAtRef = useRef(Date.now());
@@ -76,7 +72,7 @@ export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: Eval
       <style>{`
         @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
       `}</style>
-      <CandidateTopBar />
+      <CandidateTopBar langSwitcher={false} />
       <div className={styles.evalBody}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 56 }}>
           {[0, 0.15, 0.3, 0.45, 0.6].map((delay) => (
@@ -96,11 +92,10 @@ export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: Eval
         </div>
         <div style={{ textAlign: "center", maxWidth: 560, display: "flex", flexDirection: "column", gap: 14 }}>
           <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-            C&apos;est terminé, merci.
+            {t.evaluating.title}
           </h2>
           <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.6 }}>
-            Nous analysons votre prise de parole : prononciation, fluidité, vocabulaire et grammaire. Votre
-            niveau CECRL s&apos;affichera dans un instant.
+            {t.evaluating.lead}
           </p>
         </div>
         <div style={{ width: 420, maxWidth: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -118,11 +113,11 @@ export function EvaluatingScreen({ done, onDone, labels = DEFAULT_LABELS }: Eval
             }}
           >
             <span>{labels[labelIndex]}</span>
-            <span>{done ? "TERMINÉ" : `~${secondsLeft} S`}</span>
+            <span>{done ? t.evaluating.done : `~${secondsLeft} S`}</span>
           </div>
         </div>
         <span style={{ fontSize: 14, color: "#8A8F9C", textAlign: "center" }}>
-          Vous pouvez fermer cette fenêtre : le rapport vous sera envoyé par e-mail.
+          {t.evaluating.canClose}
         </span>
       </div>
     </div>

@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useUi } from "@/lib/ui-lang";
 
-const QUESTIONS = [
-  { key: "experienceRating", label: "Sur une échelle de 1 à 10, avez-vous apprécié l’expérience ?" },
-  { key: "questionsRelevance", label: "Les questions posées vous ont-elles semblé pertinentes ?" },
-  { key: "gradeRelevance", label: "Le niveau obtenu vous semble-t-il pertinent ?" },
-] as const;
+/** Labels come from the interface dictionary (t.survey.questions), in this order. */
+const QUESTIONS = [{ key: "experienceRating" }, { key: "questionsRelevance" }, { key: "gradeRelevance" }] as const;
 
 type RatingKey = (typeof QUESTIONS)[number]["key"];
 
@@ -18,6 +16,7 @@ type RatingKey = (typeof QUESTIONS)[number]["key"];
  * (`?survey=1`, see SurveyPreview): submitting sends nothing.
  */
 export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | null; onClose: () => void }) {
+  const { t } = useUi();
   const [ratings, setRatings] = useState<Partial<Record<RatingKey, number>>>({});
   const [comment, setComment] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -72,7 +71,7 @@ export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | 
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Votre avis"
+        aria-label={t.survey.aria}
         onClick={(e) => e.stopPropagation()}
         style={{
           background: "#FFFFFF",
@@ -87,17 +86,17 @@ export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | 
         }}
       >
         {status === "sent" ? (
-          <div style={{ textAlign: "center", padding: "24px 0", color: "#2F9E6E", fontSize: 16 }}>Merci pour votre retour !</div>
+          <div style={{ textAlign: "center", padding: "24px 0", color: "#2F9E6E", fontSize: 16 }}>{t.survey.thanks}</div>
         ) : (
           <>
             <div style={{ fontFamily: "'Outfit',sans-serif", fontWeight: 500, fontSize: 18, color: "#141D33", marginBottom: 4 }}>
-              Votre avis nous intéresse
+              {t.survey.title}
             </div>
-            <div style={{ fontSize: 14, color: "#5A5F6E", marginBottom: 16 }}>Trois questions rapides (1 = pas du tout, 10 = tout à fait).</div>
+            <div style={{ fontSize: 14, color: "#5A5F6E", marginBottom: 16 }}>{t.survey.scale}</div>
 
-            {QUESTIONS.map((q) => (
+            {QUESTIONS.map((q, qi) => (
               <div key={q.key} style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 14, color: "#141D33", marginBottom: 8 }}>{q.label}</div>
+                <div style={{ fontSize: 14, color: "#141D33", marginBottom: 8 }}>{t.survey.questions[qi]}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 4 }}>
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
                     const selected = ratings[q.key] === n;
@@ -130,7 +129,7 @@ export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | 
               onChange={(e) => setComment(e.target.value)}
               maxLength={1000}
               rows={3}
-              placeholder="Un commentaire ? (facultatif)"
+              placeholder={t.survey.comment}
               style={{
                 width: "100%",
                 boxSizing: "border-box",
@@ -147,7 +146,7 @@ export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | 
             />
 
             {status === "error" && (
-              <div style={{ color: "#B3542E", fontSize: 12, marginBottom: 8 }}>L’envoi a échoué. Vous pouvez réessayer ou passer.</div>
+              <div style={{ color: "#B3542E", fontSize: 12, marginBottom: 8 }}>{t.survey.failed}</div>
             )}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -156,7 +155,7 @@ export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | 
                 onClick={onClose}
                 style={{ padding: "12px 16px", borderRadius: 10, border: "none", background: "transparent", color: "#6B6F7D", fontSize: 14, cursor: "pointer" }}
               >
-                Passer
+                {t.survey.skip}
               </button>
               <button
                 type="button"
@@ -175,7 +174,7 @@ export function SatisfactionModal({ sessionId, onClose }: { sessionId: string | 
                   opacity: complete && status !== "sending" ? 1 : 0.5,
                 }}
               >
-                {status === "sending" ? "Envoi…" : "Envoyer"}
+                {status === "sending" ? t.survey.sending : t.survey.send}
               </button>
             </div>
           </>

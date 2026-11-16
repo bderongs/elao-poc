@@ -7,6 +7,7 @@ import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { ClaimResultsForm } from "@/components/ClaimResultsForm";
 import { CandidateTopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
+import { useUi } from "@/lib/ui-lang";
 import type { CefrResult, PronunciationAvg } from "@/lib/types";
 import type { LevelFloors } from "@/lib/cefr-score";
 
@@ -14,16 +15,6 @@ const SATISFACTION_ENABLED = process.env.NEXT_PUBLIC_SATISFACTION_MODAL === "1";
 // Gives the candidate time to read their grade before the survey opens.
 const SATISFACTION_DELAY_MS = 10_000;
 
-const FR_CEFR_LABELS = {
-  eyebrow: "VOTRE NIVEAU",
-  score: "Score",
-  strengths: "Points forts",
-  toImprove: "À travailler",
-  notableErrors: "Erreurs notables",
-  confidence: { high: "FIABLE", medium: "MOYEN", low: "INDICATIF" },
-  topOfScale:
-    "Le niveau le plus élevé évalué par ce test. Votre expression orale se situe en haut de notre échelle ; votre niveau est peut-être encore supérieur (C2), ce que cette courte conversation n'est pas conçue pour mesurer.",
-};
 
 /**
  * The "done" phase screen (doc/new_design's visual language, extended past
@@ -49,6 +40,7 @@ export function SessionResultsScreen({
   sessionId: string | null;
   onRestart: () => void;
 }) {
+  const { lang, t } = useUi();
   const [surveyOpen, setSurveyOpen] = useState(false);
   // The admin's level cut-offs (/api/scoring-settings); undefined while loading, null = defaults.
   const [levelFloors, setLevelFloors] = useState<LevelFloors | null | undefined>(undefined);
@@ -109,7 +101,7 @@ export function SessionResultsScreen({
             className={styles.tapTarget}
             style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
           >
-            Nouvelle session
+            {t.results.newSession}
           </span>
         }
       />
@@ -118,14 +110,14 @@ export function SessionResultsScreen({
         {/* Hero */}
         <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8, marginBottom: 4 }}>
           <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
-            Merci d&apos;avoir passé le test.
+            {t.results.thanks}
           </h2>
-          <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>Voici votre résultat.</p>
+          <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>{t.results.hereIsResult}</p>
         </div>
 
         {/* Held until the cut-offs are in, so the level never flips under the candidate's eyes. */}
         {cefrResult && levelFloors !== undefined && (
-          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={FR_CEFR_LABELS} theme="light" levelFloors={levelFloors} feedbackLanguage="fr" />
+          <CefrPanel result={cefrResult} pronunciationAvg={pronunciationAvg} labels={t.cefr} theme="light" levelFloors={levelFloors} feedbackLanguage={lang} />
         )}
 
         {evalFailed && !cefrResult && (
@@ -139,22 +131,22 @@ export function SessionResultsScreen({
               fontSize: 14,
             }}
           >
-            L&apos;évaluation n&apos;a pas pu être finalisée, mais votre session a bien été enregistrée.
+            {t.results.evalFailed}
           </div>
         )}
 
         {sessionId && <ClaimResultsForm sessionId={sessionId} light />}
 
-        <CollapsibleSection title="Voir le détail : enregistrement et transcription" defaultOpen={false} light>
+        <CollapsibleSection title={t.results.detailToggle} defaultOpen={false} light>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 12 }}>
             {audioBlobUrl && (
               <div style={{ padding: "16px 18px", borderRadius: 14, background: "#FFFFFF", border: "1px solid #E4E0D7" }}>
                 <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.1em", marginBottom: 10 }}>
-                  ÉCOUTER
+                  {t.results.listen}
                 </div>
                 <audio controls src={audioBlobUrl} style={{ width: "100%", height: 32, accentColor: "#141D33" }} />
                 <div style={{ fontSize: 12, color: "#8A8F9C", marginTop: 8 }}>
-                  Les mots colorés dans la transcription ci-dessous indiquent la qualité de prononciation.
+                  {t.results.coloredWords}
                 </div>
               </div>
             )}

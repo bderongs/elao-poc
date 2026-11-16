@@ -67,7 +67,7 @@ const VERDICT_MAP: Record<string, { confidence: number; accuracyScore: number; e
 };
 
 const LANG_LABELS: Record<string, string> = {
-  fr: "French", "nl-BE": "Dutch (Belgian)", es: "Spanish", it: "Italian", de: "German", en: "English",
+  fr: "French", "nl-BE": "Dutch (Belgian)", "nl-NL": "Dutch (Netherlands)", es: "Spanish", it: "Italian", de: "German", en: "English",
 };
 
 interface VoxtralJudgeWord {

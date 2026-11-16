@@ -14,7 +14,8 @@ import { logServerEvent } from "@/lib/server-log";
 import { fluencyFromWpm, levelBeforeBoundaryChecks, SCORING_RULES } from "@/lib/cefr-score";
 import { withBoundaryChecks, type Exchange } from "@/lib/cefr-boundary";
 import { EVALUATION_SIGNATURE_HEADER, signEvaluation } from "@/lib/evaluation-signature";
-import { withFrenchAnalysis } from "@/lib/analysis-translation";
+import { withAnalysesFor } from "@/lib/analysis-translation";
+import { DEFAULT_UI_LANG, isUiLang } from "@/lib/ui-strings";
 
 interface SttContext {
   pronunciation: number;
@@ -31,10 +32,13 @@ interface EvalRequest {
   ladderSteps?: LadderStep[];
   /** Each answer with the examiner's question — the boundary checks judge the answers against what was asked. */
   exchanges?: Exchange[];
+  /** The candidate's interface language (lib/ui-strings.ts) — the feedback is translated into it (roadmap L-04). Default French. */
+  uiLanguage?: string;
 }
 
 export async function POST(req: Request) {
-  const { language, userTurns, pronunciationContext, ladderSteps, exchanges } = (await req.json()) as EvalRequest;
+  const { language, userTurns, pronunciationContext, ladderSteps, exchanges, uiLanguage } = (await req.json()) as EvalRequest;
+  const uiLang = isUiLang(uiLanguage) ? uiLanguage : DEFAULT_UI_LANG;
 
   if (!Array.isArray(userTurns) || !userTurns.length || !userTurns.every((t) => typeof t === "string")) {
     return NextResponse.json(
@@ -80,8 +84,9 @@ export async function POST(req: Request) {
       level: levelBeforeBoundaryChecks(evaluation, pronunciationContext ?? null),
     });
 
-    // The feedback in French for the results screen — signed with the rest; never fails the evaluation.
-    evaluation = await withFrenchAnalysis(evaluation, "cefr-eval-fr");
+    // The feedback in French (the client and the admin read it) and in the candidate's interface
+    // language, in parallel — signed with the rest; never fails the evaluation.
+    evaluation = await withAnalysesFor(evaluation, uiLang, "cefr-eval");
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
     // The browser hands this result to the public final save — the signature

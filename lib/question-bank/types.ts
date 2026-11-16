@@ -1,9 +1,9 @@
-import type { ConvLang } from "@/lib/conversation-prompts";
+import type { BankLang } from "@/lib/conversation-prompts";
 import type { CefrRung } from "@/lib/cefr-rung";
 import type { TopicDomain } from "@/lib/topic-domain";
 
-/** One string per session language — Record<ConvLang,…> makes a missing language a compile error. */
-export type L10n = Record<ConvLang, string>;
+/** One string per bank language — a missing language is a compile error. nl-NL reads nl-BE (bankLang()). */
+export type L10n = Record<BankLang, string>;
 
 /** "warmup" = the session's opening question, asked whatever the starting rung (Track AA-01). */
 export type BankRung = CefrRung | "warmup";

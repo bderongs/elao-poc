@@ -11,7 +11,7 @@ import type { PronunciationResult } from "@/lib/pronunciation/types";
  * Track M, 2026-08-10), briefly went all-Voxtral, then back to
  * "azure-ensemble" everywhere on 2026-08-14 at the client's request. Split
  * per-language on 2026-08-31: Voxtral (direct Mistral audio call) for
- * English/French, azure-ensemble (Azure + Deepgram, judged by Mistral) for
+ * English/French, azure-ensemble (Azure + a second hearing, judged by Mistral) for
  * the rest — same shape as lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
  * Reverted to azure-ensemble everywhere on 2026-09-09: a SpeechAce-vs-Voxtral
  * comparison on low-level (A1/A2) French imports showed Voxtral's single-call
@@ -32,6 +32,7 @@ export const LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG: Record<ConvLang, 
   en: "azure-ensemble",
   fr: "azure-ensemble",
   "nl-BE": "azure-ensemble",
+  "nl-NL": "azure-ensemble",
   es: "azure-ensemble",
   it: "azure-ensemble",
   de: "azure-ensemble",

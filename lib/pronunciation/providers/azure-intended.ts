@@ -9,8 +9,8 @@
  * error is masked. Here the reference is the INTENDED sentence instead, so a
  * mispronounced word is graded against the word the speaker was aiming for:
  *
- *   1. Three hearings of the audio: the live transcript, Deepgram nova-3
- *      (with per-word confidence) and Azure's own free-speech recognizer.
+ *   1. Three hearings of the audio: the live transcript, the second hearing
+ *      (lib/pronunciation/verbatim.ts) and Azure's own free-speech recognizer.
  *   2. Mistral reconstructs the intended sentence from them plus the
  *      examiner's question. It may ONLY undo sound-alike substitutions —
  *      never fix grammar or word choice, or Azure would flag grammar errors
@@ -28,7 +28,8 @@
 
 import { mistralComplete, mistralPronunciationModel } from "@/lib/mistral";
 import { discreteWordConfidence } from "@/lib/pronunciation-scoring";
-import { azureAcoustic, deepgramVerbatim, LANG_LABELS, type DgEvidence } from "@/lib/pronunciation/providers/azure-ensemble";
+import { azureAcoustic, LANG_LABELS, type DgEvidence } from "@/lib/pronunciation/providers/azure-ensemble";
+import { confidenceLine, verbatimEngineLabel, verbatimHearing } from "@/lib/pronunciation/verbatim";
 import type { PronunciationProvider, PronunciationAssessParams, PronunciationResult } from "@/lib/pronunciation/types";
 
 const RECONSTRUCT_SYSTEM = `You reconstruct the sentence a second-language learner INTENDED to say, so that a pronunciation model can compare their audio against it.
@@ -65,7 +66,7 @@ async function reconstructIntended(
     (context ? `Examiner's question: "${context}"\n` : "") +
     `\nTranscript 1:\n"${liveText}"\n` +
     (dg
-      ? `\nTranscript 2:\n"${dg.transcript}"\nPer-word confidence: ${dg.words.map((w) => `${w.word}(${w.confidence})`).join(" ")}\n`
+      ? `\nTranscript 2:\n"${dg.transcript}"\n${confidenceLine(dg)}\n`
       : "") +
     (azText ? `\nTranscript 3:\n"${azText}"\n` : "");
 
@@ -102,6 +103,7 @@ async function assess({
   referenceText = "",
   context = "",
   clientWpm = 0,
+  verbatimEngine,
 }: PronunciationAssessParams): Promise<PronunciationResult | null> {
   const key = process.env.AZURE_SPEECH_KEY;
   const region = process.env.AZURE_SPEECH_REGION ?? "westeurope";
@@ -110,7 +112,7 @@ async function assess({
   const langLabel = LANG_LABELS[langCode] ?? "English";
 
   const [dg, azFree] = await Promise.all([
-    deepgramVerbatim(audio, contentType, langCode),
+    verbatimHearing(audio, contentType, langCode, verbatimEngine),
     azureAcoustic(audio, contentType, langCode, key, region),
   ]);
   const liveText = referenceText || dg?.transcript || azFree?.text || "";
@@ -157,6 +159,6 @@ async function assess({
 export const azureIntendedProvider: PronunciationProvider = {
   id: "azure-intended",
   label: "Azure scripted on intended text (experimental)",
-  modelLabel: `Deepgram nova-3 + Azure free-speech + ${mistralPronunciationModel()} reconstruction + Azure Pronunciation Assessment (scripted)`,
+  modelLabel: `${verbatimEngineLabel()} + Azure free-speech + ${mistralPronunciationModel()} reconstruction + Azure Pronunciation Assessment (scripted)`,
   assess,
 };

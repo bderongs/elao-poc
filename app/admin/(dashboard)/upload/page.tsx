@@ -83,6 +83,7 @@ export default function UploadRecordingPage() {
             <option value="fr">Français</option>
             <option value="en">English</option>
             <option value="nl-BE">Nederlands (BE)</option>
+            <option value="nl-NL">Nederlands (NL)</option>
             <option value="es">Español</option>
             <option value="it">Italiano</option>
             <option value="de">Deutsch</option>

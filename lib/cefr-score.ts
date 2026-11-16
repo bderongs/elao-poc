@@ -13,10 +13,10 @@ export const DEFAULT_LEVEL_FLOORS: LevelFloors = {
   A1: 40, "A1+": 45, A2: 50, "A2+": 55, B1: 60, "B1+": 65, B2: 70, "B2+": 75, C1: 80, "C1+": 85, C2: 90,
 };
 
-/** Top of C1+, the highest score reported (ScoringRules.ceiling). */
+/** Top of C1+: the highest floor an admin can set, and the C2 gate's cap. C2 starts at 90. */
 const SCORING_RULES_CEILING_CAP = 89;
 
-/** The levels an admin can move: C2 stays at 90, above the C1+ ceiling (ScoringRules.ceiling), since the test never reports it. */
+/** The levels an admin can move: C2 stays at 90 — it is reached only through the C2 gate (ScoringRules.c2Gate), which lifts to 90. */
 export const EDITABLE_LEVELS = SCORED_LEVELS.filter((l) => l !== "C2");
 
 /**
@@ -149,6 +149,12 @@ export interface ScoringRules {
  * 2026-10-18 (Baptiste): the test no longer reports C2 — scores stop at C1+,
  * with a "top of the scale" flag on C2-type evidence (`ceiling`); the C2 gate
  * and the boundary checks are off.
+ * 2026-11-13 (Baptiste, client roadmap: "C2 remis en évaluation"): C2 is
+ * reported again, by evidence only (`c2Gate`, the 14–18 October rule): ≥ 2
+ * C2-bank answers judged "well", ≤ 2 speaker_errors and an axis mean ≥ 8.75
+ * lift to 90; without that evidence the score stays at 89 (C1+). No
+ * ceiling. Replay on 80 live sessions: 5 C1+ → C2, none down
+ * (`--scenario c1plus-ceiling` replays the rule it replaced).
  * 2026-11-05 (Baptiste, after an A1 candidate was rated A0): the curve's low
  * end — an axis mean of 3, the evaluator's "A1", is 40 (A1's floor) instead
  * of 30; unchanged from 5 (A2) up.
@@ -162,9 +168,9 @@ export const SCORING_RULES: ScoringRules = {
   fluencyFromWpm: "cap",
   bonus: null,
   c2Floor: null,
-  c2Gate: null,
+  c2Gate: { maxSpeakerErrors: 2, minC2AnswersWell: 2, cap: SCORING_RULES_CEILING_CAP, liftFromAxisMean: 8.75 },
   boundaryCheck: "off",
-  ceiling: { cap: SCORING_RULES_CEILING_CAP, topOfScale: { minC2AnswersWell: 2, minAxisMean: 8.75 } },
+  ceiling: null,
   levelFloors: DEFAULT_LEVEL_FLOORS,
 };
 

@@ -1,4 +1,5 @@
 import styles from "./candidate.module.css";
+import { UiLangSwitcher } from "./UiLangSwitcher";
 
 /** ELAO wordmark (three amber bars + name) used across the candidate screens. */
 export function Logo() {
@@ -16,12 +17,19 @@ export function Logo() {
   );
 }
 
-/** Top bar shared by every candidate screen (doc/new_design): ELAO logo left, contextual content right. */
-export function CandidateTopBar({ right }: { right?: React.ReactNode }) {
+/** Top bar shared by every candidate screen (doc/new_design): ELAO logo left, contextual content and the interface-language menu right. */
+export function CandidateTopBar({ right, langSwitcher = true }: { right?: React.ReactNode; langSwitcher?: boolean }) {
   return (
     <div className={styles.topbar}>
       <Logo />
-      {right}
+      {langSwitcher ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <UiLangSwitcher />
+          {right}
+        </div>
+      ) : (
+        right
+      )}
     </div>
   );
 }

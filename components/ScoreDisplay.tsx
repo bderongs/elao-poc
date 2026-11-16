@@ -1,6 +1,8 @@
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import type { AnalysisTranslation, CefrResult, PronunciationAvg } from "@/lib/types";
 import { scoreToLevel, computeCompositeCefrScore, withLevelFloors, type LevelFloors } from "@/lib/cefr-score";
+import { analysisFor } from "@/lib/analysis-pick";
+import type { UiLang } from "@/lib/ui-strings";
 import { adminColors } from "@/lib/admin-theme";
 
 export { scoreToLevel };
@@ -122,7 +124,9 @@ const DEFAULT_CEFR_LABELS = {
   notableErrors: "Notable errors",
   originalFeedback: "Original feedback (English)",
   confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
-  /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). */
+  axes: { pronunciation: "Pronunciation", fluency: "Fluency", vocabGram: "Vocab & Gram.", communication: "Communication" },
+  notAvailable: "n/a",
+  /** Shown under the level when the session is at the top of the scale the test assesses (C1+, see ScoringRules.ceiling). Not set by the live rules since 2026-11-13 (ceiling: null). */
   topOfScale:
     "The highest level this test assesses. Your spoken language is at the top of our scale; your level may be higher still (C2), which this short conversation is not designed to measure.",
 };
@@ -157,8 +161,8 @@ export function CefrPanel({
   theme?: "dark" | "light";
   /** The admin's level cut-offs (getLevelFloors) — omitted = the default 5-point bands. */
   levelFloors?: LevelFloors | null;
-  /** Which version of the written feedback to show: "fr" (falls back to the English when there is no translation), "en", or "both" (French, the English original behind a toggle). */
-  feedbackLanguage?: "en" | "fr" | "both";
+  /** Which version of the written feedback to show: an interface language (falls back to the English when that translation is missing, lib/analysis-pick.ts), or "both" (French, the English original behind a toggle — admin). */
+  feedbackLanguage?: UiLang | "both";
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   const light = theme === "light";
@@ -171,10 +175,10 @@ export function CefrPanel({
   const { score: compositeScore, level: compositeLevel, topOfScale } = computeCompositeCefrScore(result, pronunciationAvg, withLevelFloors(levelFloors));
 
   const dim4: [string, number | null][] = [
-    ["Pronunciation", pronScore],
-    ["Fluency",       fluency],
-    ["Vocab & Gram.", vocabGram],
-    ["Communication", comm],
+    [t.axes.pronunciation, pronScore],
+    [t.axes.fluency,       fluency],
+    [t.axes.vocabGram,     vocabGram],
+    [t.axes.communication, comm],
   ];
 
   const eyebrowColor = light ? "#8A8F9C" : "rgba(255,255,255,0.6)";
@@ -184,7 +188,7 @@ export function CefrPanel({
   const dividerColor = light ? "1px solid #EFEBE2" : "1px solid rgba(255,255,255,0.1)";
 
   // The evaluator writes the feedback in English; analysis_fr is its French translation (lib/analysis-translation.ts).
-  const primaryFeedback: AnalysisTranslation = feedbackLanguage !== "en" && result.analysis_fr ? result.analysis_fr : result;
+  const primaryFeedback: AnalysisTranslation = analysisFor(result, feedbackLanguage === "both" ? "fr" : feedbackLanguage);
   const renderFeedback = (f: AnalysisTranslation) => (
     <>
       {/* Strengths */}
@@ -302,7 +306,7 @@ export function CefrPanel({
           ) : (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: light ? 12 : 11, marginBottom: light ? 5 : 3 }}>
               <span style={{ width: light ? 92 : 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
-              <span style={{ color: light ? "#8A8F9C" : "#4b5563", fontSize: 10 }}>n/a</span>
+              <span style={{ color: light ? "#8A8F9C" : "#4b5563", fontSize: 10 }}>{t.notAvailable}</span>
             </div>
           )
         )}
@@ -369,10 +373,10 @@ export function UtteranceBadges({ p, showForgiven = false }: { p: PronunciationR
       <span
         title={
           p.source === "azure"
-            ? "Scored by Azure + Deepgram, judged by Mistral"
+            ? "Scored by Azure + a second hearing (Voxtral; Deepgram before 2026-11-16), judged by Mistral"
             : p.source === "voxtral"
             ? "Scored by Voxtral (Mistral direct-audio judge)"
-            : "Scored by Deepgram confidence — Azure assessment pending"
+            : "Scored by Deepgram confidence (historical) — Azure assessment pending"
         }
         style={{
           background: p.source === "azure" ? "#60a5fa" : p.source === "voxtral" ? "#c084fc" : "#475569",

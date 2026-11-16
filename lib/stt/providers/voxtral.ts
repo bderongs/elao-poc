@@ -12,7 +12,7 @@ import { logServerEvent } from "@/lib/server-log";
 import type { SttProvider, SttTranscribeParams, SttResult } from "@/lib/stt/types";
 
 const LANG_CODES: Record<string, string> = {
-  fr: "fr", "nl-BE": "nl", es: "es", it: "it", de: "de", en: "en",
+  fr: "fr", "nl-BE": "nl", "nl-NL": "nl", es: "es", it: "it", de: "de", en: "en",
 };
 
 async function transcribe({ audio, contentType, filename, langCode, turnLogId }: SttTranscribeParams): Promise<SttResult> {

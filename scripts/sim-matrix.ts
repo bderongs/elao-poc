@@ -13,7 +13,7 @@
  *   npx tsx scripts/sim-matrix.ts --resume sim-runs/matrix-<ts>                    # continue / re-report a run
  *
  * Options (all optional):
- *   --lang  fr,en,nl-BE,es,it,de   languages                           (all six)
+ *   --lang  fr,en,nl-BE,nl-NL,es,it,de   languages                           (all seven)
  *   --levels A1,…,C2               simulated learner levels            (all six)
  *   --runs N                       sessions per cell                   (3)
  *   --start RUNG                   examiner starting rung              (live setting per language, else A2)
@@ -106,7 +106,7 @@ function flag(name: string): boolean {
   return process.argv.includes(`--${name}`) || savedArgs[name] === true;
 }
 
-const ALL_LANGS: ConvLang[] = ["fr", "en", "nl-BE", "es", "it", "de"];
+const ALL_LANGS: ConvLang[] = ["fr", "en", "nl-BE", "nl-NL", "es", "it", "de"];
 const languages = arg("lang", ALL_LANGS.join(",")).split(",").map((l) => l.trim()) as ConvLang[];
 for (const l of languages) if (!isConvLang(l)) throw new Error(`Unknown language "${l}"`);
 const levels = arg("levels", CEFR_LADDER.join(",")).split(",").map((l) => l.trim()) as CefrRung[];

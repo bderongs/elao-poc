@@ -3,7 +3,7 @@
 Test d'expression orale en conversation avec Léa, une examinatrice virtuelle
 (avatar 3D animé). Le candidat parle quelques minutes, l'application adapte la
 difficulté des questions à ses réponses, puis donne un niveau CEFR (de A0 à
-C1+), un score sur 100 et un retour détaillé.
+C2), un score sur 100 et un retour détaillé.
 
 Six langues : anglais, français, néerlandais (Belgique), espagnol, italien,
 allemand.
@@ -42,7 +42,7 @@ réellement utilisé.
 | **Juge par réponse (ET)** — réponse maîtrisée ou non, d'où le niveau de la question suivante | À chaque réponse | Mistral, même modèle que la conversation | Variable d'env. |
 | **Transcription (STT)** | Pendant que le candidat parle | Mistral realtime `voxtral-mini-transcribe-realtime-2602` (`MISTRAL_REALTIME_TRANSCRIBE_MODEL`), toutes langues. Secours : Mistral `voxtral-mini-latest` (`MISTRAL_TRANSCRIBE_MODEL`) si le flux échoue, coupe une réponse longue, ou si le candidat appuie sur « J'ai terminé ». | `lib/realtime-stt-config.ts` |
 | **Voix de Léa (TTS)** | À chaque phrase | Gradium : en (Zoey), fr (Solène), es (Vera), de (Resi). Azure Neural : nl-BE (Dena), it (Elsa), que Gradium ne couvre pas. | `lib/tts/registry.ts` |
-| **Prononciation (EO)** | À chaque réponse, en arrière-plan | Trois sources combinées : Deepgram `nova-3` (transcription indépendante), Azure Pronunciation Assessment (score acoustique), et un juge Mistral (`MISTRAL_PRONUNCIATION_MODEL`, sinon `MISTRAL_MODEL`) qui tranche mot par mot. | `lib/pronunciation-rollup.ts` |
+| **Prononciation (EO)** | À chaque réponse, en arrière-plan | Trois sources combinées : une seconde transcription indépendante (Voxtral, `PRONUNCIATION_VERBATIM_ENGINE`), Azure Pronunciation Assessment (score acoustique), et un juge Mistral (`MISTRAL_PRONUNCIATION_MODEL`, sinon `MISTRAL_MODEL`) qui tranche mot par mot. | `lib/pronunciation-rollup.ts` |
 | **Évaluation CEFR finale** | Une fois, en fin de session | Mistral, `MISTRAL_MODEL` (sinon `mistral-large-latest`) | `lib/llm/live-provider.ts` |
 
 Le **niveau final** n'est pas directement la sortie du modèle :
@@ -51,10 +51,10 @@ des moteurs de prononciation ; fluidité, vocabulaire/grammaire et
 communication viennent de l'évaluation CEFR), plafonne la fluidité selon le
 débit (mots par minute), passe cette moyenne sur 100, puis convertit le
 score en niveau (A1 à partir de 40, A2 à 50, B1 à 60, B2 à 70, C1 à 80, avec
-un « + » à mi-palier). **Le test ne délivre pas C2** : le score est plafonné à
-89 (C1+). Un candidat qui a maîtrisé au moins 2 questions de niveau C2 (selon
-le juge par réponse) avec une moyenne des axes d'au moins 8,75 reçoit la
-mention « haut de l'échelle ». Les règles actives sont dans
+un « + » à mi-palier). **C2 se gagne sur preuves** : sans elles, le score
+s'arrête à 89 (C1+). Un candidat qui a maîtrisé au moins 2 questions de niveau
+C2 (selon le juge par réponse), avec au plus 2 erreurs comptées et une moyenne
+des axes d'au moins 8,75, passe à C2 (90). Les règles actives sont dans
 `SCORING_RULES` (`lib/cefr-score.ts`) et expliquées dans l'admin, page
 **Scoring guide**.
 
@@ -97,7 +97,7 @@ Navigateur (app/page.tsx — micro, détection de fin de parole, avatar, déroul
   ├─ /api/chat (flux SSE)           → réponse de Léa (Mistral) + voix (Gradium / Azure)
   ├─ /api/assess-transcript         → juge par réponse (ET)
   ├─ /api/classify-topic            → suivi des thèmes
-  ├─ /api/pronunciation             → prononciation (Deepgram + Azure + juge Mistral)
+  ├─ /api/pronunciation             → prononciation (Voxtral + Azure + juge Mistral)
   ├─ /api/sessions/live             → sauvegarde de la session après chaque réponse
   ├─ /api/evaluate                  → évaluation CEFR finale (signée, voir Sécurité)
   ├─ Supabase Storage               ← envoi direct de l'audio, via URLs signées (/api/sessions/audio-urls)
@@ -211,7 +211,7 @@ Le détail de chaque variable est dans `.env.example`.
 | `MISTRAL_API_KEY` | Conversation, transcription, juges, évaluation | Obligatoire |
 | `GRADIUM_API` | Voix en/fr/es/de | Obligatoire |
 | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | Voix nl-BE/it, score acoustique de prononciation | Obligatoire |
-| `DEEPGRAM_API_KEY` | Transcription indépendante pour la prononciation | Recommandé (sans elle, score Azure seul) |
+| `PRONUNCIATION_VERBATIM_ENGINE` | Seconde transcription de la prononciation : `voxtral-transcribe` (défaut), `voxtral-chat`, `deepgram` (retour arrière, avec `DEEPGRAM_API_KEY`) | Non |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Accès serveur à la base et au stockage | Obligatoire |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Connexion des utilisateurs depuis le navigateur | Obligatoire |
 | `MISTRAL_MODEL`, `MISTRAL_CHAT_MODEL`, `MISTRAL_PRONUNCIATION_MODEL`, `MISTRAL_TRANSCRIBE_MODEL`, `MISTRAL_REALTIME_TRANSCRIBE_MODEL`, `MISTRAL_VOXTRAL_MODEL` | Choix des modèles (voir « Modèles utilisés ») | Facultatif |

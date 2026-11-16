@@ -11,7 +11,7 @@
  *
  * Options (all optional):
  *   --level A1|A2|B1|B2|C1|C2   learner level to simulate        (A1)
- *   --lang  fr,en,nl-BE,es,it,de languages, comma-separated      (fr)
+ *   --lang  fr,en,nl-BE,nl-NL,es,it,de languages, comma-separated      (fr)
  *   --runs  N                    sessions per language           (10)
  *   --answers N                  learner answers per session     (7)
  *   --start RUNG                 examiner starting rung          (A2 = live default)

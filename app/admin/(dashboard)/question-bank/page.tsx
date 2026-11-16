@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { BANK_RUNGS, bankFor, type BankRung } from "@/lib/question-bank";
-import { isConvLang, type ConvLang } from "@/lib/conversation-prompts";
+import { bankLang, isConvLang, type BankLang } from "@/lib/conversation-prompts";
 import { DOMAIN_LABEL, TOPIC_DOMAINS } from "@/lib/topic-domain";
 import { adminColors } from "@/lib/admin-theme";
 import styles from "@/components/admin.module.css";
 
-const LANG_TABS: { key: ConvLang; label: string }[] = [
+const LANG_TABS: { key: BankLang; label: string }[] = [
   { key: "fr", label: "Français" },
   { key: "en", label: "English" },
-  { key: "nl-BE", label: "Nederlands" },
+  { key: "nl-BE", label: "Nederlands (BE + NL)" },
   { key: "es", label: "Español" },
   { key: "it", label: "Italiano" },
   { key: "de", label: "Deutsch" },
@@ -26,7 +26,8 @@ const RUNG_NOTE: Record<BankRung, string> = {
 
 export default async function QuestionBankPage({ searchParams }: { searchParams: Promise<{ lang?: string }> }) {
   const { lang: langParam } = await searchParams;
-  const lang: ConvLang = isConvLang(langParam) ? langParam : "fr";
+  // nl-NL asks the nl-BE texts (roadmap L-06), so it has no tab of its own.
+  const lang: BankLang = isConvLang(langParam) ? bankLang(langParam) : "fr";
 
   return (
     <div>

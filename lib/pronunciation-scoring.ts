@@ -1,7 +1,7 @@
 /**
  * Single source of truth for pronunciation scoring, consumed by
  * lib/pronunciation/providers/azure-ensemble.ts — the live pronunciation
- * provider (Azure Pronunciation Assessment REST + Deepgram + Mistral judge).
+ * provider (Azure Pronunciation Assessment REST + Voxtral second hearing + Mistral judge).
  * The voxtral provider remains registered as an on-demand comparison run,
  * scoring from Voxtral's own judge output rather than Azure phoneme scores.
  *

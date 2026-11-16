@@ -7,10 +7,11 @@
  * the same recognition stack. This provider replaces the single-engine score
  * with TRIANGULATION:
  *
- *   1. Deepgram nova-3 (prerecorded REST) — an independent engine that
- *      transcribes closer to what was acoustically said, with per-word
- *      confidence. A mispronounced word shows up as a DIFFERENT word or a
- *      low-confidence word here.
+ *   1. A second, independent hearing (lib/pronunciation/verbatim.ts —
+ *      Voxtral transcription since 2026-11-16, Deepgram nova-3 before) that
+ *      transcribes closer to what was acoustically said. A mispronounced
+ *      word shows up as a DIFFERENT word here (or, with Deepgram, a
+ *      low-confidence one).
  *   2. Azure free-speech assessment — kept as a second, acoustic signal:
  *      per-word accuracy + phoneme scores + error flags.
  *   3. Mistral as judge — receives the live transcript (what the UI shows),
@@ -19,70 +20,23 @@
  *      → good; engines disagree on a word ("think" vs "sink") → work out the
  *      intended word from context and rate the substitution.
  *
- * Fallbacks: if the judge or Deepgram fail, the Azure acoustic result is
+ * Fallbacks: if the judge or the second hearing fail, the Azure acoustic result is
  * returned (worst case = previous behaviour, never worse).
  *
- * AZURE_SPEECH_KEY, DEEPGRAM_API_KEY, MISTRAL_API_KEY never leave the server.
+ * AZURE_SPEECH_KEY and MISTRAL_API_KEY never leave the server.
  */
 
 import { mistralComplete, mistralPronunciationModel } from "@/lib/mistral";
 import { discreteWordConfidence, wordAccuracy } from "@/lib/pronunciation-scoring";
 import { applyPronunciationForgiveness } from "@/lib/recognition-forgiveness";
 import type { PronunciationProvider, PronunciationAssessParams } from "@/lib/pronunciation/types";
+import { confidenceLine, verbatimEngineLabel, verbatimHearing, type VerbatimEvidence } from "@/lib/pronunciation/verbatim";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 
 // ─── Evidence collectors ──────────────────────────────────────────────────────
 
-export interface DgEvidence {
-  transcript: string;
-  words: Array<{ word: string; confidence: number }>;
-}
-
-/** Independent verbatim hearing of the audio via Deepgram's prerecorded API. */
-export async function deepgramVerbatim(
-  audio: ArrayBuffer,
-  contentType: string,
-  langCode: string,
-): Promise<DgEvidence | null> {
-  const key = process.env.DEEPGRAM_API_KEY;
-  if (!key) return null;
-  const lang =
-    langCode === "fr" ? "fr" :
-    langCode === "nl-BE" ? "nl" :
-    langCode === "es" ? "es" :
-    langCode === "it" ? "it" :
-    langCode === "de" ? "de" :
-    "en-US";
-  try {
-    const res = await fetch(
-      `https://api.deepgram.com/v1/listen?model=nova-3&language=${lang}&punctuate=false&smart_format=false`,
-      {
-        method: "POST",
-        headers: { Authorization: `Token ${key}`, "Content-Type": contentType },
-        body: audio,
-      }
-    );
-    if (!res.ok) {
-      console.warn(`[pronunciation] deepgram ${res.status}: ${(await res.text()).slice(0, 150)}`);
-      return null;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = (await res.json()) as any;
-    const alt = data.results?.channels?.[0]?.alternatives?.[0];
-    if (!alt?.transcript?.trim()) return null;
-    return {
-      transcript: alt.transcript as string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      words: (alt.words ?? []).map((w: any) => ({
-        word: w.word as string,
-        confidence: Math.round((w.confidence ?? 0) * 100) / 100,
-      })),
-    };
-  } catch (e) {
-    console.warn("[pronunciation] deepgram failed:", e);
-    return null;
-  }
-}
+/** The second, independent hearing — lib/pronunciation/verbatim.ts. */
+export type DgEvidence = VerbatimEvidence;
 
 export interface AzWord {
   word: string;
@@ -116,7 +70,7 @@ export async function azureAcoustic(
   referenceText = "",
 ): Promise<AzEvidence | null> {
   const langMap: Record<string, string> = {
-    fr: "fr-FR", en: "en-US", "nl-BE": "nl-BE", es: "es-ES", it: "it-IT", de: "de-DE",
+    fr: "fr-FR", en: "en-US", "nl-BE": "nl-BE", "nl-NL": "nl-NL", es: "es-ES", it: "it-IT", de: "de-DE",
   };
   const pronConfigB64 = Buffer.from(
     JSON.stringify({
@@ -183,7 +137,7 @@ export const JUDGE_SYSTEM = `You are an expert phonetician assessing the pronunc
 You cannot hear the audio. You receive evidence from two independent speech-recognition engines that both processed the SAME recording, and you triangulate:
 
 1. LIVE transcript — what the conversation recognizer understood. These are the words you must rate, in order.
-2. VERBATIM transcript (independent engine) — a second engine's hearing of the same audio, with per-word confidence 0-1. It transcribes closer to what was acoustically said.
+2. VERBATIM transcript (independent engine) — a second engine's hearing of the same audio, with per-word confidence 0-1. It transcribes closer to what was acoustically said. Some engines give no confidence ("Per-word confidence: unavailable"): then judge recognizability on agreement alone and accent on the acoustic scores, and skip every confidence criterion below.
 3. ACOUSTIC scores — per-word pronunciation accuracy 0-100 and error flags from a pronunciation model.
 4. The examiner's question — for inferring which words the learner intended.
 
@@ -237,7 +191,7 @@ async function judge(
     (context ? `Examiner's question: "${context}"\n` : "") +
     `\nLIVE transcript (rate these words, in order):\n"${liveTranscript}"\n` +
     (dg
-      ? `\nVERBATIM transcript (independent engine):\n"${dg.transcript}"\nPer-word confidence: ${dg.words.map((w) => `${w.word}(${w.confidence})`).join(" ")}\n`
+      ? `\nVERBATIM transcript (independent engine):\n"${dg.transcript}"\n${confidenceLine(dg)}\n`
       : "\nVERBATIM transcript: unavailable\n") +
     (az
       ? `\nACOUSTIC scores: ${az.words.map((w) => `${w.word}(${w.accuracyScore}${w.errorType !== "None" ? "," + w.errorType : ""})`).join(" ")}\n`
@@ -278,7 +232,7 @@ const VERDICT_MAP: Record<string, { confidence: number; accuracyScore: number; e
 };
 
 export const LANG_LABELS: Record<string, string> = {
-  fr: "French", "nl-BE": "Dutch (Belgian)", es: "Spanish", it: "Italian", de: "German", en: "English",
+  fr: "French", "nl-BE": "Dutch (Belgian)", "nl-NL": "Dutch (Netherlands)", es: "Spanish", it: "Italian", de: "German", en: "English",
 };
 
 async function assess({
@@ -288,6 +242,7 @@ async function assess({
   referenceText = "",
   context = "",
   clientWpm = 0,
+  verbatimEngine,
 }: PronunciationAssessParams): Promise<PronunciationResult | null> {
   const key = process.env.AZURE_SPEECH_KEY;
   const region = process.env.AZURE_SPEECH_REGION ?? "westeurope";
@@ -297,12 +252,12 @@ async function assess({
 
   // Both engines hear the audio in parallel — independent evidence.
   const [dg, az] = await Promise.all([
-    deepgramVerbatim(audio, contentType, langCode),
+    verbatimHearing(audio, contentType, langCode, verbatimEngine),
     azureAcoustic(audio, contentType, langCode, key, region),
   ]);
 
   console.log(
-    `[pronunciation] evidence: deepgram=${dg ? `"${dg.transcript.slice(0, 50)}"` : "none"} azure=${az ? `${az.words.length} words` : "none"}`
+    `[pronunciation] evidence: ${dg?.engine ?? "verbatim"}=${dg ? `"${dg.transcript.slice(0, 50)}"` : "none"} azure=${az ? `${az.words.length} words` : "none"}`
   );
 
   const liveText = referenceText || az?.text || dg?.transcript || "";
@@ -388,7 +343,7 @@ async function assess({
 
 export const azureEnsembleProvider: PronunciationProvider = {
   id: "azure-ensemble",
-  label: "Azure + Deepgram + Mistral judge",
-  modelLabel: `Deepgram nova-3 + Azure Pronunciation Assessment + ${mistralPronunciationModel()} judge`,
+  label: "Azure + second hearing + Mistral judge",
+  modelLabel: `${verbatimEngineLabel()} + Azure Pronunciation Assessment + ${mistralPronunciationModel()} judge`,
   assess,
 };

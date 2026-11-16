@@ -7,6 +7,8 @@ import { SileroVad } from "@/lib/silero-vad";
 import { IntegrityTracker } from "@/lib/integrity-tracker";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
+import type { ConvLang } from "@/lib/conversation-prompts";
+import { WelcomeListenButton } from "@/components/WelcomeListenButton";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
 import { StreamingAudioPlayer } from "@/lib/audio-player";
@@ -26,12 +28,14 @@ import { CandidateTopBar as TopBar } from "@/components/CandidateTopBar";
 import styles from "@/components/candidate.module.css";
 import { WelcomeAuthForm } from "@/components/WelcomeAuthForm";
 import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/DebugPanel";
-import { AVATAR_NAME, SESSION_DURATION_MINUTES, SESSION_LENGTH_LABEL_FR, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
+import { AVATAR_NAME, SESSION_DURATION_MINUTES, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { questionById } from "@/lib/question-bank";
 import { substantiveAnswers } from "@/lib/pronunciation-rollup";
 import { exchangesFromHistory } from "@/lib/cefr-boundary";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
+import { UI_STRINGS } from "@/lib/ui-strings";
+import { UiLangProvider, useUiLangFromBrowser } from "@/lib/ui-lang";
 import {
   UserWords,
   UtteranceBadges,
@@ -45,32 +49,24 @@ const TalkingHeadAvatar = dynamic(
   { ssr: false }
 );
 
-type Lang = "fr" | "en" | "nl-BE" | "es" | "it" | "de";
+type Lang = ConvLang;
 
 const LANGUAGES: Array<{ code: Lang; label: string; meta: string }> = [
   { code: "fr", label: "Français", meta: "FR · FRANCE" },
   { code: "en", label: "English", meta: "EN · UK" },
-  { code: "nl-BE", label: "Nederlands", meta: "NL · BELGIQUE" },
+  { code: "nl-BE", label: "Nederlands", meta: "NL · BELGIË" },
+  { code: "nl-NL", label: "Nederlands", meta: "NL · NEDERLAND" },
   { code: "es", label: "Español", meta: "ES · ESPAÑA" },
   { code: "it", label: "Italiano", meta: "IT · ITALIA" },
   { code: "de", label: "Deutsch", meta: "DE · DEUTSCHLAND" },
 ];
-
-/** French name of each assessment language, for the picker's CTA — interface copy stays French regardless of the language chosen (doc/new_design). */
-const LANG_NAME_FR: Record<Lang, string> = {
-  fr: "français",
-  en: "anglais",
-  "nl-BE": "néerlandais",
-  es: "espagnol",
-  it: "italien",
-  de: "allemand",
-};
 
 /** Neutral filler sent through the normal chat pipeline when the user hits "Passer" — treated as a real (weak) answer, not a special protocol message. */
 const SKIP_TEXT: Record<Lang, string> = {
   fr: "Je préfère passer cette question.",
   en: "I'd rather skip this question.",
   "nl-BE": "Ik sla deze vraag liever over.",
+  "nl-NL": "Ik sla deze vraag liever over.",
   es: "Prefiero saltarme esta pregunta.",
   it: "Preferisco saltare questa domanda.",
   de: "Ich überspringe diese Frage lieber.",
@@ -90,12 +86,11 @@ const CLARIFY_TEXT: Record<Lang, string> = {
   fr: "Je n'ai pas compris la question.",
   en: "I didn't understand the question.",
   "nl-BE": "Ik heb de vraag niet begrepen.",
+  "nl-NL": "Ik heb de vraag niet begrepen.",
   es: "No he entendido la pregunta.",
   it: "Non ho capito la domanda.",
   de: "Ich habe die Frage nicht verstanden.",
 };
-
-/** French word for small counts (0-3), used in the "N questions sur 3 terminées" caption. */
 
 type Msg = {
   role: "user" | "assistant";
@@ -192,6 +187,14 @@ function computePronunciationAvgFromHistory(history: Msg[]): PronunciationAvg | 
 
 export default function Home() {
   const [language, setLanguage] = useState<Lang>("fr");
+  /** Interface language (roadmap L-02) — independent of the test language. */
+  const [uiLang, setUiLang] = useUiLangFromBrowser();
+  const t = UI_STRINGS[uiLang];
+  /** For callbacks that may outlive a render (VAD, stream handlers). */
+  const tRef = useRef(t);
+  tRef.current = t;
+  const uiLangRef = useRef(uiLang);
+  uiLangRef.current = uiLang;
   const [sessionStarted, setSessionStarted] = useState(false);
   /** Pre-session onboarding: "welcome" (what the test is) -> "auth" (sign in / sign up / continue as guest)
    *  -> "language" (today's picker) -> "instructions" (mic check, doc/new_design screen 2). A returning
@@ -450,7 +453,7 @@ export default function Home() {
           liveSessionStartRef.current = fetch("/api/sessions/live", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ language }),
+            body: JSON.stringify({ language, uiLanguage: uiLangRef.current }),
           })
             .then((r) => (r.ok ? r.json() : null))
             .then((j: { id?: string } | null) => {
@@ -688,6 +691,7 @@ export default function Home() {
     const form = new FormData();
     if (liveSessionIdRef.current) form.append("sessionId", liveSessionIdRef.current);
     form.append("language", language);
+    form.append("uiLanguage", uiLangRef.current);
     form.append("durationSeconds", String(elapsed));
     // Level, score and dimensions are read server-side from the (verified) evaluation itself.
     form.append("evaluation", JSON.stringify(result ?? null));
@@ -1049,7 +1053,7 @@ export default function Home() {
    *  a neutral filler through the normal chat pipeline (doc/new_design). */
   const handleSkipQuestion = () => {
     if (turnState !== "userSpeaking" || isProcessingRef.current) return;
-    const confirmSkip = () => window.confirm("Passer cette question sans y répondre ?");
+    const confirmSkip = () => window.confirm(tRef.current.session.confirmSkip);
     if (!(integrityRef.current ? integrityRef.current.withoutAway(confirmSkip) : confirmSkip())) return;
     integrityRef.current?.mark("skipped");
     void handleUserTurn(SKIP_TEXT[language] ?? SKIP_TEXT.fr);
@@ -1253,7 +1257,7 @@ export default function Home() {
       micStreamRef.current = stream;
       setMicStatus("granted");
       const label = stream.getAudioTracks()[0]?.label;
-      setMicDeviceLabel(label && label.trim() ? label : "Micro par défaut");
+      setMicDeviceLabel(label && label.trim() ? label : null);
       startMicLevelLoop(stream);
       return stream;
     } catch (e) {
@@ -1388,7 +1392,7 @@ export default function Home() {
     // inside the click handler before any await, otherwise Chrome's autoplay
     // policy will block the AudioContext when the first TTS chunk arrives.
     // The MediaStreamDestinationNode (for session recording) is also created
-    // here so it's ready when we connect the mic stream after Deepgram starts.
+    // here so it's ready when we connect the mic stream once the live recognizer opens the mic.
     playerRef.current = new StreamingAudioPlayer((amp) => {
       const wasSpeaking = isSpeakingRef.current;
       isSpeakingRef.current = amp > 0;
@@ -1468,7 +1472,7 @@ export default function Home() {
         isProcessingRef.current = false;
         setPartialUser("");
         if (notifyUser) {
-          setSttNotice("Je n'ai pas bien entendu — pouvez-vous répéter ?");
+          setSttNotice(tRef.current.session.notHeard);
           integrityRef.current?.mark("techIssue");
         }
         // An answer spoken while this one was transcribing got buffered
@@ -1850,7 +1854,7 @@ export default function Home() {
       if (!res.body) {
         isProcessingRef.current = false;
         setIsThinking(false);
-        setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
+        setChatError(tRef.current.session.examinerError);
         integrityRef.current?.mark("techIssue");
         return;
       }
@@ -1952,7 +1956,7 @@ export default function Home() {
           } else if (type === "error") {
             console.error("Stream error:", data);
             setIsThinking(false);
-            setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
+            setChatError(tRef.current.session.examinerError);
             integrityRef.current?.mark("techIssue");
           }
         }
@@ -1980,7 +1984,7 @@ export default function Home() {
         return;
       }
       console.error("handleUserTurn failed:", err);
-      setChatError("L'examinateur rencontre un problème technique, réessaie dans un instant.");
+      setChatError(tRef.current.session.examinerError);
       integrityRef.current?.mark("techIssue");
       processBufferedRef.current();
     }
@@ -2104,6 +2108,7 @@ export default function Home() {
           pronunciationContext: finalPronunciationAvg,
           ladderSteps: ladderStepsRef.current,
           exchanges: exchangesFromHistory(historyRef.current),
+          uiLanguage: uiLangRef.current,
         }),
       });
       if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
@@ -2162,10 +2167,10 @@ export default function Home() {
   const transcriptPanel = (
     <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
       <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.1em", marginBottom: 10 }}>
-        TRANSCRIPTION
+        {t.transcript.title}
       </div>
       {history.length === 0 && (
-        <p style={{ color: "#8A8F9C", fontSize: 13 }}>La conversation s&apos;affichera ici…</p>
+        <p style={{ color: "#8A8F9C", fontSize: 13 }}>{t.transcript.empty}</p>
       )}
       {history.map((m, i) => (
         <div
@@ -2179,7 +2184,7 @@ export default function Home() {
           }}
         >
           <div style={{ fontSize: 11, color: "#8A8F9C", marginBottom: 4 }}>
-            {m.role === "user" ? "Vous" : "Léa"}
+            {m.role === "user" ? t.transcript.you : AVATAR_NAME}
           </div>
           <div style={{ fontSize: 14, lineHeight: 1.5, color: "#141D33" }}>
             {/* Coloured pronunciation words appear only after the CEFR
@@ -2216,6 +2221,7 @@ export default function Home() {
   const dotsFilled = Math.min(answersCount, dotsTotal);
 
   return (
+    <UiLangProvider lang={uiLang} setLang={setUiLang}>
     <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", background: "#F7F5F0", color: "#141D33", fontFamily: "'DM Sans',system-ui,sans-serif" }}>
       <style>{`
         @keyframes elaoWave { 0%,100% { transform:scaleY(0.28); } 50% { transform:scaleY(1); } }
@@ -2248,23 +2254,19 @@ export default function Home() {
           <div className={styles.welcomeScreen}>
             <div style={{ textAlign: "center", maxWidth: 640, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                Évaluation orale · CECRL
+                {t.welcome.eyebrow}
               </span>
               <h1 className={styles.titleXL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
-                Votre niveau de langue,
-                <br className={styles.hideMobile} /> en une conversation.
+                {t.welcome.titleLine1}
+                <br className={styles.hideMobile} /> {t.welcome.titleLine2}
               </h1>
               <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.55, maxWidth: 540 }}>
-                Échangez à voix haute pendant {SESSION_LENGTH_LABEL_FR} avec {AVATAR_NAME}, notre examinatrice. Ses questions
-                s&apos;adaptent à vos réponses&nbsp;; il n&apos;y a rien à préparer.
+                {t.welcome.lead(t.sessionLength, AVATAR_NAME)}
               </p>
+              <WelcomeListenButton />
             </div>
             <div className={styles.welcomeSteps}>
-              {[
-                ["Choisissez la langue", "Français, anglais, néerlandais, espagnol, italien ou allemand."],
-                [`Parlez avec ${AVATAR_NAME}`, "Une vraie conversation, au rythme qui vous convient."],
-                ["Recevez votre niveau", "De A0 à C1+, avec le détail : prononciation, fluidité, vocabulaire, grammaire."],
-              ].map(([title, desc], i) => (
+              {t.welcome.steps(AVATAR_NAME).map(([title, desc], i) => (
                 <div key={title} className={styles.welcomeStep}>
                   <StepBadge n={i + 1} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -2276,9 +2278,9 @@ export default function Home() {
             </div>
             <div className={styles.welcomeCta}>
               <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={() => setPreSessionStep("auth")} style={primaryBtn()}>
-                Commencer
+                {t.welcome.start}
               </button>
-              <span style={{ fontSize: 13, color: "#8A8F9C" }}>Prévoyez un endroit calme et un micro.</span>
+              <span style={{ fontSize: 13, color: "#8A8F9C" }}>{t.welcome.quietPlace}</span>
             </div>
           </div>
         </>
@@ -2292,10 +2294,10 @@ export default function Home() {
             <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em" }}>
-                  Créez votre compte
+                  {t.auth.title}
                 </h2>
                 <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E", lineHeight: 1.55 }}>
-                  Pour retrouver vos résultats et suivre votre progression.
+                  {t.auth.lead}
                 </p>
               </div>
               <div style={{ width: "100%", boxSizing: "border-box", background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14, padding: 22, textAlign: "left" }}>
@@ -2307,14 +2309,14 @@ export default function Home() {
                   className={`elao-text-action ${styles.tapTarget}`}
                   style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
                 >
-                  ← Retour
+                  {t.auth.back}
                 </span>
                 <span
                   onClick={() => setPreSessionStep("language")}
                   className={`elao-text-action ${styles.tapTarget}`}
                   style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
                 >
-                  Continuer sans compte
+                  {t.auth.guest}
                 </span>
               </div>
             </div>
@@ -2329,19 +2331,18 @@ export default function Home() {
           <div className={styles.centerScreen}>
             <div style={{ width: "100%", maxWidth: 440, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
               <h2 className={styles.titleM} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.25 }}>
-                Continuer en {LANGUAGES.find((l) => l.code === storedPreference.language)?.label}, niveau{" "}
-                {storedPreference.rung}&nbsp;?
+                {t.confirmPreference.title(t.langName[storedPreference.language as Lang] ?? storedPreference.language, storedPreference.rung)}
               </h2>
-              <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>On reprend là où vous vous étiez arrêté(e).</p>
+              <p style={{ margin: 0, fontSize: 16, color: "#5A5F6E" }}>{t.confirmPreference.lead}</p>
               <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
-                Continuer
+                {t.confirmPreference.continue}
               </button>
               <span
                 onClick={() => setPreSessionStep("language")}
                 className={`elao-text-action ${styles.tapTarget}`}
                 style={{ fontSize: 14, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
               >
-                Changer de langue
+                {t.confirmPreference.changeLanguage}
               </span>
             </div>
           </div>
@@ -2355,12 +2356,12 @@ export default function Home() {
           <div className={styles.langScreen}>
             <div style={{ textAlign: "center", maxWidth: 620, display: "flex", flexDirection: "column", gap: 14 }}>
               <h2 className={styles.titleXL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
-                Bonjour. Dans quelle langue
+                {t.language.titleLine1}
                 <br className={styles.hideMobile} />{" "}
-                allons-nous parler&nbsp;?
+                {t.language.titleLine2}
               </h2>
               <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.55 }}>
-                Une conversation de {SESSION_LENGTH_LABEL_FR} avec Léa, notre examinatrice. Il n&apos;y a rien à préparer.
+                {t.language.lead(t.sessionLength, AVATAR_NAME)}
               </p>
             </div>
             <div className={styles.langGrid}>
@@ -2392,9 +2393,9 @@ export default function Home() {
             </div>
             <div className={styles.langCta}>
               <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={() => setPreSessionStep("instructions")} style={primaryBtn()}>
-                Continuer en {LANG_NAME_FR[language]}
+                {t.language.continueIn(t.langName[language])}
               </button>
-              <span style={{ fontSize: 13, color: "#8A8F9C" }}>Vous pourrez vérifier votre micro à l&apos;étape suivante.</span>
+              <span style={{ fontSize: 13, color: "#8A8F9C" }}>{t.language.micNext}</span>
             </div>
           </div>
         </>
@@ -2406,9 +2407,11 @@ export default function Home() {
           <TopBar
             right={
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#6B6F7D" }}>
+                {/* Divider: the interface-language menu sits just left of this one. */}
+                <span aria-hidden="true" style={{ width: 1, height: 18, background: "#DDD9D0", marginRight: 8 }} />
                 {/* Lets a misclicked language be fixed without going back to the picker. */}
                 <select
-                  aria-label="Changer de langue"
+                  aria-label={t.instructions.changeLanguageAria}
                   value={language}
                   onChange={(e) => setLanguage(e.target.value as Lang)}
                   style={{
@@ -2424,11 +2427,11 @@ export default function Home() {
                 >
                   {LANGUAGES.map((l) => (
                     <option key={l.code} value={l.code}>
-                      {LANG_NAME_FR[l.code].charAt(0).toUpperCase() + LANG_NAME_FR[l.code].slice(1)}
+                      {t.langName[l.code].charAt(0).toUpperCase() + t.langName[l.code].slice(1)}
                     </option>
                   ))}
                 </select>
-                · évaluation orale
+                <span className={styles.hideMobile}>{t.instructions.topBarSuffix}</span>
               </span>
             }
           />
@@ -2436,22 +2439,14 @@ export default function Home() {
             <div className={styles.instructionsIntro} style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-                  Votre niveau en {SESSION_LENGTH_LABEL_FR}
+                  {t.instructions.title(t.sessionLength)}
                 </h2>
                 <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.6, maxWidth: 460 }}>
-                  Léa vous posera des questions simples sur votre quotidien. Répondez à voix haute, comme dans une
-                  vraie conversation.
+                  {t.instructions.lead(AVATAR_NAME)}
                 </p>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                {[
-                  ["Écoutez la question", "Vous pouvez la faire répéter une fois."],
-                  ["Parlez librement", "Hésiter, reprendre, se corriger : tout cela est normal."],
-                  ["Laissez un silence", "Léa comprend que vous avez terminé et enchaîne."],
-                  ...(integrityEnabled
-                    ? [["Répondez spontanément", "Sans aide extérieure. Les longs silences avant de répondre et les sorties de cette fenêtre sont enregistrés et visibles par l'évaluateur."]]
-                    : []),
-                ].map(([title, desc], i) => (
+                {[...t.instructions.steps(AVATAR_NAME), ...(integrityEnabled ? [t.instructions.integrityStep] : [])].map(([title, desc], i) => (
                   <div key={title} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
                     <StepBadge n={i + 1} />
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -2464,31 +2459,25 @@ export default function Home() {
             </div>
             <div className={styles.instructionsMic} style={{ display: "flex", flexDirection: "column", gap: 18, padding: 28, background: "#FFFFFF", border: "1px solid #E4E0D7", borderRadius: 14 }}>
               <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em" }}>
-                VOTRE MICRO
+                {t.instructions.micLabel}
               </span>
               <LevelBars count={12} flexBars height={64} color="#141D33" level={micStatus === "granted" ? Math.max(micLevel, 0.06) : 0} gapPx={4} />
               <p style={{ margin: 0, fontSize: 15, color: "#5A5F6E", lineHeight: 1.5 }}>
-                {micStatus === "denied" ? (
-                  "Le micro est bloqué — autorisez l'accès dans les réglages du navigateur."
-                ) : (
-                  <>Dites «&nbsp;bonjour&nbsp;» pour vérifier que l&apos;on vous entend bien.</>
-                )}
+                {micStatus === "denied" ? t.instructions.micBlocked : t.instructions.sayHello}
               </p>
               {micStatus === "granted" && noiseWarning && (
                 <p role="status" style={{ margin: 0, padding: "10px 14px", fontSize: 14, color: "#8A6410", lineHeight: 1.5, background: "#FBF4E4", borderRadius: 10 }}>
-                  {noiseWarning === "noisy"
-                    ? "Votre environnement semble un peu bruyant. Le test fonctionnera, mais vos résultats seront plus fiables dans un endroit plus calme."
-                    : "On vous entend faiblement. Rapprochez-vous du micro ou parlez un peu plus fort."}
+                  {noiseWarning === "noisy" ? t.instructions.noisy : t.instructions.quiet}
                 </p>
               )}
               <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 4, borderTop: "1px solid #EFEBE2" }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: micStatus === "granted" ? "#2F9E6E" : "#C9C4B8" }} />
                 <span style={{ fontSize: 15, color: "#141D33" }}>
                   {micStatus === "granted"
-                    ? `Micro détecté — ${micDeviceLabel}`
+                    ? t.instructions.micDetected(micDeviceLabel ?? t.instructions.defaultMic)
                     : micStatus === "denied"
-                      ? "Micro non détecté"
-                      : "Détection du micro…"}
+                      ? t.instructions.micNotDetected
+                      : t.instructions.micDetecting}
                 </span>
               </div>
             </div>
@@ -2499,9 +2488,9 @@ export default function Home() {
                 disabled={micStatus === "pending"}
                 style={primaryBtn("16px 36px")}
               >
-                Je suis prêt
+                {t.instructions.ready}
               </button>
-              <span style={{ fontSize: 14, color: "#8A8F9C" }}>Aucune note n&apos;est affichée pendant l&apos;épreuve.</span>
+              <span style={{ fontSize: 14, color: "#8A8F9C" }}>{t.instructions.noGrades}</span>
             </div>
           </div>
         </>
@@ -2513,12 +2502,13 @@ export default function Home() {
       {sessionStarted && phase === "active" && (
         <>
           <TopBar
+            langSwitcher={false}
             right={
               <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div
                     role="img"
-                    aria-label={`${answersCount} réponse${answersCount > 1 ? "s" : ""} donnée${answersCount > 1 ? "s" : ""}`}
+                    aria-label={t.session.answersAria(answersCount)}
                     style={{ display: "flex", alignItems: "center", gap: 6 }}
                   >
                     {Array.from({ length: dotsTotal }, (_, i) => (
@@ -2529,7 +2519,7 @@ export default function Home() {
                     ))}
                   </div>
                   <span className={styles.hideMobile} style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 14, color: "#5A5F6E" }}>
-                    {answersCount} réponse{answersCount > 1 ? "s" : ""}
+                    {t.session.answers(answersCount)}
                   </span>
                 </div>
                 <span
@@ -2537,7 +2527,7 @@ export default function Home() {
                   className={`elao-text-action ${styles.tapTarget}`}
                   style={{ fontSize: 13, color: "#8A8F9C", cursor: "pointer" }}
                 >
-                  Terminer
+                  {t.session.finish}
                 </span>
               </div>
             }
@@ -2580,7 +2570,7 @@ export default function Home() {
             {/* Whatever the turn state — it only sits above the indicator, never interrupts. */}
             {awayNotice && (
               <span role="status" style={{ fontSize: 15, color: "#6B6F7D", textAlign: "center" }}>
-                Merci de rester sur le test et de ne pas quitter cette fenêtre.
+                {t.session.awayNotice}
               </span>
             )}
 
@@ -2588,9 +2578,9 @@ export default function Home() {
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
                 <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 22px", borderRadius: 100, background: "#141D33" }}>
                   <WaveBars count={5} width={3} height={20} color="#F5B921" duration={0.9} />
-                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#FFFFFF" }}>Léa vous parle</span>
+                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#FFFFFF" }}>{t.session.avatarSpeaking(AVATAR_NAME)}</span>
                 </div>
-                <span style={{ fontSize: 15, color: "#8A8F9C", textAlign: "center" }}>Écoutez — vous répondrez juste après.</span>
+                <span style={{ fontSize: 15, color: "#8A8F9C", textAlign: "center" }}>{t.session.listenThen}</span>
               </div>
             )}
 
@@ -2599,12 +2589,12 @@ export default function Home() {
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div className={styles.pill} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 26px", borderRadius: 100, background: "#FDF0D0", border: "1px solid #F0DDA8" }}>
                     <LevelBars count={8} barWidth={4} height={26} color="#8A6410" level={Math.max(micLevel, 0.1)} gapPx={4} />
-                    <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>À vous — on vous écoute</span>
+                    <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 18, color: "#4A3708" }}>{t.session.yourTurn}</span>
                   </div>
                   <button
                     onClick={handleFinishedTalking}
-                    title="J'ai terminé — si Léa ne réagit pas à la fin de votre réponse"
-                    aria-label="J'ai terminé"
+                    title={t.session.finishedTitle(AVATAR_NAME)}
+                    aria-label={t.session.finishedAria}
                     style={{
                       width: 40,
                       height: 40,
@@ -2638,21 +2628,21 @@ export default function Home() {
                       cursor: repeatUsed ? "default" : "pointer",
                     }}
                   >
-                    Répéter la question
+                    {t.session.repeat}
                   </span>
                   <span
                     onClick={handleNotUnderstood}
                     className={`elao-text-action ${styles.tapTarget}`}
                     style={{ fontSize: 15, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
                   >
-                    Je ne comprends pas
+                    {t.session.notUnderstood}
                   </span>
                   <span
                     onClick={handleSkipQuestion}
                     className={`elao-text-action ${styles.tapTarget}`}
                     style={{ fontSize: 15, color: "#6B6F7D", borderBottom: "1px solid #C9C4B8", paddingBottom: 2, cursor: "pointer" }}
                   >
-                    Passer
+                    {t.session.skip}
                   </span>
                 </div>
               </div>
@@ -2669,10 +2659,10 @@ export default function Home() {
                       />
                     ))}
                   </div>
-                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#3A4055" }}>Léa prépare la question suivante</span>
+                  <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#3A4055" }}>{t.session.thinking(AVATAR_NAME)}</span>
                 </div>
                 <span style={{ fontSize: 15, color: "#8A8F9C" }}>
-                  Vous vous en sortez bien.
+                  {t.session.doingWell}
                 </span>
               </div>
             )}
@@ -2683,10 +2673,10 @@ export default function Home() {
                 style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "16px 22px", borderRadius: 14, background: "#FFFFFF", border: "1px solid #F0DDA8" }}
               >
                 <span style={{ fontSize: 15, color: "#141D33", lineHeight: 1.5 }}>
-                  La session a été interrompue : le micro s&apos;est coupé pendant que l&apos;écran était verrouillé ou l&apos;application en arrière-plan.
+                  {t.session.micInterrupted}
                 </span>
                 <button className={`elao-btn-primary ${styles.fullWidthMobile}`} onClick={endSession} style={primaryBtn("12px 24px")}>
-                  Terminer et voir mon résultat
+                  {t.session.finishAndSee}
                 </button>
               </div>
             )}
@@ -2714,6 +2704,7 @@ export default function Home() {
         />
       )}
     </main>
+    </UiLangProvider>
   );
 }
 

@@ -14,6 +14,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
   fr: "Français",
   en: "English",
   "nl-BE": "Nederlands (BE)",
+  "nl-NL": "Nederlands (NL)",
   es: "Español",
   it: "Italiano",
   de: "Deutsch",
@@ -71,7 +72,7 @@ export default async function ConversationSettingsPage() {
         <div style={{ fontSize: 13, color: adminColors.muted, marginBottom: 14, lineHeight: 1.5 }}>
           The lowest global score (0–100) of each level. Levels are computed when a page is viewed, so
           a change here also relabels past sessions — in the admin, on the candidate&apos;s dashboard and
-          on the results screen. Scores stop at 89 (C1+, top of the scale), so C2 can&apos;t be set.
+          on the results screen. C2 stays at 90: it is reached only with C2-question evidence (see the scoring page), so it can&apos;t be set here.
           See <a href="/admin/scoring">Scoring, explained</a> for how the score itself is built.
         </div>
         <LevelFloorsForm initial={levelFloors} />
