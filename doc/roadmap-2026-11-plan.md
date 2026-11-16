@@ -71,17 +71,20 @@ Live STT is already Voxtral (Track O). Deepgram is still used in pronunciation: 
 
 ## Phase 5 — end-of-test report
 
-- [ ] **R-01** Framing: put an ELAO report and a real Speechace report (from the imported ones, `/admin/import-speechace`) side by side; list the gap section by section. Send the list to Michel before building. List written 2026-11-16 for Michel (Claude Doc "Rapport de fin de test : écarts avec Speechace", https://claude.ai/artifact/ELzL8PZHVUToXbhAnq4KHU), from reports EN_6 + FR_3 and the per-answer data Speechace's API returns. Six decisions for Michel (A–F): axes 3 vs 4, per-axis text fixed or written, which answers to show, what ELAO-only items to keep, word colours (Speechace: green/red only), PDF in v1. Ticked once he answers.
-- [ ] **R-02** Report page `app/report/[id]` reachable without an account through a signed token (the link returned to ELAO); the same component replaces the end-of-test results screen.
-- [ ] **R-03** Content, per the roadmap: shortened detailed analysis; scores on 100 (7.1 → 71, display only); every text in `ui_language` (L-04); per-answer replay with its transcript (recordings are private since 0015 → signed URLs via `/api/sessions/audio-urls`); words coloured yellow / orange / red from the pronunciation word verdicts; pronunciation and fluency scores.
-- [ ] **R-04** Copy the Speechace layout as-is (Michel: copy, don't approximate).
+Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Speechace-style report. He wants the API to give his own platform enough data to build its report. Our results screen is the test bench: try what is worth showing there first, then decide what the API sends.
+
+- [x] **R-01** Framing: ELAO vs Speechace side by side. Gap list written 2026-11-16 (Claude Doc "Rapport de fin de test : écarts avec Speechace", https://claude.ai/artifact/ELzL8PZHVUToXbhAnq4KHU) — now background only; Baptiste took the decisions below instead of Michel.
+- [x] **R-03a** Scores: keep the 4 axes, shown on 100 (display only, 7.5 → 75; the composite is unchanged). Done 2026-11-16 in `CefrPanel`.
+- [x] **R-03b** Analysis: a few words per axis above the existing feedback — `axis_feedback` (4 strings) from the final evaluator, prompt v10; the pronunciation line gets the session's most-missed words (`weakPronunciationWords`). Translated with the rest. The general appreciation (`summary`) stays; it becomes `general_summary` in the API. Done 2026-11-16.
+- [ ] ~~**R-03c**~~ Per-answer assessment: not done (Baptiste, 2026-11-16). Per-answer facts we already store (pronunciation score, WPM, question level, level-judge verdict, response time, help buttons) stay available for the API.
+- [ ] **R-02** Report page `app/report/[id]` reachable without an account through a signed token — only if the API needs a report link; to decide with the API output.
+- [ ] **R-05** API output for the report: map what the results screen shows (4 axes on 100, `axis_feedback`, `general_summary`, strengths / to improve / errors, in the interface language) into the result snapshot (`doc/api/openapi.yaml`, API-06b).
 
 ## Waiting on Michel
 
 1. Mistral API key (Q-01).
 2. Where the call-reception screen lives (phase 2).
 3. Forced-question rules when the candidate doesn't reach the question's rung (P-02).
-4. Decisions A–F on the report gap list (R-01).
 
 ## Log
 
@@ -100,3 +103,4 @@ Live STT is already Voxtral (Track O). Deepgram is still used in pronunciation: 
 | 2026-11-16 | Model pin cherry-picked to master (`3faccb0`, pushed: `MISTRAL_MODEL` unset on Vercel, so prod was on the reasoning model). Go for Voxtral: `voxtral-transcribe` is the code default (A-02). A-03 | Voxtral reaches production only when this branch is merged (needs migrations 0018 + 0019 first) | A-04 (VAD lab comparison) |
 | 2026-11-16 | Branch merged to master (`daef876`, build OK). Migrations 0018 + 0019 applied to the shared DB (constraints checked) | — | Prod smoke test; A-04; R-01 |
 | 2026-11-16 | A-04 dropped (Silero stays). R-01 gap list written for Michel | Michel's decisions A–F on the report | R-02 (report page + signed link) can start; content waits for A–F |
+| 2026-11-16 | Phase 5 reframed (report = test bench for the API). R-03a (axes on 100), R-03b (`axis_feedback`, prompt v10) | — | R-05 (report fields in the API spec) |

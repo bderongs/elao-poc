@@ -31,7 +31,7 @@ import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/Deb
 import { AVATAR_NAME, SESSION_DURATION_MINUTES, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { questionById } from "@/lib/question-bank";
-import { substantiveAnswers } from "@/lib/pronunciation-rollup";
+import { substantiveAnswers, weakPronunciationWords } from "@/lib/pronunciation-rollup";
 import { exchangesFromHistory } from "@/lib/cefr-boundary";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { UI_STRINGS } from "@/lib/ui-strings";
@@ -2105,7 +2105,12 @@ export default function Home() {
         body: JSON.stringify({
           language,
           userTurns,
-          pronunciationContext: finalPronunciationAvg,
+          pronunciationContext: finalPronunciationAvg && {
+            ...finalPronunciationAvg,
+            weakWords: weakPronunciationWords(
+              historyRef.current.filter((m) => m.role === "user" && m.pronunciation && !isPlaceholderPronunciation(m.pronunciation)).map((m) => m.pronunciation!)
+            ),
+          },
           ladderSteps: ladderStepsRef.current,
           exchanges: exchangesFromHistory(historyRef.current),
           uiLanguage: uiLangRef.current,

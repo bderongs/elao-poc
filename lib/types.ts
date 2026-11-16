@@ -22,7 +22,10 @@ export interface CefrResult {
   strengths: string[];
   areas_for_improvement: string[];
   notable_errors: string[];
+  /** The general appreciation (2-3 sentences) — exposed as `general_summary` in the integrator API. */
   summary: string;
+  /** A few words of appreciation per axis, shown above the rest of the feedback (prompt v10, 2026-11-16). Absent before. */
+  axis_feedback?: AxisFeedback;
   /** Number of candidate answers and their mean length in words — stamped at evaluation time (withAnswerEvidence in lib/cefr-prompt.ts) for the C2-floor rule. Absent on sessions evaluated before 2026-10-08. */
   answer_count?: number;
   words_per_answer?: number;
@@ -38,12 +41,23 @@ export interface CefrResult {
   analysis_i18n?: Partial<Record<"nl" | "es" | "it" | "de", AnalysisTranslation>>;
 }
 
+/** One short sentence per scored axis — written by the final evaluator (lib/cefr-prompt.ts). */
+export interface AxisFeedback {
+  pronunciation: string;
+  fluency: string;
+  vocabulary_grammar: string;
+  communication: string;
+}
+
+export const AXIS_FEEDBACK_KEYS = ["pronunciation", "fluency", "vocabulary_grammar", "communication"] as const;
+
 /** The evaluator's written feedback, translated — same items, same order as the original. */
 export interface AnalysisTranslation {
   summary: string;
   strengths: string[];
   areas_for_improvement: string[];
   notable_errors: string[];
+  axis_feedback?: AxisFeedback;
 }
 
 export interface PronunciationAvg {

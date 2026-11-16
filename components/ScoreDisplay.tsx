@@ -1,5 +1,5 @@
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
-import type { AnalysisTranslation, CefrResult, PronunciationAvg } from "@/lib/types";
+import type { AnalysisTranslation, AxisFeedback, CefrResult, PronunciationAvg } from "@/lib/types";
 import { scoreToLevel, computeCompositeCefrScore, withLevelFloors, type LevelFloors } from "@/lib/cefr-score";
 import { analysisFor } from "@/lib/analysis-pick";
 import type { UiLang } from "@/lib/ui-strings";
@@ -166,11 +166,12 @@ export function CefrPanel({
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   const light = theme === "light";
-  // All 4 components on a 0-10 scale for uniform bar display
-  const pronScore  = pronunciationAvg  ? pronunciationAvg.pronunciation / 10 : null;
-  const fluency    = result.dimensions.fluency;
-  const vocabGram  = result.dimensions.vocabulary_grammar;
-  const comm       = result.dimensions.communication;
+  // All 4 axes shown on 100 (display only: the evaluator scores 0-10 in half points, 7.5 → 75; the composite is unchanged).
+  const on100 = (v: number | null) => (v === null ? null : v * 10);
+  const pronScore  = pronunciationAvg ? pronunciationAvg.pronunciation : null;
+  const fluency    = on100(result.dimensions.fluency);
+  const vocabGram  = on100(result.dimensions.vocabulary_grammar);
+  const comm       = on100(result.dimensions.communication);
 
   const { score: compositeScore, level: compositeLevel, topOfScale } = computeCompositeCefrScore(result, pronunciationAvg, withLevelFloors(levelFloors));
 
@@ -189,8 +190,28 @@ export function CefrPanel({
 
   // The evaluator writes the feedback in English; analysis_fr is its French translation (lib/analysis-translation.ts).
   const primaryFeedback: AnalysisTranslation = analysisFor(result, feedbackLanguage === "both" ? "fr" : feedbackLanguage);
+  const axisLines: [string, keyof AxisFeedback][] = [
+    [t.axes.pronunciation, "pronunciation"],
+    [t.axes.fluency, "fluency"],
+    [t.axes.vocabGram, "vocabulary_grammar"],
+    [t.axes.communication, "communication"],
+  ];
   const renderFeedback = (f: AnalysisTranslation) => (
     <>
+      {/* A few words per axis (prompt v10) — above the rest of the feedback */}
+      {f.axis_feedback && (
+        <div style={{ marginBottom: light ? 14 : 8, paddingBottom: light ? 12 : 6, borderBottom: dividerColor }}>
+          {axisLines.map(([label, key]) =>
+            f.axis_feedback![key] ? (
+              <div key={key} style={{ fontSize: light ? 14 : 11, lineHeight: 1.5, marginBottom: light ? 6 : 3, color: light ? "#141D33" : undefined }}>
+                <span style={{ fontWeight: 600 }}>{label}</span>
+                <span style={{ color: bodyColor }}> — {f.axis_feedback![key]}</span>
+              </div>
+            ) : null
+          )}
+        </div>
+      )}
+
       {/* Strengths */}
       {f.strengths?.length > 0 && (
         <div style={{ marginBottom: light ? 12 : 6 }}>
@@ -298,11 +319,11 @@ export function CefrPanel({
         </span>
       </div>
 
-      {/* 4 equal-weight dimension bars (all 0-10) */}
+      {/* 4 equal-weight dimension bars, on 100 */}
       <div style={{ marginBottom: light ? 16 : 8 }}>
         {dim4.map(([label, val]) =>
           val !== null ? (
-            <Bar key={label} label={label} value={val} max={10} theme={theme} />
+            <Bar key={label} label={label} value={val} max={100} theme={theme} />
           ) : (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: light ? 12 : 11, marginBottom: light ? 5 : 3 }}>
               <span style={{ width: light ? 92 : 80, color: light ? "#6B6F7D" : "#9ca3af", flexShrink: 0 }}>{label}</span>
@@ -336,7 +357,7 @@ export function CefrPanel({
 
 export function UtteranceBadges({ p, showForgiven = false }: { p: PronunciationResult; showForgiven?: boolean }) {
   const dims: [string, number, string][] = [
-    ["P", p.pronunciationScore, "Pronunciation confidence"],
+    ["P", p.pronunciationScore, "Pronunciation score"],
     ["W", p.wpm, "Words per minute"],
   ];
   // Admin only (showForgiven): words left out of this answer's score as presumed recognition errors (Track AD).
@@ -354,9 +375,9 @@ export function UtteranceBadges({ p, showForgiven = false }: { p: PronunciationR
       {dims.map(([lbl, val, title]) => (
         <span
           key={lbl}
-          title={`${title}: ${Math.round(val)}/100`}
+          title={lbl === "W" ? `${title}: ${Math.round(val)} (speaking rate, long pauses capped)` : `${title}: ${Math.round(val)}/100`}
           style={{
-            background: wordColor(val),
+            background: lbl === "W" ? "#cbd5e1" : wordColor(val),
             color: "#000",
             borderRadius: 3,
             padding: "1px 5px",

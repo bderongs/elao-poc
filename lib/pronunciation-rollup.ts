@@ -76,6 +76,27 @@ export function substantiveAnswers<T>(items: T[], wordsOf: (item: T) => number):
   return long.length ? long : items;
 }
 
+/**
+ * The words most often scored as mispronounced over a session (accuracy
+ * below 60, the "mispronounced" colour of the transcript; forgiven words
+ * left out), most frequent first — fed to the final evaluator for the
+ * pronunciation line of its axis feedback.
+ */
+export function weakPronunciationWords(results: PronunciationResult[], max = 8): string[] {
+  const counts = new Map<string, { word: string; n: number }>();
+  for (const r of results) {
+    for (const w of r.words ?? []) {
+      if (w.forgiven || w.errorType === "Omission" || w.errorType === "Insertion" || (w.accuracyScore ?? 100) >= 60) continue;
+      const key = w.word.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, "");
+      if (key.length < 2) continue;
+      const c = counts.get(key) ?? { word: w.word.replace(/[^\p{L}\p{N}'’-]/gu, ""), n: 0 };
+      c.n++;
+      counts.set(key, c);
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.n - a.n).slice(0, max).map((c) => c.word);
+}
+
 export function computePronunciationAvg(results: PronunciationResult[]): PronunciationAvg | null {
   if (!results.length) return null;
 
