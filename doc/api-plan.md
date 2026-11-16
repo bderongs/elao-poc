@@ -39,7 +39,7 @@ One migration (`0020_api_tests.sql`; 0018 is the interface language, 0019 nl-NL)
 
 ### 3. Result snapshot
 
-- [ ] **API-06** `lib/api-result.ts` (new): `buildResultSnapshot(session, rules)` → the `full` result of the spec (level/score from `computeCompositeCefrScore` with `getLiveScoringRules()`, axes as in `buildScoreCallbackPayload`, feedback `en` + `analysis_fr`, turns from the transcript and the ladder, integrity summary). `summary` and `standard` are cuts of it.
+- [ ] **API-06** `lib/api-result.ts` (new): `buildResultSnapshot(session, rules)` → the `full` result of the spec (level/score from `computeCompositeCefrScore` with `getLiveScoringRules()`, axes on 100 as in `buildScoreCallbackPayload`, feedback `en` + `analysis_fr` + the interface language's (`analysis_i18n`), each with `axis_feedback` and `general_summary` (= the evaluator's `summary`); turns from the transcript (`pronunciation_json`: score, `wpm` → `speaking_rate`, words → `word_scores`), the ladder (`question_level`, `judge_verdict`) and `integrity_json` (`response_delay_seconds`, `answer_seconds`, `help`); integrity summary). `summary` and `standard` are cuts of it. Spec updated 2026-11-16.
 - [ ] **API-07** Write it in the final save (`POST /api/sessions` → `createSessionFromForm`), for `via_api` rows only, together with `completed_at`. Never rewrite it afterwards.
 
 ### 4. Endpoints
@@ -68,7 +68,7 @@ One migration (`0020_api_tests.sql`; 0018 is the interface language, 0019 nl-NL)
 ## Open questions for the integrator
 
 1. Does the candidate see their result at the end, or go straight to `redirect_url`? (Proposed default: our results screen, then a button to `redirect_url`.)
-2. Is French + English feedback right, or only French?
+2. Feedback languages: the spec now gives `en`, `fr` and the candidate's interface language. Enough, or only one?
 3. Do they need the audio in `full`? Left out of v1 (GDPR: retention period, a `DELETE /tests/{id}`).
 4. Webhook, polling, or both? Is the HMAC signature fine on their side? Their receiving URL.
 5. Expected volume (cost and rate limit).

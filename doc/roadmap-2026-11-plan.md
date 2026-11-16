@@ -78,7 +78,7 @@ Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Spe
 - [x] **R-03b** Analysis: a few words per axis above the existing feedback — `axis_feedback` (4 strings) from the final evaluator, prompt v10; the pronunciation line gets the session's most-missed words (`weakPronunciationWords`). Translated with the rest. The general appreciation (`summary`) stays; it becomes `general_summary` in the API. Done 2026-11-16.
 - [ ] ~~**R-03c**~~ Per-answer assessment: not done (Baptiste, 2026-11-16). Per-answer facts we already store (pronunciation score, WPM, question level, level-judge verdict, response time, help buttons) stay available for the API.
 - [ ] **R-02** Report page `app/report/[id]` reachable without an account through a signed token — only if the API needs a report link; to decide with the API output.
-- [ ] **R-05** API output for the report: map what the results screen shows (4 axes on 100, `axis_feedback`, `general_summary`, strengths / to improve / errors, in the interface language) into the result snapshot (`doc/api/openapi.yaml`, API-06b).
+- [x] **R-05** API output for the report: map what the results screen shows (4 axes on 100, `axis_feedback`, `general_summary`, strengths / to improve / errors, in the interface language) into the result snapshot (`doc/api/openapi.yaml`, API-06b). Spec done 2026-11-16: `axis_feedback`, `general_summary` (was `summary`), feedback in `en` + `fr` + the interface language, `interface_language` on tests and results, `nl-NL`; per answer in `full`: `judge_verdict`, `speaking_rate`, `word_scores`, `answer_seconds`, `help`. Still no score per answer. Code follows with phase 2.
 
 ## Waiting on Michel
 
@@ -104,3 +104,4 @@ Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Spe
 | 2026-11-16 | Branch merged to master (`daef876`, build OK). Migrations 0018 + 0019 applied to the shared DB (constraints checked) | — | Prod smoke test; A-04; R-01 |
 | 2026-11-16 | A-04 dropped (Silero stays). R-01 gap list written for Michel | Michel's decisions A–F on the report | R-02 (report page + signed link) can start; content waits for A–F |
 | 2026-11-16 | Phase 5 reframed (report = test bench for the API). R-03a (axes on 100), R-03b (`axis_feedback`, prompt v10) | — | R-05 (report fields in the API spec) |
+| 2026-11-16 | R-05: API spec carries the report details (axis feedback, general summary, interface language, per-answer words / rate / help) | Phase 2 code still waits on the integrator (API-02) | Send the updated spec to the integrator |
