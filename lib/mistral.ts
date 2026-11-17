@@ -49,14 +49,23 @@ export function mistralModel(override?: string): string {
 }
 
 /**
+ * Default model of the live conversation (2026-11-17): the examiner prompt was
+ * reworked and measured on it (doc/examiner-prompt-audit-2026-11-17.md), and
+ * it allows far more requests per minute than mistral-large-2512 (15/min).
+ */
+export const MISTRAL_CHAT_DEFAULT_MODEL = "mistral-small-latest";
+
+/**
  * Model for the live conversation call (app/api/chat/route.ts) specifically —
  * separate from MISTRAL_MODEL so it can be tuned/tested (e.g. mistral-small-latest
  * for latency) without also changing the end-of-session CEFR evaluation, which
  * reads mistralModel() directly and stays on the default/large model.
- * Falls back to MISTRAL_MODEL, then the same pinned large model.
+ * Also used by the per-turn level estimate (lib/level-assessment.ts) and the
+ * topic classifier (lib/topic-tracking.ts). MISTRAL_CHAT_MODEL overrides it
+ * (rollback: MISTRAL_CHAT_MODEL=mistral-large-2512).
  */
 export function mistralChatModel(): string {
-  return process.env.MISTRAL_CHAT_MODEL ?? process.env.MISTRAL_MODEL ?? MISTRAL_LARGE_MODEL;
+  return process.env.MISTRAL_CHAT_MODEL ?? MISTRAL_CHAT_DEFAULT_MODEL;
 }
 
 /** Model that translates the end-of-session feedback into French (lib/analysis-translation.ts) — small by default, it sits on the candidate's wait for results. */

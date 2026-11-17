@@ -122,7 +122,6 @@ const DEFAULT_CEFR_LABELS = {
   strengths: "Strengths",
   toImprove: "To improve",
   notableErrors: "Notable errors",
-  originalFeedback: "Original feedback (English)",
   confidence: { high: "HIGH", medium: "MEDIUM", low: "LOW" } as Record<string, string>,
   axes: { pronunciation: "Pronunciation", fluency: "Fluency", vocabGram: "Vocab & Gram.", communication: "Communication" },
   notAvailable: "n/a",
@@ -161,8 +160,8 @@ export function CefrPanel({
   theme?: "dark" | "light";
   /** The admin's level cut-offs (getLevelFloors) — omitted = the default 5-point bands. */
   levelFloors?: LevelFloors | null;
-  /** Which version of the written feedback to show: an interface language (falls back to the English when that translation is missing, lib/analysis-pick.ts), or "both" (French, the English original behind a toggle — admin). */
-  feedbackLanguage?: UiLang | "both";
+  /** Which version of the written feedback to show: an interface language (falls back to the English when that translation is missing, lib/analysis-pick.ts). The admin keeps the default, English. */
+  feedbackLanguage?: UiLang;
 }) {
   const t = { ...DEFAULT_CEFR_LABELS, ...labels, confidence: { ...DEFAULT_CEFR_LABELS.confidence, ...labels?.confidence } };
   const light = theme === "light";
@@ -188,8 +187,8 @@ export function CefrPanel({
   const bodyColor = light ? "#5A5F6E" : "rgba(255,255,255,0.7)";
   const dividerColor = light ? "1px solid #EFEBE2" : "1px solid rgba(255,255,255,0.1)";
 
-  // The evaluator writes the feedback in English; analysis_fr is its French translation (lib/analysis-translation.ts).
-  const primaryFeedback: AnalysisTranslation = analysisFor(result, feedbackLanguage === "both" ? "fr" : feedbackLanguage);
+  // The evaluator writes the feedback in English; the other languages are translations (lib/analysis-translation.ts).
+  const primaryFeedback: AnalysisTranslation = analysisFor(result, feedbackLanguage);
   const axisLines: [string, keyof AxisFeedback][] = [
     [t.axes.pronunciation, "pronunciation"],
     [t.axes.fluency, "fluency"],
@@ -338,17 +337,7 @@ export function CefrPanel({
         </div>
       )}
 
-      {showDetails && (
-        <>
-          {renderFeedback(primaryFeedback)}
-          {feedbackLanguage === "both" && result.analysis_fr && (
-            <details style={{ marginTop: light ? 12 : 6, fontSize: light ? 12 : 10, color: mutedColor }}>
-              <summary style={{ cursor: "pointer" }}>{t.originalFeedback}</summary>
-              <div style={{ marginTop: light ? 10 : 6 }}>{renderFeedback(result)}</div>
-            </details>
-          )}
-        </>
-      )}
+      {showDetails && renderFeedback(primaryFeedback)}
     </div>
   );
 }

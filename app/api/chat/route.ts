@@ -3,6 +3,8 @@ import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
 import { mistralChatModel, mistralComplete, mistralStreamText } from "@/lib/mistral";
 import { repairExaminerReply, SPOKEN_SENTENCE_RE } from "@/lib/examiner-guard";
 import { logServerEvent } from "@/lib/server-log";
+import { getLiveProfile } from "@/lib/test-profiles";
+import { profileQuestionReply, withTurnNote } from "@/lib/conversation-prompts";
 import type { CefrRung } from "@/lib/cefr-rung";
 import { chatProcessLabel } from "@/lib/turn-labels";
 import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
@@ -40,6 +42,10 @@ interface ChatRequest {
   clarify?: boolean;
   /** Consecutive "didn't understand" on this question, this one included — from CLARIFY_GIVE_UP_ATTEMPT the question is dropped instead (lib/examiner-prompt.ts). */
   clarifyAttempt?: number;
+  /** Client profile id of this test (`?profile=` on the link, lib/test-profiles.ts). */
+  profile?: string;
+  /** The end of the test is near — missing profile questions are asked even out of their level range. */
+  profileUrgent?: boolean;
 }
 
 // Speaking-rate presets. The conversation opens slow so low-level listeners
@@ -74,17 +80,22 @@ const NORMAL_RATE = "-3%";
  *  4. By the time the LLM finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
-  const { language, history, userMessage, turnLogId, rung, usedQuestions, bankState, isStart, avoidDomain, switchToDomain, clarify, clarifyAttempt } =
+  const { language, history, userMessage, turnLogId, rung, usedQuestions, bankState, isStart, avoidDomain, switchToDomain, clarify, clarifyAttempt, profile: profileId, profileUrgent } =
     (await req.json()) as ChatRequest;
+  const profile = profileId ? await getLiveProfile(profileId) : null;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
-  const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
-    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt,
+  const previousReply = [...(history ?? [])].reverse().find((m) => m.role === "assistant")?.content ?? "";
+  const { system, turnNote, targetRung, updatedUsedQuestions, bankState: updatedBankState, profileRemaining, profileQuestion } = buildExaminerPrompt({
+    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt, profile, profileUrgent, previousReply,
   });
+  // The turn's instruction goes last, after the speaker's message (lib/conversation-prompts.ts, three layers).
+  const modelMessages = [...(history ?? []).map(({ role, content }) => ({ role, content })), { role: "user" as const, content: withTurnNote(userMessage, turnNote) }];
   const requestReceivedAt = Date.now();
   logServerEvent("chat_request_received", {
     turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true, clarifyAttempt: clarifyAttempt ?? 1 } : {}),
     ...(updatedBankState.currentId ? { bankQuestionId: updatedBankState.currentId, bankFollowUp: updatedBankState.followUpDone === true } : {}),
+    ...(profile ? { profile: profile.id, profileQuestionId: updatedBankState.profileCurrent ?? null, profileRemaining, profileUrgent: profileUrgent === true } : {}),
   });
   const encoder = new TextEncoder();
 
@@ -149,47 +160,50 @@ export async function POST(req: Request) {
       };
 
       try {
-        const llmStream = mistralStreamText({
-          model: mistralChatModel(),
-          system,
-          messages: [
-            ...history.map(({ role, content }) => ({ role, content })),
-            { role: "user", content: userMessage },
-          ],
-          maxTokens: 300,
-          context: process,
-        });
-
-        for await (const piece of llmStream) {
-          if (!loggedFirstToken) {
-            loggedFirstToken = true;
-            logServerEvent("chat_first_llm_token", { turnLogId: logId, process });
-          }
-          emit(piece);
-        }
-
-        // The last sentence (normally the question) is still unspoken here: a reply with
-        // no question, or the same question again, gets one corrective regeneration
-        // before it is spoken (lib/examiner-guard.ts).
-        if (userMessage !== "__END__") {
-          const repaired = await repairExaminerReply({
-            language,
-            fullText,
-            pending,
-            previousExaminerTurns: history.filter((m) => m.role === "assistant").map((m) => m.content),
-            regenerate: (direction) =>
-              mistralComplete({
-                model: mistralChatModel(),
-                system: system + direction,
-                messages: [...history.map(({ role, content }) => ({ role, content })), { role: "user", content: userMessage }],
-                maxTokens: 300,
-                context: `${process}:repair`,
-              }),
+        if (profileQuestion) {
+          // Client-profile turn: the question is spoken exactly as the client wrote it, no model call.
+          const lastExaminer = [...history].reverse().find((m) => m.role === "assistant")?.content ?? "";
+          emit(profileQuestionReply(language, profileQuestion, lastExaminer));
+        } else {
+          const llmStream = mistralStreamText({
+            model: mistralChatModel(),
+            system,
+            messages: modelMessages,
+            maxTokens: 300,
+            context: process,
           });
-          if (repaired) {
-            logServerEvent("chat_reply_repaired", { turnLogId: logId, process, problem: repaired.problem, before: fullText, after: repaired.fullText });
-            fullText = repaired.fullText;
-            pending = repaired.pending;
+
+          for await (const piece of llmStream) {
+            if (!loggedFirstToken) {
+              loggedFirstToken = true;
+              logServerEvent("chat_first_llm_token", { turnLogId: logId, process });
+            }
+            emit(piece);
+          }
+
+          // The last sentence (normally the question) is still unspoken here: a reply with
+          // no question, or the same question again, gets one corrective regeneration
+          // before it is spoken (lib/examiner-guard.ts).
+          if (userMessage !== "__END__") {
+            const repaired = await repairExaminerReply({
+              language,
+              fullText,
+              pending,
+              previousExaminerTurns: history.filter((m) => m.role === "assistant").map((m) => m.content),
+              regenerate: (direction) =>
+                mistralComplete({
+                  model: mistralChatModel(),
+                  system: system + direction,
+                  messages: modelMessages,
+                  maxTokens: 300,
+                  context: `${process}:repair`,
+                }),
+            });
+            if (repaired) {
+              logServerEvent("chat_reply_repaired", { turnLogId: logId, process, problem: repaired.problem, before: fullText, after: repaired.fullText });
+              fullText = repaired.fullText;
+              pending = repaired.pending;
+            }
           }
         }
 
@@ -241,7 +255,7 @@ export async function POST(req: Request) {
       // either content or tool_calls, but not none", permanently breaking the
       // rest of the session over one transient failure.
       if (fullText.trim()) {
-        send("done", JSON.stringify({ fullText, usedQuestions: updatedUsedQuestions, bankState: updatedBankState }));
+        send("done", JSON.stringify({ fullText, usedQuestions: updatedUsedQuestions, bankState: updatedBankState, profileRemaining }));
       }
       logServerEvent("chat_stream_done", { turnLogId: logId, process, durationMs: Date.now() - requestReceivedAt });
       controller.close();

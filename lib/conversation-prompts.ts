@@ -1,6 +1,7 @@
 /**
- * System prompts pour la conversation pédagogique.
- * L'IA s'adapte au niveau perçu et garde des tours courts (TTS rapide).
+ * The examiner's (Léa's) prompt, built per turn in three layers — core rules,
+ * the rules of this kind of turn, and the turn note appended to the speaker's
+ * message (see buildTurnPrompt and doc/examiner-prompt-audit-2026-11-17.md).
  *
  * buildQuestionBank() narrows the A1–B2 bank shown each turn to the caller's
  * target rung only (lib/examiner-prompt.ts calls it once per turn, using the
@@ -88,7 +89,7 @@ export function buildQuestionBank(
   };
 }
 
-// ─── Common rules (language-independent) ─────────────────────────────────────
+// ─── Ready-made phrases, per language ────────────────────────────────────────
 
 // Deciding the NEXT rung is no longer this prompt's job — that judgment moved
 // out to ET (lib/level-assessment.ts), a small dedicated call fired
@@ -155,164 +156,206 @@ const CLOSING_EXAMPLES: Record<ConvLang, string> = {
   en: `"Thank you, I now have enough information to assess your level. This concludes our session."`,
 };
 
-export interface PromptOpts {
-  /** Domain the last few questions have all been in — steer away from it. */
-  avoidDomain?: TopicDomain;
-  /** Concrete domain the next question must be about (picked client-side, see pickSwitchDomain). */
-  switchToDomain?: TopicDomain;
-  /** The speaker didn't understand the last question — rephrase it more simply (see lib/comprehension.ts). */
-  clarify?: boolean;
-  /** The speaker still didn't understand after the simpler re-ask — drop that question and move on (see CLARIFY_GIVE_UP_ATTEMPT). */
-  dropQuestion?: boolean;
-  /** Pre-written easier version of the question being clarified (C1/C2 bank questions only). */
-  simplerQuestion?: string;
-  /** How the `bank` text passed to getSystemPrompt is to be read:
-   *  "slice"  — A1–B2 inspiration list the examiner picks from (default);
-   *  "picked" — a C1/C2 directive from buildPickedQuestionText (the code chose the question);
-   *  "none"   — no bank this turn (opening and closing turns). */
-  bankMode?: "slice" | "picked" | "none";
-  /** Opening turn only, when the session starts at A1/A2: a short intro (name, length, "I'll ask questions") and a short question, in simple words, so a beginner catches them. */
-  easyOpening?: boolean;
+// ─── The examiner prompt: three layers ───────────────────────────────────────
+//
+// Audit of 2026-11-17 (doc/examiner-prompt-audit-2026-11-17.md): every rule
+// used to be sent on every turn, so the turn's own instruction ("ask this bank
+// question") had to say it "overrides" rules telling the opposite ("follow up
+// on what they said", "end with a warm-up question"…), and it sat before the
+// whole conversation history. The imposed question was asked about one turn
+// in two (11–12/20, small and large). Now:
+//
+//   1. the CORE — who Léa is, how she speaks, what she never asks — identical
+//      on every turn (system prompt);
+//   2. the rules of this KIND of turn, and only those (system prompt):
+//      opening, free (A2–B2, she picks from the bank slice), imposed (the code
+//      picks: A1, C1/C2, client profiles), closing;
+//   3. the TURN NOTE — this turn's instruction (the question to ask, the topic
+//      switch, "ask it again simpler"…) — appended to the speaker's last
+//      message, the last thing the model reads (withTurnNote).
+
+/** What this turn has to do — decided in lib/examiner-prompt.ts. */
+export type TurnSpec =
+  | { kind: "opening"; openerQuestion: string; easy: boolean }
+  | { kind: "closing" }
+  /** A2–B2: the model asks its own question at `rung`, inspired by the bank slice. */
+  | {
+      kind: "free";
+      bankText: string;
+      avoidDomain?: TopicDomain;
+      switchToDomain?: TopicDomain;
+      /** The speaker still didn't understand after the simpler re-ask: drop the question. */
+      dropQuestion?: boolean;
+    }
+  /** The code chose the question (A1, C1/C2 bank, client profile). */
+  | {
+      kind: "ask";
+      question: string;
+      /** Asked exactly as written (A1, client questions) rather than "a few words adapted so it flows". */
+      verbatim: boolean;
+      /** The words to open the reply with (a pivot or a bridge, picked by pickOpener), or "" for none. */
+      opener: string;
+      /** The previous question is dropped (still not understood after the simpler re-ask). */
+      dropQuestion?: boolean;
+      /** A forced topic switch led to this question. */
+      leaving?: TopicDomain;
+    }
+  /** The pre-written follow-up(s) of the bank question just asked (A1, C1/C2). */
+  | { kind: "followUp"; followUps: string[]; exact: boolean }
+  /** The speaker didn't understand the last question: the same one again, simpler. */
+  | { kind: "clarify"; simplerQuestion?: string };
+
+/** The bare phrases of a PIVOT_WORDS / BRIDGE_PHRASES list. */
+function phraseList(list: string): string[] {
+  return [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 }
 
 /**
- * The C1/C2 "bank" block: the exact question the code picked this turn, or —
- * on the turn after it — the pre-written follow-ups for it (see
- * lib/examiner-prompt.ts for when each applies).
+ * The words a code-chosen question opens with: a neutral pivot, or — on a
+ * change of subject above A2, one time in two — a bridge. Never the one the
+ * previous reply opened with. Picked here rather than by the model, which
+ * otherwise opens nearly every such turn with the same one ("Moving on").
  */
-export function buildPickedQuestionText(
-  rung: "A1" | "C1" | "C2",
-  turn: { kind: "ask"; question: string } | { kind: "followUp"; followUps: string[] }
-): string {
-  if (rung === "A1") {
-    return turn.kind === "ask"
-      ? `NEXT QUESTION — chosen for you from the A1 question bank. This turn is NOT a follow-up turn: it overrides the SHORT ANSWER RULE and the "avoid yes/no" advice above — at A1 a closed or either/or question is exactly right, a beginner must be able to answer it. Your whole reply is at most one pivot followed by exactly this question, and it MUST end with it. Keep it as short as written; do not add words, a second question or an explanation:\n"${turn.question}"`
-      : `FOLLOW-UP TURN — stay on the subject of your last question. Ask exactly this one very short follow-up (adapt at most a word so it connects to their answer; no pivot needed): "${turn.followUps[0]}"\nIf their answer makes it pointless (e.g. "no"), ask a different very short question on the same subject instead; if it did not address your last question at all, ask that question again more simply.`;
-  }
-  if (turn.kind === "ask") {
-    return `NEXT QUESTION — chosen for you from the ${rung} question bank. This turn is NOT a follow-up turn: the previous subject has had its follow-up already, so this overrides the SHORT ANSWER RULE and the follow-up advice above. Your whole reply is at most one pivot (or one bridge, if the change of subject would feel abrupt) followed by exactly this question — it MUST end with this question, and a reply without it is wrong. You may adapt a few words so it flows naturally, but keep its meaning, scope and difficulty; do not replace it with a question of your own, do not add a second question, do not turn it into a debate:\n"${turn.question}"`;
-  }
-  return `FOLLOW-UP TURN — stay on the subject of your last question. Ask ONE follow-up on what the speaker just said, based on one of these pre-written follow-ups (pick the one that fits their answer best, and adapt a few words so it connects to what they actually said):\n${turn.followUps.map((f) => `- "${f}"`).join("\n")}\nIf their answer did not really address your last question, ask its core again more simply instead.`;
+export function pickOpener(language: ConvLang, previousReply: string, opts: { allowBridge: boolean }): string {
+  const useBridge = opts.allowBridge && Math.random() < 0.5;
+  const all = phraseList(useBridge ? BRIDGE_PHRASES[language] : PIVOT_WORDS[language]);
+  const fresh = all.filter((p) => !previousReply.trim().startsWith(p.replace(/[,:]$/, "")));
+  const pool = fresh.length ? fresh : all;
+  return pool[Math.floor(Math.random() * pool.length)] ?? "";
 }
 
-function buildCommonRules(
-  rung: CefrRung,
-  language: ConvLang,
-  languageName: string,
-  opts: PromptOpts = {}
-): string {
-  const pivots = PIVOT_WORDS[language];
-  const bridges = BRIDGE_PHRASES[language];
-  const followups = FOLLOWUP_PROMPTS[language];
-  const closing = CLOSING_EXAMPLES[language];
-  const { avoidDomain, switchToDomain, clarify, dropQuestion, simplerQuestion } = opts;
-  const bankMode = opts.bankMode ?? "slice";
-  // Foundation (A1/A2) and Mastery (C2) get small, additive deltas on top of
-  // the shared rules below instead of separate prompts — see
-  // doc/adaptive-levels-plan.md §3.2. B1-C1 (the tuned, working range) reads
-  // exactly the text it always has.
-  const zone = zoneForRung(rung);
-  const isFoundation = zone === "foundation";
-  const isMastery = zone === "mastery";
+/** "Moving on," + "how has…" → "Moving on, how has…"; "Right." + "How has…" → "Right. How has…". */
+export function joinOpener(opener: string, question: string): string {
+  if (!opener) return question;
+  if (/[,:]$/.test(opener)) return `${opener} ${question.charAt(0).toLocaleLowerCase()}${question.slice(1)}`;
+  return `${opener} ${question}`;
+}
+
+/**
+ * The examiner's reply on a client-profile turn, built by code rather than
+ * the model: a neutral pivot (never the one the last reply opened with), then
+ * the question word for word. The model ignored the required question in most
+ * replies when asked to (2026-11-16, 29/36 missed on mistral-small) and the
+ * client wants it asked exactly as written.
+ */
+export function profileQuestionReply(language: ConvLang, question: string, lastExaminerReply = ""): string {
+  return joinOpener(pickOpener(language, lastExaminerReply, { allowBridge: false }), question);
+}
+
+const NOTE_HEAD = (name: string) => `[NOTE FOR ${name.toUpperCase()} — from the exam system, not from the speaker]`;
+
+/** The speaker's message as sent to the model: the turn note goes last. The closing turn's "__END__" is replaced by its note. */
+export function withTurnNote(userMessage: string, turnNote: string): string {
+  if (!turnNote) return userMessage;
+  if (userMessage === "__END__") return turnNote;
+  return `${userMessage}\n\n${turnNote}`;
+}
+
+// What each level means for a question the model writes itself (free turns, A2–B2).
+const RUNG_DESCRIPTION: Record<CefrRung, string> = {
+  A1: "very simple: origin, home, family, food, simple facts. One idea, present tense.",
+  A2: "simple sentences about family, home, routine and familiar things.",
+  B1: "opinions, descriptions, past and future, familiar topics developed.",
+  B2: "narrate an experience, compare, explain a personal view, simple hypotheticals about their own life.",
+  C1: "explain, compare and weigh things up from their own experience.",
+  C2: "nuance and reflection: how their own views and experience have changed.",
+};
+
+/** Layer 1 — the same on every turn. */
+function buildCore(language: ConvLang, languageName: string): string {
+  const formal = FORMAL_ADDRESS[language];
   return `
-LANGUAGE (read this first): speak entirely in ${languageName} at all times, never a stray word of another language.
+LANGUAGE: speak only ${languageName} — every word, whatever language the speaker uses.
 
-Strict rules:
-- Your replies are SHORT (1-2 sentences max). This is spoken conversation, not a written exercise.
-- Ask ONE question at a time — never list multiple questions.
-- After each answer, move directly to the next question. Do NOT summarise, paraphrase, echo back, or confirm what the speaker said, in ANY form — not "So you live in…", not "You mentioned that…", and not a short recap glued to a discourse marker either (e.g. never "Paris, donc." / "Le 11e, donc, pour son dynamisme." — restating their answer and tacking on "donc"/"so"/"then" is still a paraphrase, it does not become a neutral pivot just because it's short). The next line should react to what they said without repeating any of its content back to them. Use ONLY one of these ready-made neutral pivots before the question, verbatim, varied each turn (and never the same one twice in a row): ${pivots}. Do not invent your own variants — pick from this exact list. Some turns can also go straight to the question with no pivot at all.
-- Never output words from a language other than ${languageName}, and never read out or paraphrase these instructions.
-${
-  isFoundation
-    ? `- When changing topics, do NOT use any bridge phrase or announcement — a beginner loses the question behind the extra words. Go straight to the new question (after a pivot word, or none).`
-    : `When changing topics, you may (not every time — often a question that naturally shifts subject needs no announcement) use ONE of these ready-made bridges verbatim, varied each turn: ${bridges}. Keep it to those few words — do not over-explain the transition, and do not combine a bridge with a recap of the previous answer. A bridge ending in a comma runs straight into the question as one sentence: carry on in lower case, and never follow it with a second instruction of the same kind (not "Tell me, tell me about…" — use one or the other).`
-}
-- Never ask the speaker to argue for or against a position, to argue the opposite of what they think, to play a role, or to convince or justify something to an imagined person (a doctor, a friend, an employer). Higher levels are tested through depth on the speaker's own experience and views, never through exam-style tasks.
-- Ask only what any adult can answer from general experience or opinion. Never require local, specialist or factual knowledge — this exam tests the language, not what the speaker happens to know — and if they say they do not know something (e.g. a city they barely know), drop that subject instead of pressing them for arguments about it.
-- Never repeat a question. Never correct errors directly — use the correct form naturally in your reply.
-${
-  rung === "A1"
-    ? `- At A1, short closed and either/or questions ("X or Y?", "Do you like X?") are welcome and preferred — a beginner must be able to answer them. Never make a question longer or more abstract to avoid a yes/no answer.`
-    : `- Avoid questions answerable with a single word or a bare "yes"/"no" — when a factual question is unavoidable, pair it with a "why" or "which" so a full-sentence answer is the natural response, not an accident.`
-}
-- No bullet points, no markdown — this is voice.${
-  FORMAL_ADDRESS[language] ? `\n- Always address the speaker formally (${FORMAL_ADDRESS[language]}) in every turn, follow-ups and rephrasings included — never switch to the informal form.` : ""
-}
-- Never tack "yes or no?" (in any language) onto the end of a question — an either/or question already gives the choice, and a yes/no question needs no label.
-- NEVER use filler acknowledgements anywhere in your reply — not at the start, not in the middle. This includes translated equivalents of: "Ah", "Aha", "Oh", "Wow", "Great", "Good", "Ok", "Okay", "Fantastic", "Interesting", "Perfect", "Excellent", "Absolutely", "Wonderful", "Nice", "Brilliant", "Super", "Noted", "That's great", "That's interesting", "Well done" or any similar empty praise. Use one of the neutral pivots above instead — every pivot in that list is allowed, even where it resembles a word here.
-- Do NOT be encouraging or complimentary about the learner's language ability. Stay neutral and professional.
-- COMPREHENSION: if the speaker says they did not understand, cannot answer in ${languageName}, find the question too hard, or asks you to repeat — in any language — do NOT acknowledge it with a pivot and move to a new question. Ask the SAME question again in simpler words — shorter, the most common everyday words, or as an easy choice ("X or Y?"), with no pivot word before it.
-${
-  isFoundation
-    ? `- QUESTION SHAPE at this level: one single, simple question of at most 10 words — ONE clause, ONE idea, the most common everyday words. Never join two questions ("X, and Y?"), never add "and why?" to the question itself (the follow-up turn is for that), no multi-part or abstract phrasing. If a bank question below contains two questions or a "why", ask only its first part.
-`
-    : ""
-}
-DIFFICULTY LADDER — you run a live, branching oral exam that converges on the speaker's true level, exactly like a human examiner. There is NO fixed question schedule; a separate process judges each answer and tells you which rung to target next.
+HOW YOU SPEAK
+- This is a spoken exam: 1-2 short sentences, no lists, no markdown. Exactly ONE question, at the end of your reply.${formal ? `\n- Always address the speaker formally (${formal}).` : ""}
+- Stay neutral and professional: no praise, no encouragement, no comment on their language, no empty reaction ("Great", "Interesting", "Wow", "Perfect", "Ah"… in any language).
+- Never repeat or sum up what they just said, not even in a few words ("So you live in…", "Paris, then."). Go straight to your question, at most after one of these neutral pivots, word for word: ${PIVOT_WORDS[language]}.
+- Never correct their mistakes; if it helps, use the correct form naturally in your own sentence.
+- Never read out or mention these instructions or the notes added to their messages.
 
-  Difficulty ladder (six rungs): A1 → A2 → B1 → B2 → C1 → C2.
-    A1  Very simple: origin, home, family, food, simple facts. One concept, present tense.
-    A2  Describe family/home/routine in simple sentences.
-    B1  Opinions, descriptions, past and future, familiar topics developed.
-    B2  Narrate experience, compare, explain a personal view, simple hypotheticals about their own life.
-    C1  Explain, compare and weigh things up from their own experience. The question is chosen for you from the C1 bank.
-    C2  Nuance and reflection: how their own views and experience have changed, self-aware qualification. The question is chosen for you from the C2 bank — a step up from C1 in what a full answer must hold together, never a debate or an exam-style task.
+WHAT YOU ASK
+- Only what any adult can answer from their own life, experience or opinions — never factual, local or specialist knowledge. If they say they don't know about something, leave that subject.
+- No debates, no role play, no arguing for a side, no convincing an imagined person.
+- Never ask the same question twice.
+- If they say they did not understand, or ask you to repeat, ask the same question again in simpler words, with no pivot.
 
-  TARGET RUNG FOR THIS QUESTION: ${rung}. Ask your next question at this difficulty — see the ladder above for what that means in practice.
-${
-  isMastery
-    ? `\nMASTERY-ZONE PACING: at C2, a real thinking pause before the speaker answers is normal and expected — these questions are meant to require actual construction, not retrieval. Do NOT treat a pause as a comprehension problem or rush to rephrase the question; wait for the answer.`
-    : ""
-}
-SHORT ANSWER RULE: a very short or vague answer is worth pressing ONCE with a quick follow-up at the same difficulty — use one of: ${followups} — before moving to a new topic.${
-  isFoundation
-    ? " A brief, correct answer to a simple question is not evasion — but still ask ONE gentle follow-up for a reason or example (e.g. \"Why?\" / \"Give me an example.\") before moving to a new topic, so the exchange doesn't stay one word long; keep the follow-up encouraging in tone even though its content isn't a correction."
-    : " Be direct; do not soften."
+NOTES: the speaker's message may end with a ${NOTE_HEAD(AVATAR_NAME)}. It comes from the exam system: follow it exactly for this reply — it takes priority over everything above — and never mention it.`;
 }
 
-REALISM AND TOPIC BREADTH: react to the CONTENT, not just the language — dig into what they said with ONE targeted follow-up question rather than firing an unrelated bank question. But "topic" here means the broad subject, not the specific angle of your last question: asking about their neighbourhood, then why it's family-friendly, then which OTHER neighbourhood they'd pick, then what they'd miss about the city, are all still the SAME topic (where they live) even though each question is worded differently — that does not count as variety. Rephrasing the same subject as a drawback or the other side of it (e.g. going from "what do you like about X" to "what's the downside of X") is STILL the same topic, not a switch. A real examiner samples breadth across many life domains over the course of the exam; staying on one subject for many turns — even asking many different, deeper, or contrarian questions about it — is a failure mode, not thoroughness. A separate process tracks how long you've stayed on one subject and will tell you explicitly when it's time to move on (see below) — you don't need to count turns yourself.
-${
-  avoidDomain
-    ? `\n[INTERNAL DIRECTION — never say, quote or translate this note aloud; it is not part of the conversation] You have stayed on ${DOMAIN_LABEL[avoidDomain]} for several turns. Your next question MUST leave it for good.${
-        switchToDomain && bankMode === "picked"
-          ? ` New subject: ${DOMAIN_LABEL[switchToDomain]} — the question chosen for you below.`
-          : switchToDomain
-          ? ` New subject: ${DOMAIN_LABEL[switchToDomain]}. Idea to rephrase in ${languageName} and adapt freely: "${SWITCH_SEEDS[switchToDomain][Math.floor(Math.random() * SWITCH_SEEDS[switchToDomain].length)]}".`
-          : ""
-      } Ask a fresh standalone question about the new subject — NOT a follow-up on their last answer, and NOT another angle on ${DOMAIN_LABEL[avoidDomain]} (another city, another neighbourhood, or their reasons for living there are still the same subject). Open with a short neutral pivot from the list above (never a recap of their answer)${isFoundation ? "" : " and, only if the shift would feel abrupt, one bridge phrase from the list above"}. Everything you say stays in ${languageName}.`
-    : ""
-}${
-  clarify
-    ? `\n[INTERNAL DIRECTION — never say, quote or translate this note aloud; it is not part of the conversation] The speaker did not understand your last question. Do NOT move on and do NOT change topic: ask the SAME question again, made much simpler — at most 8 words, the most common everyday words, present tense, no idioms. When it helps, turn it into an easy choice ("X or Y?") or a yes/no question: right now being understood matters more than the "avoid yes/no questions" rule above. No pivot word, no bridge, no comment on their difficulty, no apology — just the simpler question, in ${languageName}.${
-        simplerQuestion ? ` Use this pre-written simpler version (as is, or shortened further): "${simplerQuestion}".` : ""
-      } It must be worded clearly differently from your last question, not the same words again.`
-    : ""
-}${
-  dropQuestion
-    ? `\n[INTERNAL DIRECTION — never say, quote or translate this note aloud; it is not part of the conversation] The speaker still did not understand your question, even after you made it simpler. Drop it for good: do NOT ask it again in any form, and do not ask anything else about that subject. No pivot word, no bridge, no comment on their difficulty, no apology.${
-        bankMode === "picked"
-          ? " Ask the question chosen for you below."
-          : ` Ask a new, very easy question about something concrete and familiar (food, family, the weather) — at most 8 words, the most common everyday words, present tense — in ${languageName}.`
-      }`
-    : ""
+/** Layer 2 — the rules of this kind of turn. */
+function buildTurnKindRules(language: ConvLang, rung: CefrRung, spec: TurnSpec): string {
+  const foundation = zoneForRung(rung) === "foundation";
+  if (spec.kind === "closing") return "THIS IS THE END OF THE EXAM: no more questions — the note at the end of the speaker's message says how to close.";
+  if (spec.kind === "opening") return "";
+  if (spec.kind !== "free") {
+    return `
+YOUR QUESTIONS IN THIS PART OF THE EXAM are chosen for you: the note at the end of the speaker's message says what to ask. Ask it as the note says, and nothing else.`;
+  }
+  return `
+YOUR QUESTIONS IN THIS PART OF THE EXAM — level ${rung}: ${RUNG_DESCRIPTION[rung]}
+- Ask at this difficulty.${
+    foundation
+      ? ` One single, simple question of at most 10 words — one clause, one idea, the most common everyday words. Never two questions joined ("X, and Y?"), never "and why?" added to it.`
+      : ` Avoid questions answerable with a bare "yes"/"no" or one word: pair a factual question with a "why" or "which".`
+  }
+- React to what they said: one targeted follow-up on their answer (their job, their city, their hobby) — and if the answer is very short or vague, press once (${FOLLOWUP_PROMPTS[language]}). Then move to a new subject.
+- Cover many areas of life over the exam. Another angle on the same subject (another neighbourhood, the downside of the same thing) is NOT a new subject. A separate process tells you when to change subject — you don't need to count turns.${
+    foundation
+      ? `\n- When you change subject, go straight to the new question — no announcement, a beginner loses the question behind extra words.`
+      : `\n- When you change subject, you may open with ONE of these bridges, word for word (not every time): ${BRIDGE_PHRASES[language]}. A bridge ending in a comma runs straight into the question, in lower case.`
+  }
+- The questions below are for this level. ${
+    foundation
+      ? "Prefer them, asked as written — they are already worded for this level; your own questions are only for one follow-up, as concrete and simple as these."
+      : "They are inspiration, not a script: mix them with your own questions at this level, roughly half each."
+  }
+
+Question bank for this level:
+${spec.bankText}`;
 }
 
-END RULE: If the user message is "__END__", do NOT ask another question. Instead deliver a single polite closing sentence (1-2 sentences max), close in spirit to: ${closing}. This closing sentence is mandatory content — it must actually say the conversation is ending; a bare pivot word alone (e.g. just ${pivots.split(" / ")[0]} with nothing else) is NOT a valid closing reply.
-
-${bankMode === "slice" ? `QUESTION BANK USAGE: The bank below is for your target rung only.${
-  isFoundation
-    ? `
-- Prefer the bank questions below, asked as written — they are already worded for this level. Your own questions are only for ONE follow-up on what the speaker just said, and must stay as concrete, literal and simple as the bank.`
-    : `
-- It's inspiration, not a script: mix bank questions with your own at the CEFR difficulty of the current rung. Aim for roughly half your questions to be your own.
-- Never feel obliged to use a bank question when a better one fits the conversation.`
+/** Layer 3 — this turn's instruction, appended to the speaker's message. */
+function buildTurnNote(language: ConvLang, languageName: string, rung: CefrRung, spec: TurnSpec): string {
+  const head = NOTE_HEAD(AVATAR_NAME);
+  switch (spec.kind) {
+    case "opening":
+      return "";
+    case "closing":
+      return `${head} The exam is over. Do NOT ask any question. Say one or two polite closing sentences in ${languageName} that clearly end the conversation, close in spirit to: ${CLOSING_EXAMPLES[language]}`;
+    case "clarify":
+      return `${head} The speaker did not understand your last question. Ask the SAME question again, much simpler: at most 8 words, the most common everyday words, present tense, no idiom — an easy choice ("X or Y?") or a yes/no question is fine here. It must be worded clearly differently from last time.${
+        spec.simplerQuestion ? ` Use this simpler version (as is, or shorter): "${spec.simplerQuestion}"` : ""
+      } No pivot, no comment on their difficulty, no apology.`;
+    case "followUp":
+      return spec.exact
+        ? `${head} Stay on the subject of your last question and ask exactly this one short follow-up (adapt at most a word so it connects to their answer), with no pivot:\n"${spec.followUps[0]}"\nIf their answer makes it pointless (e.g. "no"), ask another very short question on the same subject instead; if they did not answer your last question at all, ask it again more simply.`
+        : `${head} Stay on the subject of your last question and ask ONE follow-up on what they just said, based on the one of these that fits their answer best (adapt a few words so it connects to it), with no pivot:\n${spec.followUps.map((f) => `- "${f}"`).join("\n")}\nIf they did not really answer your last question, ask its core again more simply instead.`;
+    case "ask": {
+      const drop = spec.dropQuestion ? " The speaker still did not understand your previous question, even after you made it simpler: drop it for good, with no comment." : "";
+      const leave = spec.leaving ? ` You are leaving ${DOMAIN_LABEL[spec.leaving]} for good.` : "";
+      const reply = joinOpener(spec.opener, spec.question);
+      const how = spec.verbatim
+        ? "Your whole reply is exactly this, word for word, nothing before or after it:"
+        : "Your whole reply is this next question, with its opening words — you may adapt a few words so it flows, but keep its meaning, scope and difficulty, and add nothing before or after it:";
+      return `${head} Do not follow up on this answer.${drop}${leave} ${how}\nQUESTION TO ASK\n"${reply}"`;
+    }
+    case "free": {
+      if (spec.dropQuestion) {
+        return `${head} The speaker still did not understand your question, even simpler. Drop it and its subject for good. Ask a new, very easy question about something concrete and familiar (food, family, the weather): at most 8 words, the most common everyday words, present tense. No pivot, no comment.`;
+      }
+      if (spec.avoidDomain) {
+        const target = spec.switchToDomain;
+        const seeds = target ? SWITCH_SEEDS[target] : [];
+        const seed = seeds[Math.floor(Math.random() * seeds.length)];
+        return `${head} Change subject now: leave ${DOMAIN_LABEL[spec.avoidDomain]} for good — no follow-up on this answer, and no other angle on it.${
+          target ? ` New subject: ${DOMAIN_LABEL[target]}. Idea to put in your own words in ${languageName}, at level ${rung}: "${seed}"` : ""
+        } Open with a neutral pivot${zoneForRung(rung) === "foundation" ? "" : " or a bridge"}, never a recap of their answer.`;
+      }
+      return `${head} Your next question is at level ${rung}.`;
+    }
+  }
 }
-- Build follow-up questions from what the speaker actually said (their job, their city, their hobby) — personalised questions assess better than generic ones.
-
-Question bank for this rung:` : ""}`;
-}
-
-// ─── Per-request system prompt builder ───────────────────────────────────────
 
 const LANGUAGE_NAME: Record<ConvLang, string> = {
   fr: "French",
@@ -324,34 +367,74 @@ const LANGUAGE_NAME: Record<ConvLang, string> = {
   en: "English",
 };
 
-// The opening turn's warm-up-question instruction, localized. The question
-// itself comes from the warm-up bank (lib/question-bank/warmup.ts), picked in
-// code whatever the starting rung (Track AA-01) — the model used to pick its
-// own opener and kept defaulting to "where are you from".
-// Only the opening turn gets a picked question; the OPENING section is still
-// in every turn's prompt, so later turns get the generic line instead.
-const OPENING_QUESTION_LINE: Record<ConvLang, (question?: string) => string> = {
-  fr: (q) => q
-    ? `Termine par cette question de mise en route, telle quelle ou à peine reformulée : « ${q} »`
-    : "Termine par UNE question de mise en route simple et quotidienne.",
-  "nl-BE": (q) => q
-    ? `Eindig met deze opwarmvraag, zoals ze is of licht aangepast: « ${q} »`
-    : "Eindig met ÉÉN eenvoudige, alledaagse opwarmvraag.",
-  "nl-NL": (q) => q
-    ? `Eindig met deze opwarmvraag, zoals ze is of licht aangepast: "${q}"`
-    : "Eindig met ÉÉN eenvoudige, alledaagse opwarmvraag.",
-  es: (q) => q
-    ? `Termina con esta pregunta de calentamiento, tal cual o apenas reformulada: «${q}»`
-    : "Termina con UNA pregunta de calentamiento sencilla y cotidiana.",
-  it: (q) => q
-    ? `Concludi con questa domanda di riscaldamento, così com'è o appena riformulata: «${q}»`
-    : "Concludi con UNA domanda di riscaldamento semplice e quotidiana.",
-  de: (q) => q
-    ? `Schließe mit dieser Aufwärmfrage, unverändert oder leicht umformuliert: „${q}"`
-    : "Schließe mit EINER einfachen, alltäglichen Aufwärmfrage.",
-  en: (q) => q
-    ? `End with this warm-up question, as is or very lightly reworded: "${q}"`
-    : "End with ONE simple, everyday warm-up question.",
+// Who Léa is, in the test language (first lines of the prompt).
+const PERSONA: Record<ConvLang, string> = {
+  fr: `Tu es ${AVATAR_NAME}. Ton objectif est de faire parler ton interlocuteur le plus possible en lui posant des questions. Tu es directe et professionnelle — tu n'es pas là pour le mettre à l'aise.`,
+  "nl-BE": `Je bent ${AVATAR_NAME}. Jouw doel is om je gesprekspartner zo veel mogelijk te laten spreken door vragen te stellen. Je bent direct en professioneel — niet hier om hen op hun gemak te stellen.`,
+  "nl-NL": `Je bent ${AVATAR_NAME}. Jouw doel is om je gesprekspartner zo veel mogelijk te laten spreken door vragen te stellen. Je bent direct en professioneel — niet hier om hen op hun gemak te stellen.`,
+  es: `Eres ${AVATAR_NAME}. Tu objetivo es hacer que la persona hable lo máximo posible haciéndole preguntas. Eres directa y profesional — no estás aquí para que se sienta cómoda.`,
+  it: `Sei ${AVATAR_NAME}. Il tuo obiettivo è far parlare il più possibile il tuo interlocutore facendogli domande. Sei diretta e professionale — non sei qui per metterlo a suo agio.`,
+  de: `Du bist ${AVATAR_NAME}. Dein Ziel ist es, dein Gegenüber so viel wie möglich zum Sprechen zu bringen, indem du Fragen stellst. Du bist direkt und professionell — nicht hier, um es ihm bequem zu machen.`,
+  en: `You are ${AVATAR_NAME}. Your goal is to get the speaker to talk as much as possible by asking questions. You are direct and professional — not here to put them at ease.`,
+};
+
+// The language reminder that closes the prompt, in the test language; the
+// second part only when a bank slice is shown (free turns).
+const LANGUAGE_TAIL: Record<ConvLang, { always: string; bank: string }> = {
+  fr: { always: "- Tu dois TOUJOURS répondre en français, quelle que soit la langue utilisée par l'interlocuteur.", bank: "- Les questions de la banque sont déjà rédigées en français : utilise-les telles qu'elles sont écrites." },
+  "nl-BE": {
+    always: "- Antwoord ALTIJD in het Nederlands (Belgische variant), ongeacht welke taal de gesprekspartner gebruikt.\n- Gebruik waar mogelijk Belgisch-Nederlandse uitdrukkingen en woordenschat.",
+    bank: "- De vragen uit de vragenbank zijn al in het Nederlands geschreven: gebruik ze zoals ze er staan.",
+  },
+  "nl-NL": {
+    always: "- Antwoord ALTIJD in het Nederlands zoals het in Nederland gesproken wordt, ongeacht welke taal de gesprekspartner gebruikt.\n- Gebruik geen typisch Belgisch-Nederlandse uitdrukkingen of woordenschat.",
+    bank: "- De vragen uit de vragenbank zijn al in het Nederlands geschreven: gebruik ze zoals ze er staan.",
+  },
+  es: { always: "- Responde SIEMPRE en español, sea cual sea el idioma que use la persona.", bank: "- Las preguntas del banco ya están redactadas en español: úsalas tal como están escritas." },
+  it: { always: "- Rispondi SEMPRE in italiano, qualunque sia la lingua usata dall'interlocutore.", bank: "- Le domande del banco sono già scritte in italiano: usale così come sono." },
+  de: { always: "- Antworte IMMER auf Deutsch, egal welche Sprache die Person benutzt.", bank: "- Die Fragen aus der Fragenbank sind bereits auf Deutsch formuliert: verwende sie so, wie sie dastehen." },
+  en: { always: "- Always reply in English regardless of what language the speaker uses.", bank: "" },
+};
+
+// The opening turn's instructions, in the test language (opening turn only).
+// The warm-up question is picked in code (lib/question-bank/warmup.ts, Track
+// AA-01) — the model used to pick its own and kept defaulting to "where are you from".
+const OPENING: Record<ConvLang, (q: string) => string> = {
+  fr: (q) => `OUVERTURE — compose ta propre introduction, différente à chaque session (ne réutilise jamais la même formulation) :
+- Salue brièvement et présente-toi explicitement avec la formule « je m'appelle ${AVATAR_NAME} » (ne te contente pas de dire ton prénom seul).
+- Mentionne que la conversation durera ${DURATION_PHRASE.fr} pour évaluer le niveau de français.
+- Termine par cette question de mise en route, telle quelle ou à peine reformulée : « ${q} »
+- Garde l'ensemble court : 2-3 phrases maximum.`,
+  "nl-BE": (q) => `OPENING — stel je eigen introductie samen, elke sessie anders (hergebruik nooit dezelfde formulering):
+- Groet kort en stel jezelf expliciet voor met « ik ben ${AVATAR_NAME} » (noem niet enkel je voornaam).
+- Zeg daarna letterlijk, woord voor woord, deze zin: « ${NL_INTRO} »
+- Eindig met deze opwarmvraag, zoals ze is of licht aangepast: « ${q} »
+- Houd het geheel kort: maximaal 2-3 zinnen.`,
+  "nl-NL": (q) => `OPENING — stel je eigen introductie samen, elke sessie anders (hergebruik nooit dezelfde formulering):
+- Groet kort en stel jezelf expliciet voor met « ik ben ${AVATAR_NAME} » (noem niet enkel je voornaam).
+- Zeg daarna letterlijk, woord voor woord, deze zin: « ${NL_INTRO} »
+- Eindig met deze opwarmvraag, zoals ze is of licht aangepast: "${q}"
+- Houd het geheel kort: maximaal 2-3 zinnen.`,
+  es: (q) => `APERTURA — compón tu propia introducción, distinta en cada sesión (nunca reutilices la misma formulación):
+- Saluda brevemente y preséntate explícitamente con «me llamo ${AVATAR_NAME}» (no digas solo tu nombre).
+- Menciona que la conversación durará ${DURATION_PHRASE.es} para evaluar el nivel de español.
+- Termina con esta pregunta de calentamiento, tal cual o apenas reformulada: «${q}»
+- Mantenlo breve: 2-3 frases como máximo.`,
+  it: (q) => `APERTURA — componi la tua introduzione, diversa a ogni sessione (non riutilizzare mai la stessa formulazione):
+- Saluta brevemente e presentati esplicitamente con «mi chiamo ${AVATAR_NAME}» (non dire solo il tuo nome).
+- Indica che la conversazione durerà ${DURATION_PHRASE.it} per valutare il livello di italiano.
+- Concludi con questa domanda di riscaldamento, così com'è o appena riformulata: «${q}»
+- Tieni tutto breve: massimo 2-3 frasi.`,
+  de: (q) => `ERÖFFNUNG — formuliere deine eigene Einleitung, jede Sitzung anders (verwende nie dieselbe Formulierung):
+- Begrüße kurz und stelle dich ausdrücklich mit „ich heiße ${AVATAR_NAME}" vor (nenne nicht nur deinen Vornamen).
+- Erwähne, dass das Gespräch ${DURATION_PHRASE.de} dauert, um das Deutschniveau einzuschätzen.
+- Schließe mit dieser Aufwärmfrage, unverändert oder leicht umformuliert: „${q}"
+- Halte alles kurz: höchstens 2-3 Sätze.`,
+  en: (q) => `OPENING — compose your own introduction, different every session (never reuse the same wording):
+- Greet briefly and introduce yourself explicitly with "my name is ${AVATAR_NAME}" (don't just state your first name on its own).
+- Mention the conversation will last ${DURATION_PHRASE.en} to assess their English level.
+- End with this warm-up question, as is or very lightly reworded: "${q}"
+- Keep the whole thing short: 2-3 sentences maximum.`,
 };
 
 const EASY_OPENING_NOTE = (languageName: string, durationPhrase: string, fixedIntro?: string) => `
@@ -364,116 +447,24 @@ ${fixedIntro
 3. Ask the opening question — ONE short, simple question of at most 8 words. If the opening question given above has two parts ("X, and why?" / two questions in a row), ask ONLY its first part.
 The whole opening stays under ${fixedIntro ? 45 : 35} words, in ${languageName}, and sounds like a natural spoken greeting.`;
 
-export function getSystemPrompt(
-  language: ConvLang,
-  rung: CefrRung,
-  bank: string,
-  opts: PromptOpts & { openerQuestion?: string } = {}
-): string {
-  const base = buildSystemPrompt(language, rung, bank, opts);
-  return opts.easyOpening ? base + EASY_OPENING_NOTE(LANGUAGE_NAME[language], DURATION_PHRASE[language], FIXED_INTRO_SENTENCE[language]) : base;
-}
-
-function buildSystemPrompt(
-  language: ConvLang,
-  rung: CefrRung,
-  bank: string,
-  opts: PromptOpts & { openerQuestion?: string } = {}
-): string {
-  const COMMON_RULES = buildCommonRules(rung, language, LANGUAGE_NAME[language], opts);
-
-  if (language === "fr") {
-    return `Tu es ${AVATAR_NAME}. Ton objectif est de faire parler ton interlocuteur le plus possible en lui posant des questions. Tu es directe et professionnelle — tu n'es pas là pour le mettre à l'aise.
-
-OUVERTURE — compose ta propre introduction, différente à chaque session (ne réutilise jamais la même formulation) :
-- Salue brièvement et présente-toi explicitement avec la formule « je m'appelle ${AVATAR_NAME} » (ne te contente pas de dire ton prénom seul).
-- Mentionne que la conversation durera ${DURATION_PHRASE.fr} pour évaluer le niveau de français.
-- ${OPENING_QUESTION_LINE.fr(opts.openerQuestion)}
-- Garde l'ensemble court : 2-3 phrases maximum.
-
-${COMMON_RULES}
-${bank}
-- Tu dois TOUJOURS répondre en français, quelle que soit la langue utilisée par l'interlocuteur.
-- Les questions de la banque sont déjà rédigées en français : utilise-les telles qu'elles sont écrites.`;
+/**
+ * The examiner prompt for one turn: `system` (core + this kind of turn's
+ * rules) and `turnNote` (this turn's instruction, to append to the speaker's
+ * message with withTurnNote — "" when there is none).
+ */
+export function buildTurnPrompt(language: ConvLang, rung: CefrRung, spec: TurnSpec): { system: string; turnNote: string } {
+  const languageName = LANGUAGE_NAME[language];
+  const tail = LANGUAGE_TAIL[language];
+  const parts = [PERSONA[language]];
+  if (spec.kind === "opening") {
+    parts.push(OPENING[language](spec.openerQuestion));
+    if (spec.easy) parts.push(EASY_OPENING_NOTE(languageName, DURATION_PHRASE[language], FIXED_INTRO_SENTENCE[language]).trim());
   }
-
-  if (language === "nl-BE" || language === "nl-NL") {
-    const belgian = language === "nl-BE";
-    return `Je bent ${AVATAR_NAME}. Jouw doel is om je gesprekspartner zo veel mogelijk te laten spreken door vragen te stellen. Je bent direct en professioneel — niet hier om hen op hun gemak te stellen.
-
-OPENING — stel je eigen introductie samen, elke sessie anders (hergebruik nooit dezelfde formulering):
-- Groet kort en stel jezelf expliciet voor met « ik ben ${AVATAR_NAME} » (noem niet enkel je voornaam).
-- Zeg daarna letterlijk, woord voor woord, deze zin: « ${NL_INTRO} »
-- ${OPENING_QUESTION_LINE[language](opts.openerQuestion)}
-- Houd het geheel kort: maximaal 2-3 zinnen.
-
-${COMMON_RULES}
-${bank}
-${belgian
-  ? `- Antwoord ALTIJD in het Nederlands (Belgische variant), ongeacht welke taal de gesprekspartner gebruikt.
-- Gebruik waar mogelijk Belgisch-Nederlandse uitdrukkingen en woordenschat.`
-  : `- Antwoord ALTIJD in het Nederlands zoals het in Nederland gesproken wordt, ongeacht welke taal de gesprekspartner gebruikt.
-- Gebruik geen typisch Belgisch-Nederlandse uitdrukkingen of woordenschat.`}
-- De vragen uit de vragenbank zijn al in het Nederlands geschreven: gebruik ze zoals ze er staan.`;
-  }
-
-  if (language === "es") {
-    return `Eres ${AVATAR_NAME}. Tu objetivo es hacer que la persona hable lo máximo posible haciéndole preguntas. Eres directa y profesional — no estás aquí para que se sienta cómoda.
-
-APERTURA — compón tu propia introducción, distinta en cada sesión (nunca reutilices la misma formulación):
-- Saluda brevemente y preséntate explícitamente con «me llamo ${AVATAR_NAME}» (no digas solo tu nombre).
-- Menciona que la conversación durará ${DURATION_PHRASE.es} para evaluar el nivel de español.
-- ${OPENING_QUESTION_LINE.es(opts.openerQuestion)}
-- Mantenlo breve: 2-3 frases como máximo.
-
-${COMMON_RULES}
-${bank}
-- Responde SIEMPRE en español, sea cual sea el idioma que use la persona.
-- Las preguntas del banco ya están redactadas en español: úsalas tal como están escritas.`;
-  }
-
-  if (language === "it") {
-    return `Sei ${AVATAR_NAME}. Il tuo obiettivo è far parlare il più possibile il tuo interlocutore facendogli domande. Sei diretta e professionale — non sei qui per metterlo a suo agio.
-
-APERTURA — componi la tua introduzione, diversa a ogni sessione (non riutilizzare mai la stessa formulazione):
-- Saluta brevemente e presentati esplicitamente con «mi chiamo ${AVATAR_NAME}» (non dire solo il tuo nome).
-- Indica che la conversazione durerà ${DURATION_PHRASE.it} per valutare il livello di italiano.
-- ${OPENING_QUESTION_LINE.it(opts.openerQuestion)}
-- Tieni tutto breve: massimo 2-3 frasi.
-
-${COMMON_RULES}
-${bank}
-- Rispondi SEMPRE in italiano, qualunque sia la lingua usata dall'interlocutore.
-- Le domande del banco sono già scritte in italiano: usale così come sono.`;
-  }
-
-  if (language === "de") {
-    return `Du bist ${AVATAR_NAME}. Dein Ziel ist es, dein Gegenüber so viel wie möglich zum Sprechen zu bringen, indem du Fragen stellst. Du bist direkt und professionell — nicht hier, um es ihm bequem zu machen.
-
-ERÖFFNUNG — formuliere deine eigene Einleitung, jede Sitzung anders (verwende nie dieselbe Formulierung):
-- Begrüße kurz und stelle dich ausdrücklich mit „ich heiße ${AVATAR_NAME}" vor (nenne nicht nur deinen Vornamen).
-- Erwähne, dass das Gespräch ${DURATION_PHRASE.de} dauert, um das Deutschniveau einzuschätzen.
-- ${OPENING_QUESTION_LINE.de(opts.openerQuestion)}
-- Halte alles kurz: höchstens 2-3 Sätze.
-
-${COMMON_RULES}
-${bank}
-- Antworte IMMER auf Deutsch, egal welche Sprache die Person benutzt.
-- Die Fragen aus der Fragenbank sind bereits auf Deutsch formuliert: verwende sie so, wie sie dastehen.`;
-  }
-
-  // Default: English
-  return `You are ${AVATAR_NAME}. Your goal is to get the speaker to talk as much as possible by asking questions. You are direct and professional — not here to put them at ease.
-
-OPENING — compose your own introduction, different every session (never reuse the same wording):
-- Greet briefly and introduce yourself explicitly with "my name is ${AVATAR_NAME}" (don't just state your first name on its own).
-- Mention the conversation will last ${DURATION_PHRASE.en} to assess their English level.
-- ${OPENING_QUESTION_LINE.en(opts.openerQuestion)}
-- Keep the whole thing short: 2-3 sentences maximum.
-
-${COMMON_RULES}
-${bank}
-- Always reply in English regardless of what language the speaker uses.`;
+  parts.push(buildCore(language, languageName).trim());
+  const kindRules = buildTurnKindRules(language, rung, spec).trim();
+  if (kindRules) parts.push(kindRules);
+  parts.push([tail.always, spec.kind === "free" ? tail.bank : ""].filter(Boolean).join("\n"));
+  return { system: parts.join("\n\n"), turnNote: buildTurnNote(language, languageName, rung, spec) };
 }
 
 export type ConvLang = "fr" | "en" | "nl-BE" | "nl-NL" | "es" | "it" | "de";

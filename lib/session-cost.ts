@@ -103,9 +103,12 @@ const tokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN).toLocaleSt
 
 const LANGS: ConvLang[] = ["en", "fr", "nl-BE", "nl-NL", "es", "it", "de"];
 const RUNGS: CefrRung[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
-/** The examiner's system prompt varies by language and level — use the average. */
+/** The examiner's prompt (system + the turn note on the speaker's message) varies by language and level — use the average. */
 const EXAMINER_SYSTEM_CHARS = (() => {
-  const sizes = LANGS.flatMap((language) => RUNGS.map((rung) => buildExaminerPrompt({ language, rung }).system.length));
+  const sizes = LANGS.flatMap((language) => RUNGS.map((rung) => {
+    const p = buildExaminerPrompt({ language, rung });
+    return p.system.length + p.turnNote.length;
+  }));
   return sizes.reduce((a, b) => a + b, 0) / sizes.length;
 })();
 

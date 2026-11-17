@@ -17,13 +17,20 @@
  *       and fetches the recordings of flagged sessions imported without them.
  *       Idempotent: sessions already flagged stay, the set is only topped up.
  *
- *   npx tsx scripts/calibration-set.ts score [--dry-run] [--concurrency 3] [--reevaluate]
+ *   npx tsx scripts/calibration-set.ts score [--dry-run] [--concurrency 3] [--reevaluate] [--rescore-pronunciation] [--eval-interval 40]
  *       For each calibration session: our pronunciation on its recordings
  *       (the live provider for its language) when it has none, then the CEFR
  *       evaluation with the live model when it has none at the current
  *       CEFR_PROMPT_VERSION (--reevaluate: run it again anyway, e.g. once
  *       pronunciation arrived — the evaluator reads its score and speaking
  *       rate). Re-run after a prompt change to re-score.
+ *       --rescore-pronunciation: run the live pronunciation provider again on
+ *       every answer even when the session has a score (e.g. after the judge
+ *       model changed); the session's rollup then reads the new run.
+ *       --eval-interval <s>: at least that many seconds between two
+ *       evaluations — each one makes ~5 calls to the evaluation model
+ *       (evaluation + boundary checks), whose per-minute quota production
+ *       shares (mistral-large-2512: 15/min; 40 s ≈ 7.5 calls/min).
  *
  *   npx tsx scripts/calibration-set.ts compare voxtral,azure-intended [--dry-run] [--concurrency 3]
  *       Runs other pronunciation engines on every calibration answer that has
@@ -360,15 +367,24 @@ async function score() {
     .eq("prompt_version", CEFR_PROMPT_VERSION)
     .not("result_json", "is", null);
   const evaluated = new Set(args.includes("--reevaluate") ? [] : (evals ?? []).map((e) => e.session_id));
-  const needPron = (sessions ?? []).filter((s) => !s.pronunciation_scores);
+  const rescore = args.includes("--rescore-pronunciation");
+  const needPron = (sessions ?? []).filter((s) => rescore || !s.pronunciation_scores);
+  const evalInterval = Number(opt("eval-interval", "0")) * 1000;
+  let evalGate: Promise<void> = Promise.resolve();
+  /** Resolves when this evaluation may start: starts are evalInterval apart. */
+  const evalSlot = () => {
+    const mine = evalGate;
+    evalGate = mine.then(() => new Promise<void>((r) => setTimeout(r, evalInterval)));
+    return mine;
+  };
   const needEval = (sessions ?? []).filter((s) => !evaluated.has(s.id));
-  console.log(`${sessions?.length ?? 0} calibration sessions: ${needPron.length} need pronunciation, ${needEval.length} need an evaluation at prompt ${CEFR_PROMPT_VERSION}${DRY ? " (dry run)" : ""}`);
+  console.log(`${sessions?.length ?? 0} calibration sessions: ${needPron.length} need pronunciation${rescore ? " (rescore)" : ""}, ${needEval.length} need an evaluation at prompt ${CEFR_PROMPT_VERSION}${DRY ? " (dry run)" : ""}`);
   if (DRY) return;
 
   let done = 0;
   await mapLimit(sessions ?? [], concurrency, async (s) => {
     try {
-      if (!s.pronunciation_scores) {
+      if (rescore || !s.pronunciation_scores) {
         const { data: turns } = await sb.from("session_turns").select("id").eq("session_id", s.id).eq("role", "user").not("audio_url", "is", null);
         if (!turns?.length) console.log(`  ${s.id.slice(0, 8)}: no recordings — run build to attach them`);
         const provider = liveConversationPronunciationProviderId(s.language);
@@ -380,6 +396,7 @@ async function score() {
       }
       // After the pronunciation: the evaluator reads its score and speaking rate.
       if (!evaluated.has(s.id)) {
+        await evalSlot();
         const [row] = await runCefrEvaluation(s.id, [LIVE_CONVERSATION_MODEL_ID]);
         if (row?.error) throw new Error(row.error);
       }

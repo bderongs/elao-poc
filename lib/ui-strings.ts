@@ -162,7 +162,6 @@ const fr = {
     strengths: "Points forts",
     toImprove: "À travailler",
     notableErrors: "Erreurs notables",
-    originalFeedback: "Retour original (anglais)",
     confidence: {
       high: "FIABLE",
       medium: "MOYEN",
@@ -388,7 +387,6 @@ const en: UiStrings = {
     strengths: "Strengths",
     toImprove: "To work on",
     notableErrors: "Notable errors",
-    originalFeedback: "Original feedback (English)",
     confidence: {
       high: "RELIABLE",
       medium: "MEDIUM",
@@ -612,7 +610,6 @@ const nl: UiStrings = {
     strengths: "Sterke punten",
     toImprove: "Werkpunten",
     notableErrors: "Opvallende fouten",
-    originalFeedback: "Oorspronkelijke feedback (Engels)",
     confidence: {
       high: "BETROUWBAAR",
       medium: "GEMIDDELD",
@@ -836,7 +833,6 @@ const es: UiStrings = {
     strengths: "Puntos fuertes",
     toImprove: "A mejorar",
     notableErrors: "Errores destacados",
-    originalFeedback: "Comentarios originales (inglés)",
     confidence: {
       high: "FIABLE",
       medium: "MEDIO",
@@ -1060,7 +1056,6 @@ const it: UiStrings = {
     strengths: "Punti di forza",
     toImprove: "Da migliorare",
     notableErrors: "Errori rilevanti",
-    originalFeedback: "Commento originale (inglese)",
     confidence: {
       high: "AFFIDABILE",
       medium: "MEDIO",
@@ -1285,7 +1280,6 @@ const de: UiStrings = {
     strengths: "Stärken",
     toImprove: "Daran arbeiten",
     notableErrors: "Auffällige Fehler",
-    originalFeedback: "Ursprüngliches Feedback (Englisch)",
     confidence: {
       high: "ZUVERLÄSSIG",
       medium: "MITTEL",

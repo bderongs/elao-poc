@@ -173,10 +173,39 @@ interface JudgeWord {
   v: "good" | "ok" | "off" | "bad";
 }
 
-interface JudgeResult {
+export interface JudgeResult {
   turn_score: number;
   words: JudgeWord[];
   summary?: string;
+}
+
+/** The judge's user message — exported for scripts/judge-model-replay.ts, which replays it on several models. */
+export function buildJudgeEvidence(
+  liveTranscript: string,
+  langLabel: string,
+  context: string,
+  dg: DgEvidence | null,
+  az: AzEvidence | null,
+): string {
+  return (
+    `Language: ${langLabel}\n` +
+    (context ? `Examiner's question: "${context}"\n` : "") +
+    `\nLIVE transcript (rate these words, in order):\n"${liveTranscript}"\n` +
+    (dg
+      ? `\nVERBATIM transcript (independent engine):\n"${dg.transcript}"\n${confidenceLine(dg)}\n`
+      : "\nVERBATIM transcript: unavailable\n") +
+    (az
+      ? `\nACOUSTIC scores: ${az.words.map((w) => `${w.word}(${w.accuracyScore}${w.errorType !== "None" ? "," + w.errorType : ""})`).join(" ")}\n`
+      : "\nACOUSTIC scores: unavailable\n")
+  );
+}
+
+/** Parses the judge's reply; null when it is not a usable verdict. */
+export function parseJudgeReply(text: string): JudgeResult | null {
+  const cleaned = text.trim().replace(/^```json\s*|\s*```$/g, "").trim();
+  const parsed = JSON.parse(cleaned) as JudgeResult;
+  if (typeof parsed.turn_score !== "number" || !Array.isArray(parsed.words)) return null;
+  return parsed;
 }
 
 async function judge(
@@ -186,32 +215,17 @@ async function judge(
   dg: DgEvidence | null,
   az: AzEvidence | null,
 ): Promise<JudgeResult | null> {
-  const evidence =
-    `Language: ${langLabel}\n` +
-    (context ? `Examiner's question: "${context}"\n` : "") +
-    `\nLIVE transcript (rate these words, in order):\n"${liveTranscript}"\n` +
-    (dg
-      ? `\nVERBATIM transcript (independent engine):\n"${dg.transcript}"\n${confidenceLine(dg)}\n`
-      : "\nVERBATIM transcript: unavailable\n") +
-    (az
-      ? `\nACOUSTIC scores: ${az.words.map((w) => `${w.word}(${w.accuracyScore}${w.errorType !== "None" ? "," + w.errorType : ""})`).join(" ")}\n`
-      : "\nACOUSTIC scores: unavailable\n");
-
+  const evidence = buildJudgeEvidence(liveTranscript, langLabel, context, dg, az);
   try {
-    const text = (
-      await mistralComplete({
-        model: mistralPronunciationModel(),
-        system: JUDGE_SYSTEM,
-        messages: [{ role: "user", content: evidence }],
-        maxTokens: 2000,
-        json: true,
-        context: "pronunciation-judge",
-      })
-    ).trim();
-    const cleaned = text.replace(/^```json\s*|\s*```$/g, "").trim();
-    const parsed = JSON.parse(cleaned) as JudgeResult;
-    if (typeof parsed.turn_score !== "number" || !Array.isArray(parsed.words)) return null;
-    return parsed;
+    const text = await mistralComplete({
+      model: mistralPronunciationModel(),
+      system: JUDGE_SYSTEM,
+      messages: [{ role: "user", content: evidence }],
+      maxTokens: 2000,
+      json: true,
+      context: "pronunciation-judge",
+    });
+    return parseJudgeReply(text);
   } catch (e) {
     console.warn("[pronunciation] judge failed:", e);
     return null;
@@ -234,6 +248,35 @@ const VERDICT_MAP: Record<string, { confidence: number; accuracyScore: number; e
 export const LANG_LABELS: Record<string, string> = {
   fr: "French", "nl-BE": "Dutch (Belgian)", "nl-NL": "Dutch (Netherlands)", es: "Spanish", it: "Italian", de: "German", en: "English",
 };
+
+/**
+ * Turns the judge's verdict into the turn score and per-word display — the
+ * consistency guard and the jokers. Exported for scripts/judge-model-replay.ts.
+ */
+export function scoreFromVerdict(liveWords: string[], verdict: JudgeResult) {
+  // Defensive alignment: one entry per live-transcript word, in order.
+  const words: WordScore[] = liveWords.map((w, i) => {
+    const v = verdict.words[i]?.v ?? "ok";
+    const m = VERDICT_MAP[v] ?? VERDICT_MAP.ok;
+    return { word: w, confidence: m.confidence, accuracyScore: m.accuracyScore, errorType: m.errorType };
+  });
+  // Consistency guard: the turn score can never exceed the average implied
+  // by the judge's own per-word verdicts. Stops the judge from flagging
+  // three words and still awarding 85 for the turn.
+  const wordAvg = words.length
+    ? Math.round(words.reduce((s, w) => s + w.accuracyScore, 0) / words.length)
+    : 0;
+  let score = Math.max(0, Math.min(100, Math.round(verdict.turn_score), wordAvg));
+  // Jokers (Track AD): a strong answer's one or two worst words are presumed
+  // to be recognition errors — score the answer without them. The judge's own
+  // turn_score is not used then (it caps the turn on a single word-changing error).
+  const forgiveness = applyPronunciationForgiveness(words);
+  if (forgiveness.score !== null) {
+    for (const i of forgiveness.forgivenIndices) words[i].forgiven = true;
+    score = Math.max(score, forgiveness.score);
+  }
+  return { score, words, forgiveness };
+}
 
 async function assess({
   audio,
@@ -280,27 +323,7 @@ async function assess({
   const verdict = await judge(liveText, langLabel, context, dg, az);
 
   if (verdict) {
-    // Defensive alignment: one entry per live-transcript word, in order.
-    const words: WordScore[] = liveWords.map((w, i) => {
-      const v = verdict.words[i]?.v ?? "ok";
-      const m = VERDICT_MAP[v] ?? VERDICT_MAP.ok;
-      return { word: w, confidence: m.confidence, accuracyScore: m.accuracyScore, errorType: m.errorType };
-    });
-    // Consistency guard: the turn score can never exceed the average implied
-    // by the judge's own per-word verdicts. Stops the judge from flagging
-    // three words and still awarding 85 for the turn.
-    const wordAvg = words.length
-      ? Math.round(words.reduce((s, w) => s + w.accuracyScore, 0) / words.length)
-      : 0;
-    let score = Math.max(0, Math.min(100, Math.round(verdict.turn_score), wordAvg));
-    // Jokers (Track AD): a strong answer's one or two worst words are presumed
-    // to be recognition errors — score the answer without them. The judge's own
-    // turn_score is not used then (it caps the turn on a single word-changing error).
-    const forgiveness = applyPronunciationForgiveness(words);
-    if (forgiveness.score !== null) {
-      for (const i of forgiveness.forgivenIndices) words[i].forgiven = true;
-      score = Math.max(score, forgiveness.score);
-    }
+    const { score, words, forgiveness } = scoreFromVerdict(liveWords, verdict);
     console.log(
       `[pronunciation] judge OK score=${score} verdicts=${verdict.words.map((w) => `${w.w}:${w.v}`).join(" ")}${verdict.summary ? ` — ${verdict.summary}` : ""}` +
         (forgiveness.score !== null ? ` | forgiven: ${forgiveness.forgivenIndices.map((i) => words[i].word).join(", ")}` : "")

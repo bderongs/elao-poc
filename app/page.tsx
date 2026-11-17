@@ -8,6 +8,7 @@ import { IntegrityTracker } from "@/lib/integrity-tracker";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
 import type { ConvLang } from "@/lib/conversation-prompts";
+import { isProfileId } from "@/lib/test-profile-types";
 import { WelcomeListenButton } from "@/components/WelcomeListenButton";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
 import type { PronunciationResult, WordScore } from "@/lib/pronunciation/types";
@@ -114,6 +115,17 @@ function getLevelOverrideFromUrl(): CefrRung | null {
   const raw = new URLSearchParams(window.location.search).get("level");
   return isCefrRung(raw) ? raw : null;
 }
+
+/** `?profile=safran` runs the test with a client profile (lib/test-profile-types.ts): its
+ *  own questions are asked next to the standard bank. Same read-once pattern as `?level=`. */
+function getProfileFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("profile");
+  return isProfileId(raw) ? raw : null;
+}
+
+/** A profile question still missing this close to the minimum length is asked even out of its level range. */
+const PROFILE_URGENT_SECONDS = SESSION_MIN_SECONDS - 60;
 
 /** How long "Vous avez quitté la fenêtre du test" stays up after coming back (ms). */
 const AWAY_NOTICE_MS = 6000;
@@ -305,6 +317,9 @@ export default function Home() {
   const usedQuestionsRef = useRef<string[]>([]);
   /** C1/C2 bank question + follow-up state (lib/examiner-prompt.ts) — round-tripped with /api/chat like usedQuestionsRef. */
   const bankStateRef = useRef<BankState>({});
+  /** The test's client profile (`?profile=`) and how many of its required questions are still to ask (null = no profile in use). */
+  const profileIdRef = useRef<string | null>(null);
+  const profileRemainingRef = useRef<number | null>(null);
   /**
    * TT (lib/topic-tracking.ts) tracking state — the domain of the examiner's
    * most recently asked question, and how many turns in a row have landed on
@@ -453,7 +468,7 @@ export default function Home() {
           liveSessionStartRef.current = fetch("/api/sessions/live", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ language, uiLanguage: uiLangRef.current }),
+            body: JSON.stringify({ language, uiLanguage: uiLangRef.current, testProfile: profileIdRef.current }),
           })
             .then((r) => (r.ok ? r.json() : null))
             .then((j: { id?: string } | null) => {
@@ -533,7 +548,9 @@ export default function Home() {
       wouldStopAtRef.current = { at: elapsed, estimatedLevel: d.estimatedLevel, reason: d.converged ? d.reason : "max_reached" };
       logClientEvent("session_length_decision", { mode: SESSION_LENGTH_MODE, wouldStopAt: elapsed, ...wouldStopAtRef.current, steps: ladderStepsRef.current.length });
     }
-    if (!closeRequestedRef.current && !pendingEndRef.current && shouldCloseSession({ ...lengthParams, mode: SESSION_LENGTH_MODE })) {
+    // A client profile's required questions hold the end back, up to the maximum length.
+    const profileHold = (profileRemainingRef.current ?? 0) > 0 && elapsed < SESSION_MAX_SECONDS;
+    if (!closeRequestedRef.current && !pendingEndRef.current && !profileHold && shouldCloseSession({ ...lengthParams, mode: SESSION_LENGTH_MODE })) {
       closeRequestedRef.current = true;
       pendingEndRef.current = true;
       const requestedAt = Date.now();
@@ -692,6 +709,7 @@ export default function Home() {
     if (liveSessionIdRef.current) form.append("sessionId", liveSessionIdRef.current);
     form.append("language", language);
     form.append("uiLanguage", uiLangRef.current);
+    if (profileIdRef.current) form.append("testProfile", profileIdRef.current);
     form.append("durationSeconds", String(elapsed));
     // Level, score and dimensions are read server-side from the (verified) evaluation itself.
     form.append("evaluation", JSON.stringify(result ?? null));
@@ -1371,6 +1389,8 @@ export default function Home() {
     currentRungRef.current = conversationSettingsRef.current.startingRung;
     usedQuestionsRef.current = [];
     bankStateRef.current = {};
+    profileIdRef.current = getProfileFromUrl();
+    profileRemainingRef.current = null;
     currentDomainRef.current = null;
     visitedDomainsRef.current = [];
     domainStreakRef.current = 0;
@@ -1415,7 +1435,7 @@ export default function Home() {
       // so flushing from the SSE callback would overlap with playback.
       if (reallyDone) {
         // Response latency starts here (lib/integrity-tracker.ts) — again after a repeat.
-        integrityRef.current?.questionAsked(bankStateRef.current.currentId ?? null);
+        integrityRef.current?.questionAsked(bankStateRef.current.profileCurrent ?? bankStateRef.current.currentId ?? null);
         processBufferedRef.current();
         playbackDoneWaiterRef.current?.();
         playbackDoneWaiterRef.current = null;
@@ -1847,6 +1867,8 @@ export default function Home() {
           switchToDomain: avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomainsRef.current) : undefined,
           clarify: clarify || undefined,
           clarifyAttempt: clarify ? clarifyAttempt : undefined,
+          profile: profileIdRef.current ?? undefined,
+          profileUrgent: profileIdRef.current && startedAtRef.current ? (Date.now() - startedAtRef.current) / 1000 >= PROFILE_URGENT_SECONDS : undefined,
         }),
         signal: abortController.signal,
       });
@@ -1910,7 +1932,8 @@ export default function Home() {
             // turn, so the audio player's amp===0 callback can now safely
             // treat a drained queue as "the avatar is actually done talking".
             streamDoneRef.current = true;
-            const { fullText, usedQuestions, bankState } = JSON.parse(data);
+            const { fullText, usedQuestions, bankState, profileRemaining } = JSON.parse(data);
+            if (typeof profileRemaining === "number" || profileRemaining === null) profileRemainingRef.current = profileRemaining;
             // Defense in depth: an empty-content assistant message stuck in
             // history gets sent back to Mistral on every future turn, which
             // rejects it outright — never let one in, regardless of what the

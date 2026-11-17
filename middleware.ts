@@ -84,6 +84,8 @@ export const config = {
     "/api/conversation-settings/:language",
     "/api/integrity-settings",
     "/api/scoring-settings",
+    "/api/test-profiles",
+    "/api/test-profiles/:id",
     // Rate-limited only (lib/rate-limit.ts's RATE_LIMITED_PATHS) — the matcher
     // must be a static list, so these are repeated here.
     "/api/chat",

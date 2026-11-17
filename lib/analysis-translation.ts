@@ -3,11 +3,11 @@
  * summary) in the candidate's interface language. The evaluator writes it in
  * English (CEFR_SYSTEM_PROMPT); one extra call per language translates it.
  *
- * - French is always produced (`analysis_fr`): the client and the admin read
- *   French whatever the candidate's interface.
- * - nl / es / it / de go in `analysis_i18n` (roadmap L-04), for the session's
- *   interface language at evaluation time, or on first view in another one.
- * - English is the original.
+ * - English is the original; the admin reads it (2026-11-17, Baptiste: no
+ *   French by default — it was always produced before).
+ * - The session's interface language at evaluation time, or on first view in
+ *   another one: French in `analysis_fr`, nl / es / it / de in
+ *   `analysis_i18n` (roadmap L-04).
  *
  * Never fails the evaluation: on any error the result goes out without that
  * translation and the screens fall back to the English text
@@ -148,10 +148,6 @@ export async function translateAnalysis(result: CefrResult, lang: TargetLang, co
   return null;
 }
 
-export function translateAnalysisToFrench(result: CefrResult, context = "analysis-fr"): Promise<AnalysisTranslation | null> {
-  return translateAnalysis(result, "fr", context);
-}
-
 /** The evaluation with the feedback in `lang` stamped on it (unchanged if already there, if `lang` is English, or if the translation fails). */
 export async function withAnalysisIn(result: CefrResult, lang: UiLang, context?: string): Promise<CefrResult> {
   if (lang === "en" || hasAnalysisIn(result, lang)) return result;
@@ -162,29 +158,14 @@ export async function withAnalysisIn(result: CefrResult, lang: UiLang, context?:
     : { ...result, analysis_i18n: { ...result.analysis_i18n, [lang]: translated } };
 }
 
-/** The evaluation with `analysis_fr` stamped on it (unchanged if the translation fails or is already there). */
-export function withFrenchAnalysis(result: CefrResult, context?: string): Promise<CefrResult> {
-  return withAnalysisIn(result, "fr", context);
-}
-
-/**
- * French (always) and the candidate's interface language, translated in
- * parallel — what a fresh evaluation needs.
- */
-export async function withAnalysesFor(result: CefrResult, uiLang: UiLang, context = "cefr-eval"): Promise<CefrResult> {
-  const [fr, other] = await Promise.all([
-    hasAnalysisIn(result, "fr") ? null : translateAnalysis(result, "fr", `${context}-fr`),
-    uiLang === "en" || uiLang === "fr" || hasAnalysisIn(result, uiLang) ? null : translateAnalysis(result, uiLang, `${context}-${uiLang}`),
-  ]);
-  let out = result;
-  if (fr) out = { ...out, analysis_fr: fr };
-  if (other && uiLang !== "en" && uiLang !== "fr") out = { ...out, analysis_i18n: { ...out.analysis_i18n, [uiLang]: other } };
-  return out;
+/** The feedback in the candidate's interface language — what a fresh evaluation needs (nothing to do in English). */
+export function withAnalysesFor(result: CefrResult, uiLang: UiLang, context = "cefr-eval"): Promise<CefrResult> {
+  return withAnalysisIn(result, uiLang, `${context}-${uiLang}`);
 }
 
 /**
  * Backfill on a session page: translates the feedback into the languages
- * the page needs (French always, plus `lang`) and saves it where the
+ * the page needs (`lang`) and saves it where the
  * evaluation lives (sessions.evaluation_json for a live session, else its
  * eval-lab row), so each language is translated once. Returns the
  * evaluation as is on any failure.
@@ -194,11 +175,11 @@ export async function ensureAnalysis(params: {
   result: CefrResult;
   /** The session_evaluations row the result came from; omitted = sessions.evaluation_json. */
   evaluationRowId?: string;
-  /** The page's interface language (default: French only). */
-  lang?: UiLang;
+  /** The page's interface language. */
+  lang: UiLang;
 }): Promise<CefrResult> {
-  const { sessionId, result, evaluationRowId, lang = "fr" } = params;
-  if (hasAnalysisIn(result, "fr") && hasAnalysisIn(result, lang)) return result;
+  const { sessionId, result, evaluationRowId, lang } = params;
+  if (hasAnalysisIn(result, lang)) return result;
   const translated = await withAnalysesFor(result, lang, "analysis-backfill");
   if (translated === result) return result;
   const supabase = getSupabaseServer();
@@ -207,9 +188,4 @@ export async function ensureAnalysis(params: {
     : await supabase.from("sessions").update({ evaluation_json: translated }).eq("id", sessionId);
   if (error) logServerEvent("analysis_translation_save_failed", { sessionId, error: error.message });
   return translated;
-}
-
-/** French-only backfill, as before (admin pages). */
-export function ensureFrenchAnalysis(params: { sessionId: string; result: CefrResult; evaluationRowId?: string }): Promise<CefrResult> {
-  return ensureAnalysis({ ...params, lang: "fr" });
 }

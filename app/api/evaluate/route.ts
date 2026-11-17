@@ -85,8 +85,8 @@ export async function POST(req: Request) {
       level: levelBeforeBoundaryChecks(evaluation, pronunciationContext ?? null),
     });
 
-    // The feedback in French (the client and the admin read it) and in the candidate's interface
-    // language, in parallel — signed with the rest; never fails the evaluation.
+    // The feedback in the candidate's interface language (the admin reads the English original)
+    // — signed with the rest; never fails the evaluation.
     evaluation = await withAnalysesFor(evaluation, uiLang, "cefr-eval");
 
     logServerEvent("cefr_eval_complete", { provider: provider.id, model: provider.modelLabel });
