@@ -39,8 +39,9 @@ info:
     "test already started" page instead of a new test.
 
     **Levels** are the CEFR levels A0, A1, A2, B1, B2, C1 and C2, the same list everywhere. For a
-    finer position within a level, use `score` (0–100) with `level_scale`, the score bands that
-    were used for that test. `detailed_level` also gives our own split (B1 or B1+).
+    finer position within a level, the `full` result has an `advanced` block: `level_scale`, the
+    score bands used for that test, to read `score` (0–100) against, and `detailed_level`, our own
+    split (B1 or B1+). You can ignore it if the level is all you need.
 
     **Webhooks** — see `test.completed`, `test.graded` and `test.error` below, and
     "Verifying a webhook".
@@ -164,12 +165,13 @@ paths:
         Only available once `status` is `graded`. Each level of detail contains everything in the
         level before it:
 
-        - `summary`: level (and `detailed_level`), score, confidence and the score bands. Also the webhook's `result`.
+        - `summary`: level and score. Also the webhook's `result`.
         - `standard` (default): + the four axes (on 100) and the written feedback: a few words per
           axis, the general summary, strengths, areas for improvement and notable errors.
-        - `full`: + how the score was computed (`scoring`), the transcript answer by answer (with
-          each word's pronunciation score, the speaking rate and the help the candidate asked for),
-          and the integrity signals.
+        - `full`: + the transcript answer by answer (with each word's pronunciation score, the
+          speaking rate, the help the candidate asked for and a link to the recording), and
+          `advanced` (our finer level, the evaluator's confidence, the score bands and the
+          integrity signals).
       parameters:
         - $ref: "#/components/parameters/TestId"
         - name: detail
@@ -211,17 +213,7 @@ paths:
                     duration_seconds: 329
                     answer_count: 9
                     level: B2
-                    detailed_level: B2
                     score: 72
-                    confidence: medium
-                    level_scale:
-                      - { level: A0, min_score: 0 }
-                      - { level: A1, min_score: 40 }
-                      - { level: A2, min_score: 50 }
-                      - { level: B1, min_score: 60 }
-                      - { level: B2, min_score: 70 }
-                      - { level: C1, min_score: 80 }
-                      - { level: C2, min_score: 90 }
                     axes:
                       pronunciation: 78
                       fluency: 75
@@ -263,17 +255,24 @@ paths:
                     duration_seconds: 329
                     answer_count: 9
                     level: B2
-                    detailed_level: B2
                     score: 72
-                    confidence: medium
-                    level_scale:
-                      - { level: A0, min_score: 0 }
-                      - { level: A1, min_score: 40 }
-                      - { level: A2, min_score: 50 }
-                      - { level: B1, min_score: 60 }
-                      - { level: B2, min_score: 70 }
-                      - { level: C1, min_score: 80 }
-                      - { level: C2, min_score: 90 }
+                    advanced:
+                      detailed_level: B2
+                      confidence: medium
+                      level_scale:
+                        - { level: A0, min_score: 0 }
+                        - { level: A1, min_score: 40 }
+                        - { level: A2, min_score: 50 }
+                        - { level: B1, min_score: 60 }
+                        - { level: B2, min_score: 70 }
+                        - { level: C1, min_score: 80 }
+                        - { level: C2, min_score: 90 }
+                      integrity:
+                        level: none
+                        reasons: []
+                        window_changes: 0
+                        away_seconds: 0
+                        long_silences: 0
                     axes:
                       pronunciation: 78
                       fluency: 75
@@ -302,31 +301,6 @@ paths:
                         strengths: ["Good fluency on everyday topics"]
                         areas_for_improvement: ["Past participle agreement"]
                         notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
-                    scoring:
-                      rules_version: "2026-11-13.a41c"
-                      axes_evaluated:
-                        pronunciation: 78
-                        fluency: 7.5
-                        vocabulary_grammar: 6.5
-                        communication: 7.5
-                      axes_used:
-                        pronunciation: 7.8
-                        fluency: 7
-                        vocabulary_grammar: 6.5
-                        communication: 7.5
-                      axis_mean: 7.2
-                      base_score: 72
-                      adjustments:
-                        - rule: fluency_wpm_cap
-                          from: 7.5
-                          to: 7
-                          reason: "Speaking rate 96 wpm: fluency held at 7 at most."
-                      evidence:
-                        answer_count: 9
-                        words_per_answer: 38
-                        speaking_rate: 96
-                        c2_answers_well: 0
-                        speaker_errors: ["les choses que j'ai fait", "je suis allé à la Belgique"]
                     turns:
                       - index: 2
                         question: "Qu'est-ce que vous aimez faire le week-end ?"
@@ -353,12 +327,6 @@ paths:
                           repeated: false
                           not_understood: false
                           skipped: false
-                    integrity:
-                      level: none
-                      reasons: []
-                      window_changes: 0
-                      away_seconds: 0
-                      long_silences: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -438,17 +406,7 @@ webhooks:
                 duration_seconds: 329
                 answer_count: 9
                 level: B2
-                detailed_level: B2
                 score: 72
-                confidence: medium
-                level_scale:
-                  - { level: A0, min_score: 0 }
-                  - { level: A1, min_score: 40 }
-                  - { level: A2, min_score: 50 }
-                  - { level: B1, min_score: 60 }
-                  - { level: B2, min_score: 70 }
-                  - { level: C1, min_score: 80 }
-                  - { level: C2, min_score: 90 }
       responses:
         "2XX":
           description: Received.
@@ -540,17 +498,7 @@ components:
         duration_seconds: 329
         answer_count: 9
         level: B2
-        detailed_level: B2
         score: 72
-        confidence: medium
-        level_scale:
-          - { level: A0, min_score: 0 }
-          - { level: A1, min_score: 40 }
-          - { level: A2, min_score: 50 }
-          - { level: B1, min_score: 60 }
-          - { level: B2, min_score: 70 }
-          - { level: C1, min_score: 80 }
-          - { level: C2, min_score: 90 }
 
   schemas:
     Language:
@@ -578,7 +526,7 @@ components:
         ELAO Speaking's own finer split: each level from A1 to C1 in two halves, the upper one with
         "+" (with the default bands, B1 is 60–64 and B1+ 65–69). A0 and C2 are not split. Always
         agrees with `level` (`level` is this without the "+"). It is our split, not your scale's
-        sub-levels: to map onto those, use `score` and `level_scale`.
+        sub-levels: to map onto those, use `score` and `advanced.level_scale`.
 
     StartLevel:
       description: Level of the first questions (any `Level` but A0). When omitted, the default set for the language is used.
@@ -677,7 +625,7 @@ components:
       required: [pronunciation, fluency, vocabulary_grammar, communication]
       description: |
         Each axis from 0 to 100, as the evaluator scored it. The level is computed from these four,
-        after the rules listed in `scoring` (detail `full`).
+        after a few scoring rules (for example, fluency is held to what the speaking rate allows).
       properties:
         pronunciation:
           type: [integer, "null"]
@@ -755,110 +703,6 @@ components:
           $ref: "#/components/schemas/Feedback"
         de:
           $ref: "#/components/schemas/Feedback"
-
-    Scoring:
-      type: object
-      required: [rules_version, axes_evaluated, axes_used, axis_mean, base_score, adjustments, evidence]
-      description: |
-        How `score` was computed, step by step:
-        1. `axes_evaluated` → `axes_used`: the pronunciation engine's 0–100 is brought to the 0–10
-           scale of the other axes, then the rules that act on a single axis apply (listed in
-           `adjustments`).
-        2. `axis_mean`: the mean of `axes_used`.
-        3. `base_score`: the axis mean on 100, through the scoring curve.
-        4. The rules that act on the score itself apply (listed in `adjustments`, in order). The
-           last value is `score`; `level` is the band of `level_scale` it falls in.
-      properties:
-        rules_version:
-          type: string
-          description: Identifies the scoring rules and score bands used. Two results with the same version were scored the same way.
-        axes_evaluated:
-          type: object
-          description: Before any rule. Pronunciation as the engine gave it (0–100); the other three on the evaluator's 0–10 scale, in half points.
-          properties:
-            pronunciation:
-              type: [number, "null"]
-            fluency:
-              type: number
-            vocabulary_grammar:
-              type: number
-            communication:
-              type: number
-        axes_used:
-          type: object
-          description: The four values averaged, all on 0–10.
-          properties:
-            pronunciation:
-              type: [number, "null"]
-            fluency:
-              type: number
-            vocabulary_grammar:
-              type: number
-            communication:
-              type: number
-        axis_mean:
-          type: number
-        base_score:
-          type: integer
-        adjustments:
-          type: array
-          description: Every rule that changed a value, in the order applied. Empty when none did.
-          items:
-            $ref: "#/components/schemas/Adjustment"
-        evidence:
-          type: object
-          description: The facts the rules look at.
-          properties:
-            answer_count:
-              type: integer
-            words_per_answer:
-              type: number
-            speaking_rate:
-              type: [integer, "null"]
-              description: Words per minute over the whole test, long pauses capped.
-            c2_answers_well:
-              type: integer
-              description: Answers to C2-level questions judged "well". C2 needs at least 2.
-            speaker_errors:
-              type: array
-              items:
-                type: string
-              description: The vocabulary and grammar errors counted against the candidate, quoted.
-
-    Adjustment:
-      type: object
-      required: [rule, from, to, reason]
-      properties:
-        rule:
-          type: string
-          enum:
-            - fluency_wpm_cap
-            - pronunciation_lift
-            - pronunciation_weight
-            - bonus
-            - c2_floor
-            - boundary_check
-            - c2_gate_cap
-            - c2_by_evidence
-          description: |
-            - `fluency_wpm_cap`: fluency held to what the speaking rate allows (axis, 0–10).
-            - `pronunciation_lift`: pronunciation held close to the other axes (axis, 0–10).
-            - `pronunciation_weight`: pronunciation counts less in the mean (`from`/`to` = weight).
-            - `bonus`: excellence bonus on the score.
-            - `c2_floor`: score lifted to C2 for a clearly excellent test.
-            - `boundary_check`: score moved across a level boundary by a second opinion.
-            - `c2_gate_cap`: score held below C2, the C2 evidence is missing.
-            - `c2_by_evidence`: score lifted to C2 on the C2 evidence.
-
-            Only `fluency_wpm_cap`, `c2_gate_cap` and `c2_by_evidence` are in use today; the others
-            are listed so that a change of rules does not change this list.
-        from:
-          type: number
-        to:
-          type: number
-        reason:
-          type: string
-          description: In English, for a person reading it.
 
     WordScore:
       type: object
@@ -965,7 +809,7 @@ components:
 
     ResultSummary:
       type: object
-      required: [test_id, external_ref, language, interface_language, detail, completed_at, graded_at, duration_seconds, answer_count, level, detailed_level, score, confidence, level_scale]
+      required: [test_id, external_ref, language, interface_language, detail, completed_at, graded_at, duration_seconds, answer_count, level, score]
       properties:
         test_id:
           type: string
@@ -991,12 +835,18 @@ components:
           type: integer
         level:
           $ref: "#/components/schemas/Level"
-        detailed_level:
-          $ref: "#/components/schemas/DetailedLevel"
         score:
           type: integer
           minimum: 0
           maximum: 100
+
+    Advanced:
+      type: object
+      required: [detailed_level, confidence, level_scale, integrity]
+      description: To go finer than `level`. Safe to ignore if the level is all you need.
+      properties:
+        detailed_level:
+          $ref: "#/components/schemas/DetailedLevel"
         confidence:
           type: string
           enum: [high, medium, low]
@@ -1006,6 +856,11 @@ components:
           items:
             $ref: "#/components/schemas/LevelBand"
           description: The score bands used for this test, A0 to C2. Use them with `score` to place the candidate within a level.
+        integrity:
+          oneOf:
+            - $ref: "#/components/schemas/Integrity"
+            - type: "null"
+          description: Null when integrity tracking was off.
 
     ResultStandard:
       allOf:
@@ -1022,19 +877,14 @@ components:
       allOf:
         - $ref: "#/components/schemas/ResultStandard"
         - type: object
-          required: [scoring, turns, integrity]
+          required: [turns, advanced]
           properties:
-            scoring:
-              $ref: "#/components/schemas/Scoring"
             turns:
               type: array
               items:
                 $ref: "#/components/schemas/Turn"
-            integrity:
-              oneOf:
-                - $ref: "#/components/schemas/Integrity"
-                - type: "null"
-              description: Null when integrity tracking was off.
+            advanced:
+              $ref: "#/components/schemas/Advanced"
 
     WebhookEvent:
       type: object
