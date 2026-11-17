@@ -64,12 +64,21 @@ export function mistralTranslationModel(): string {
   return process.env.MISTRAL_TRANSLATION_MODEL ?? "mistral-small-latest";
 }
 
+/**
+ * Pronunciation judge (azure-ensemble.ts judge(), azure-intended.ts) — Mistral
+ * Small 4, pinned. Moved off mistral-large-2512 on 2026-11-17: 2512 is capped
+ * at 15 requests/minute on the account and assess-all hit 429s, Small 4 allows
+ * 100. Measured against the Speechace calibration set
+ * (scripts/judge-calibration-replay.ts, 30 sessions / 149 turns, same Azure
+ * evidence): on par with 2512 — ρ oral level 0.70 vs 0.51, r Speechace 0.47
+ * vs 0.61, A1 mean 72 vs 76, all within noise at that size.
+ * No longer falls back to MISTRAL_MODEL: the CEFR evaluator's model must not
+ * silently become the judge.
+ */
+export const MISTRAL_PRONUNCIATION_JUDGE_MODEL = "mistral-small-2603";
+
 export function mistralPronunciationModel(): string {
-  return (
-    process.env.MISTRAL_PRONUNCIATION_MODEL ??
-    process.env.MISTRAL_MODEL ??
-    MISTRAL_LARGE_MODEL
-  );
+  return process.env.MISTRAL_PRONUNCIATION_MODEL ?? MISTRAL_PRONUNCIATION_JUDGE_MODEL;
 }
 
 /** Voxtral (audio-input) model — separate family from the text models above. */
