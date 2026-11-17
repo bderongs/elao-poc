@@ -69,9 +69,11 @@ info:
     }
     ```
 
-    **Delivery.** Reply with any 2xx. Otherwise the webhook is sent again after 1 min, 5 min,
-    30 min, 2 h and 12 h (6 attempts in all); a 4xx reply is not retried. Order is not guaranteed:
-    rely on `status`, or on `GET /tests/{test_id}`.
+    **Delivery.** Reply with any 2xx. Otherwise the webhook is sent again 3 times, 1 minute apart
+    (4 attempts in all, over about 3 minutes); a 4xx reply is not retried. A webhook is a
+    notification only: the status and the result can always be read with `GET /tests/{test_id}`,
+    so if your endpoint was down, check the tests you have not seen `graded` yet. Order is not
+    guaranteed: rely on `status`, or on `GET /tests/{test_id}`.
   contact:
     name: ELAO
 servers:
