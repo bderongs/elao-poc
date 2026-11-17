@@ -26,7 +26,14 @@ info:
     candidate leaves stays `in_progress`. For a new attempt, create a new test.
 
     **The result is fixed.** It is computed once, at grading, and every later call returns the same
-    values, even if the scoring rules change afterwards.
+    values, even if the scoring rules change afterwards. The one exception is the audio links of
+    detail `full`, which are new on each call (see "Audio").
+
+    **Audio.** With detail `full`, each answer gives `audio_url`, a link to the candidate's
+    recording of that answer. The link is signed and works for 2 hours: call the result again for a
+    fresh one rather than storing it, or download the file if you want to keep it. Formats: WebM
+    (Opus) or MP4 (AAC) depending on the candidate's browser; the response's `Content-Type` says
+    which. Recordings are kept for the period agreed with you; after that, `audio_url` is null.
 
     **The test link** works once: when the candidate has started, opening it again shows a
     "test already started" page instead of a new test.
@@ -338,6 +345,8 @@ paths:
                           - { word: "le", score: 91 }
                           - { word: "samedi", score: 77 }
                           - { word: "matin", score: 83 }
+                        audio_url: "https://storage.elao-speaking.example/recordings/fr/2026-11-09/4f6c…/turn-2.webm?token=…"
+                        audio_expires_at: "2026-11-09T16:40:12Z"
                         response_delay_seconds: 1.4
                         answer_seconds: 4.8
                         help:
@@ -904,6 +913,17 @@ components:
           items:
             $ref: "#/components/schemas/WordScore"
           description: The answer word by word, with each word's pronunciation score. Empty when the answer was not scored.
+        audio_url:
+          type: [string, "null"]
+          format: uri
+          description: |
+            The candidate's recording of this answer: a signed link, valid until `audio_expires_at`
+            (2 hours after this call). Null when there is no recording (the upload failed) or it is
+            past the retention period.
+        audio_expires_at:
+          type: [string, "null"]
+          format: date-time
+          description: When `audio_url` stops working. Null with `audio_url`.
         response_delay_seconds:
           type: [number, "null"]
           description: Silence between the end of the question and the start of the answer.

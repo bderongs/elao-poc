@@ -51,7 +51,7 @@ Code: `scoreWithRules` (`lib/cefr-score.ts`) returns only `notes` (free text). I
 Answers to give back, ☐ each one Michel's call:
 
 1. **Failed evaluation / repeated abandonment.** The retry policy belongs to ELAO's platform (it creates the tests). Our part: `error` should be rare (server-side retry of the evaluation before `error`, API-28), and every attempt is a separate test, so ELAO can count attempts per `external_ref`. Suggestion: 3 attempts, then trainer grading.
-2. **Deferred trainer score.** Possible from `full` (transcript, per-answer facts, feedback). If a trainer is to grade, the audio helps a lot: ☐ offer signed audio links in `full` (2 h expiry, as in admin)? That reopens the GDPR question (retention, `DELETE /tests/{id}`).
+2. **Deferred trainer score.** Possible from `full` (transcript, per-answer facts, feedback). If a trainer is to grade, the audio helps a lot. **Decided (Baptiste, 2026-11-17): yes** — in `full`, each turn gives `audio_url` (signed link to its `turn-<i>` recording, 2 h, re-signed on every call, never stored in the snapshot) and `audio_expires_at`. → API-32. ☐ Retention period still to agree with ELAO (GDPR: voice is personal data); until a purge exists, recordings are kept.
 3. **What to show, where.** Their call. Correction to their note: feedback is no longer FR + EN only — it exists in the six interface languages (fr, en, nl, es, it, de; L-04). ☐ Proposal: always send all six, so ELAO picks at display time (5 small translation calls per test).
 4. **Redirect vs display inside ELAO's page.** Still open. Inside an iframe works but needs: their iframe with `allow="microphone"`, our `Content-Security-Policy: frame-ancestors` listing their domain (API-31), and our page not relying on third-party cookies (API tests have no account step, so fine). Redirect needs nothing new (`redirect_url`).
 
@@ -70,6 +70,7 @@ Answers to give back, ☐ each one Michel's call:
 - [ ] **API-29** Measure evaluation time (end of conversation → final save) on recent sessions; set the documented maximum.
 - [ ] **API-30** `scoreWithRules`: typed `adjustments` + intermediate values; `scoring` block in the `full` snapshot and spec.
 - [ ] **API-31** If the iframe option is chosen: `frame-ancestors` header for ELAO's domain in `next.config.js`.
+- [ ] **API-32** Audio in `full`: the snapshot keeps each turn's stored recording URL (path only, from `session_turns.audio_url`); `GET …/result?detail=full` signs them with `signRecordingUrls` (`lib/recordings.ts`) on each call → `audio_url` + `audio_expires_at`. Null when the turn has no recording. Later: retention purge once the period is agreed.
 
 Order: API-19 first (decisions), then the spec (API-20…22, 25, 28 and 30 spec parts) and republish `/api-docs` — the integrator reviews the contract before any code. Then code with step 2 below; the migration (API-23, columns for the new statuses) joins `0021_api_tests.sql`.
 
