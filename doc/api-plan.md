@@ -93,14 +93,14 @@ Updated 2026-11-17 (round 2: `completed` then `graded`).
 Client questions (roadmap phase 3, `lib/test-profiles.ts`) available to the integrator. Spec draft 3:
 
 - `POST /tests` takes `profile` (a profile id). Refused with `400` if the profile is unknown or inactive (`unknown_profile`) or not for the test's language (`profile_language_mismatch`), unlike the `?profile=` link, which silently ignores a mismatch. `Test` echoes `profile`.
-- `GET /profiles` (read-only): the active profiles with their active questions (`id`, `text`, `min_level`, `max_level`) and `min_questions`. Profiles stay edited in `/admin/profiles`; no write endpoint.
-- `full` result: each `Turn` has `client_question_id`, the profile question it asked, or null.
+- No profile endpoint for now (Baptiste, 2026-11-17): profiles are agreed with ELAO and edited in `/admin/profiles`.
+- `full` result: each `Turn` has `client_question` (boolean), true when it asked a profile question.
 
 Tasks:
 
 - [ ] **API-33** Migration (in `0021_api_tests.sql`): nothing new for the profile itself — `sessions.test_profile` exists (0020). The candidate link (API-11) passes the test's profile to the page instead of `?profile=`.
-- [ ] **API-34** `POST /tests`: validate `profile` with `getProfile` (active + same language); store it in `sessions.test_profile`. `GET /profiles` from `listProfiles`, active profiles and questions only.
-- [ ] **API-35** Snapshot (API-06): `client_question_id` per turn from `integrity_json` (each turn's `questionId` is already the profile question's id on a profile turn), kept only when it is one of the profile's question ids.
+- [ ] **API-34** `POST /tests`: validate `profile` with `getProfile` (active + same language); store it in `sessions.test_profile`.
+- [ ] **API-35** Snapshot (API-06): `client_question` per turn from `integrity_json` (each turn's `questionId` is already the profile question's id on a profile turn), true when it is one of the profile's question ids.
 
 ## Steps
 

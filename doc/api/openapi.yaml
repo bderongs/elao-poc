@@ -40,9 +40,11 @@ info:
 
     **Test profiles.** A test can include your own questions, asked word for word next to ours:
     pass `profile` to `POST /tests`. A profile (e.g. `safran`) is a list of questions, each with
-    the range of levels it suits, and how many of them each test asks (3 by default). It is set up
-    with ELAO; `GET /profiles` lists the ones you can use. In the `full` result, the turns that
-    asked one of your questions carry its id in `client_question_id`.
+    the range of levels it suits, and how many of them each test asks (3 by default); it is set up
+    with ELAO. Each question is asked when the conversation reaches a level inside its range; near
+    the end of the test, a missing one is asked anyway, and the test is extended (up to its maximum
+    length) until they have all been asked. In the `full` result, the turns that asked one of your
+    questions have `client_question: true`.
 
     **Levels** are the CEFR levels A0, A1, A2, B1, B2, C1 and C2, the same list everywhere. For a
     finer position within a level, the `full` result has an `advanced` block: `level_scale`, the
@@ -133,45 +135,6 @@ paths:
                 graded_at: null
         "400":
           $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
-  /profiles:
-    get:
-      operationId: listProfiles
-      summary: List your test profiles
-      description: |
-        The test profiles you can pass to `POST /tests`, with their questions. Profiles are set up
-        and edited with ELAO; this endpoint only reads them. A question's `id` does not change when
-        its wording is edited, so you can map it to your own records.
-      responses:
-        "200":
-          description: The profiles.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [profiles]
-                properties:
-                  profiles:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Profile"
-              example:
-                profiles:
-                  - id: safran
-                    name: Safran
-                    language: en
-                    min_questions: 3
-                    questions:
-                      - id: "0b7e4c1a-5f2d-4a8e-9c3b-1d6f2e8a4b90"
-                        text: "What do you know about Safran?"
-                        min_level: A2
-                        max_level: B2
-                      - id: "9a3d2e6b-8c1f-4b7a-a5e4-3f0c9d1b2e67"
-                        text: "Why would you like to work for Safran? And what would a good first year at Safran look like for you?"
-                        min_level: B1
-                        max_level: C1
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -604,7 +567,7 @@ components:
           type: string
           pattern: "^[a-z0-9-]{2,40}$"
           description: |
-            A test profile's `id` (see `GET /profiles`): the test also asks that profile's questions.
+            A test profile's id, as agreed with ELAO: the test also asks that profile's questions.
             The profile must be active and for the test's `language`, otherwise the request fails
             with `400` (`unknown_profile` or `profile_language_mismatch`).
         external_ref:
@@ -622,40 +585,6 @@ components:
           description: |
             Where to send this test's webhooks (`test.completed`, `test.graded`, `test.error`),
             instead of the default URL configured with ELAO. HTTPS only.
-
-    Profile:
-      type: object
-      required: [id, name, language, min_questions, questions]
-      properties:
-        id:
-          type: string
-          description: What to pass as `profile` to `POST /tests`.
-        name:
-          type: string
-        language:
-          $ref: "#/components/schemas/Language"
-        min_questions:
-          type: integer
-          description: |
-            How many of the questions each test asks. Each one is asked when the conversation reaches
-            a level inside its range; near the end of the test, a missing one is asked anyway, and the
-            test is extended (up to its maximum length) until they have all been asked.
-        questions:
-          type: array
-          description: Active questions only, in order of preference.
-          items:
-            type: object
-            required: [id, text, min_level, max_level]
-            properties:
-              id:
-                type: string
-                format: uuid
-              text:
-                type: string
-              min_level:
-                $ref: "#/components/schemas/Level"
-              max_level:
-                $ref: "#/components/schemas/Level"
 
     Test:
       type: object
@@ -824,13 +753,11 @@ components:
         question:
           type: string
           description: What the examiner said.
-        client_question_id:
-          type: [string, "null"]
-          format: uuid
+        client_question:
+          type: boolean
           description: |
-            When this turn asked one of your profile's questions: that question's `id` (see
-            `GET /profiles`). `question` then contains it word for word, after a short transition word.
-            Null for ELAO's own questions.
+            True when this turn asked one of your profile's questions: `question` then contains it
+            word for word, after a short transition word. False for ELAO's own questions.
         answer:
           type: string
           description: Transcript of the candidate's answer.
