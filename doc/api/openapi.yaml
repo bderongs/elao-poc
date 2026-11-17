@@ -728,10 +728,11 @@ components:
 
     FeedbackByLanguage:
       type: object
-      required: [en, fr]
+      required: [en]
       description: |
-        The written feedback, keyed by language: always `en` (the original) and `fr`, plus the
-        test's `interface_language` when it is another one.
+        The written feedback, keyed by language: always `en` (the original), plus the test's
+        `interface_language` when it is another one (`fr` for a French interface, `nl` for a Dutch
+        one…).
       properties:
         en:
           $ref: "#/components/schemas/Feedback"
