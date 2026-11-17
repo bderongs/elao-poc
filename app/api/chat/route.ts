@@ -4,7 +4,7 @@ import { mistralChatModel, mistralComplete, mistralStreamText } from "@/lib/mist
 import { repairExaminerReply, SPOKEN_SENTENCE_RE } from "@/lib/examiner-guard";
 import { logServerEvent } from "@/lib/server-log";
 import { getLiveProfile } from "@/lib/test-profiles";
-import { profileQuestionReply } from "@/lib/conversation-prompts";
+import { profileQuestionReply, withTurnNote } from "@/lib/conversation-prompts";
 import type { CefrRung } from "@/lib/cefr-rung";
 import { chatProcessLabel } from "@/lib/turn-labels";
 import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
@@ -85,9 +85,12 @@ export async function POST(req: Request) {
   const profile = profileId ? await getLiveProfile(profileId) : null;
   const logId = turnLogId ?? "unknown";
   const process = chatProcessLabel(logId);
-  const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState, profileRemaining, profileQuestion } = buildExaminerPrompt({
-    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt, profile, profileUrgent,
+  const previousReply = [...(history ?? [])].reverse().find((m) => m.role === "assistant")?.content ?? "";
+  const { system, turnNote, targetRung, updatedUsedQuestions, bankState: updatedBankState, profileRemaining, profileQuestion } = buildExaminerPrompt({
+    language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt, profile, profileUrgent, previousReply,
   });
+  // The turn's instruction goes last, after the speaker's message (lib/conversation-prompts.ts, three layers).
+  const modelMessages = [...(history ?? []).map(({ role, content }) => ({ role, content })), { role: "user" as const, content: withTurnNote(userMessage, turnNote) }];
   const requestReceivedAt = Date.now();
   logServerEvent("chat_request_received", {
     turnLogId: logId, process, targetRung, ...(clarify ? { clarify: true, clarifyAttempt: clarifyAttempt ?? 1 } : {}),
@@ -165,10 +168,7 @@ export async function POST(req: Request) {
           const llmStream = mistralStreamText({
             model: mistralChatModel(),
             system,
-            messages: [
-              ...history.map(({ role, content }) => ({ role, content })),
-              { role: "user", content: userMessage },
-            ],
+            messages: modelMessages,
             maxTokens: 300,
             context: process,
           });
@@ -194,7 +194,7 @@ export async function POST(req: Request) {
                 mistralComplete({
                   model: mistralChatModel(),
                   system: system + direction,
-                  messages: [...history.map(({ role, content }) => ({ role, content })), { role: "user", content: userMessage }],
+                  messages: modelMessages,
                   maxTokens: 300,
                   context: `${process}:repair`,
                 }),

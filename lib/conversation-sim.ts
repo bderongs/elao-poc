@@ -27,7 +27,7 @@
  * question can't convincingly pretend not to understand it.
  */
 
-import type { ConvLang } from "@/lib/conversation-prompts";
+import { withTurnNote, type ConvLang } from "@/lib/conversation-prompts";
 import { guardStepUp, type CefrRung } from "@/lib/cefr-rung";
 import type { CefrResult } from "@/lib/types";
 import { buildExaminerPrompt, type BankState } from "@/lib/examiner-prompt";
@@ -290,10 +290,12 @@ export async function* runConversationSimulation(
     const clarify = clarifyAttempt > 0;
     const avoidDomain = !isStart && !clarify && domainStreak >= MAX_DOMAIN_STREAK ? currentDomain ?? undefined : undefined;
     const switchToDomain = avoidDomain ? pickSwitchDomain(avoidDomain, visitedDomains) : undefined;
-    const { system, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
-      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt: clarify ? clarifyAttempt : undefined,
+    const previousReply = [...requestHistory].reverse().find((m) => m.role === "assistant")?.content ?? "";
+    const { system, turnNote, targetRung, updatedUsedQuestions, bankState: updatedBankState } = buildExaminerPrompt({
+      language, rung, usedQuestions, bankState, isStart, isEnd: userMessage === "__END__", avoidDomain, switchToDomain, clarify, clarifyAttempt: clarify ? clarifyAttempt : undefined, previousReply,
     });
-    const messages: Msg[] = [...requestHistory, { role: "user", content: userMessage }];
+    // Same as app/api/chat/route.ts: the turn's instruction goes after the speaker's message.
+    const messages: Msg[] = [...requestHistory, { role: "user", content: withTurnNote(userMessage, turnNote) }];
     let text = await mistralComplete({ model: mistralChatModel(), system, messages, maxTokens: 300, context: `${runId}:examiner-${turn}` });
     // Same post-check as app/api/chat/route.ts (no question / same question again).
     if (userMessage !== "__END__") {
