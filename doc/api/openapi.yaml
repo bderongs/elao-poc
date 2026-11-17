@@ -1,15 +1,15 @@
 openapi: 3.1.0
 info:
   title: ELAO Speaking API
-  version: 1.0.0-draft
+  version: 1.0.0-draft.2
   description: |
     Order an oral language test, send the candidate to it, then read its status and result.
 
     **Flow**
     1. `POST /tests` creates a test and returns its `test_id` and the `test_url` to give the candidate.
     2. The candidate opens `test_url` and takes the test in the browser (3 to 7 minutes).
-    3. Poll `GET /tests/{test_id}` until `status` is `completed` (or `error`), or wait for the
-       `test.completed` / `test.error` webhook.
+    3. Wait for the `test.graded` webhook (or `test.error`), or poll `GET /tests/{test_id}` until
+       `status` is `graded` or `error`.
     4. `GET /tests/{test_id}/result` returns the result, at the level of detail asked for.
 
     **Statuses**
@@ -17,14 +17,53 @@ info:
     |---|---|
     | `created` | Test created, the candidate has not started yet. |
     | `in_progress` | The candidate has started. A test the candidate leaves before the end stays `in_progress`. |
-    | `completed` | Finished and evaluated. The result is available and will not change. |
-    | `error` | Finished, but the evaluation failed. No result. |
+    | `completed` | The conversation is over; the test is being graded. |
+    | `graded` | Graded. The result is available and will not change. |
+    | `error` | The conversation is over, but grading failed. No result. |
 
-    **The result is fixed.** It is computed once, when the test is evaluated, and every later call
-    returns the same values, even if the scoring rules change afterwards.
+    A test goes from `completed` to `graded` (or `error`) within **15 minutes**, usually under one.
+    Tests are neither cancelled nor expired: a test that is never started stays `created`, one the
+    candidate leaves stays `in_progress`. For a new attempt, create a new test.
+
+    **The result is fixed.** It is computed once, at grading, and every later call returns the same
+    values, even if the scoring rules change afterwards.
 
     **The test link** works once: when the candidate has started, opening it again shows a
-    "test already started" page instead of a new test. It does not expire.
+    "test already started" page instead of a new test.
+
+    **Levels** are the CEFR levels A0, A1, A2, B1, B2, C1 and C2, the same list everywhere. For a
+    finer position within a level, use `score` (0–100) with `level_scale`, the score bands that
+    were used for that test. `detailed_level` also gives our own split (B1 or B1+).
+
+    **Webhooks** — see `test.completed`, `test.graded` and `test.error` below, and
+    "Verifying a webhook".
+
+    ## Verifying a webhook
+
+    Every webhook carries `X-Elao-Signature: t=<unix seconds>,v1=<hex>`, where `v1` is the
+    HMAC-SHA256 of `"<t>.<raw body>"` with the shared secret. To accept a webhook:
+
+    1. Recompute the HMAC over `t`, a dot and the raw body as received (before any JSON parsing),
+       and compare it with `v1` in constant time.
+    2. Reject it if `t` is more than 5 minutes away from your clock.
+    3. Ignore it if you have already processed its `event_id`. A retried webhook keeps the same
+       `event_id` (and gets a new `t`).
+
+    ```js
+    const crypto = require("node:crypto");
+
+    function verify(rawBody, header, secret) {
+      const parts = Object.fromEntries(header.split(",").map((p) => p.split("=")));
+      const expected = crypto.createHmac("sha256", secret).update(`${parts.t}.${rawBody}`).digest("hex");
+      const fresh = Math.abs(Date.now() / 1000 - Number(parts.t)) <= 300;
+      return fresh && parts.v1?.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(parts.v1), Buffer.from(expected));
+    }
+    ```
+
+    **Delivery.** Reply with any 2xx. Otherwise the webhook is sent again after 1 min, 5 min,
+    30 min, 2 h and 12 h (6 attempts in all); a 4xx reply is not retried. Order is not guaranteed:
+    rely on `status`, or on `GET /tests/{test_id}`.
   contact:
     name: ELAO
 servers:
@@ -49,6 +88,7 @@ paths:
               $ref: "#/components/schemas/CreateTestRequest"
             example:
               language: fr
+              interface_language: fr
               start_level: B1
               external_ref: "candidate-48213"
               redirect_url: "https://www.elao-test.com/oral/done?ref=candidate-48213"
@@ -65,11 +105,14 @@ paths:
                 external_ref: "candidate-48213"
                 status: created
                 language: fr
+                interface_language: fr
                 start_level: B1
                 test_url: "https://speaking.elao-test.com/?test=6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                completed_callback_url: "https://www.elao-test.com/api/oral-callback"
                 created_at: "2026-11-10T09:00:00Z"
                 started_at: null
                 completed_at: null
+                graded_at: null
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -91,13 +134,16 @@ paths:
               example:
                 test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
                 external_ref: "candidate-48213"
-                status: completed
+                status: graded
                 language: fr
+                interface_language: fr
                 start_level: B1
                 test_url: "https://speaking.elao-test.com/?test=6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                completed_callback_url: "https://www.elao-test.com/api/oral-callback"
                 created_at: "2026-11-10T09:00:00Z"
                 started_at: "2026-11-10T14:02:11Z"
                 completed_at: "2026-11-10T14:07:40Z"
+                graded_at: "2026-11-10T14:08:05Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -108,12 +154,15 @@ paths:
       operationId: getTestResult
       summary: Get a test's result
       description: |
-        Only available once `status` is `completed`. Each level of detail contains everything
-        in the level before it:
+        Only available once `status` is `graded`. Each level of detail contains everything in the
+        level before it:
 
-        - `summary`: level, score, confidence.
-        - `standard` (default): + the four axes and the written feedback.
-        - `full`: + the transcript, question by question, and the integrity signals.
+        - `summary`: level (and `detailed_level`), score, confidence and the score bands. Also the webhook's `result`.
+        - `standard` (default): + the four axes (on 100) and the written feedback: a few words per
+          axis, the general summary, strengths, areas for improvement and notable errors.
+        - `full`: + how the score was computed (`scoring`), the transcript answer by answer (with
+          each word's pronunciation score, the speaking rate and the help the candidate asked for),
+          and the integrity signals.
       parameters:
         - $ref: "#/components/parameters/TestId"
         - name: detail
@@ -129,58 +178,184 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TestResult"
+                oneOf:
+                  - $ref: "#/components/schemas/ResultSummary"
+                  - $ref: "#/components/schemas/ResultStandard"
+                  - $ref: "#/components/schemas/ResultFull"
+                discriminator:
+                  propertyName: detail
+                  mapping:
+                    summary: "#/components/schemas/ResultSummary"
+                    standard: "#/components/schemas/ResultStandard"
+                    full: "#/components/schemas/ResultFull"
               examples:
                 summary:
-                  summary: detail=summary
-                  value:
-                    test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
-                    external_ref: "candidate-48213"
-                    language: fr
-                    detail: summary
-                    completed_at: "2026-11-10T14:07:40Z"
-                    duration_seconds: 329
-                    answer_count: 9
-                    level: B2
-                    score: 72
-                    confidence: medium
-                    top_of_scale: false
+                  $ref: "#/components/examples/ResultSummaryValue"
                 standard:
                   summary: detail=standard
                   value:
                     test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
                     external_ref: "candidate-48213"
                     language: fr
+                    interface_language: fr
                     detail: standard
                     completed_at: "2026-11-10T14:07:40Z"
+                    graded_at: "2026-11-10T14:08:05Z"
                     duration_seconds: 329
                     answer_count: 9
                     level: B2
+                    detailed_level: B2
                     score: 72
                     confidence: medium
-                    top_of_scale: false
+                    level_scale:
+                      - { level: A0, min_score: 0 }
+                      - { level: A1, min_score: 40 }
+                      - { level: A2, min_score: 50 }
+                      - { level: B1, min_score: 60 }
+                      - { level: B2, min_score: 70 }
+                      - { level: C1, min_score: 80 }
+                      - { level: C2, min_score: 90 }
                     axes:
                       pronunciation: 78
-                      fluency: 70
+                      fluency: 75
                       vocabulary_grammar: 65
                       communication: 75
                     feedback:
                       fr:
-                        summary: "Le candidat s'exprime avec aisance sur des sujets familiers…"
+                        translated: true
+                        axis_feedback:
+                          pronunciation: "La prononciation est claire ; quelques voyelles nasales restent hésitantes."
+                          fluency: "Le débit est régulier, avec des pauses surtout sur les sujets abstraits."
+                          vocabulary_grammar: "Le vocabulaire est varié ; les accords du participe passé restent fragiles."
+                          communication: "Le candidat répond à toutes les questions et développe ses idées."
+                        general_summary: "Le candidat s'exprime avec aisance sur des sujets familiers…"
                         strengths: ["Bonne fluidité sur les sujets du quotidien"]
                         areas_for_improvement: ["Accord du participe passé"]
                         notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
                       en:
-                        summary: "The candidate speaks easily on familiar topics…"
+                        translated: false
+                        axis_feedback:
+                          pronunciation: "Pronunciation is clear; a few nasal vowels remain hesitant."
+                          fluency: "The delivery is steady, with pauses mostly on abstract topics."
+                          vocabulary_grammar: "Vocabulary is varied; past participle agreement is still fragile."
+                          communication: "The candidate answers every question and develops their ideas."
+                        general_summary: "The candidate speaks easily on familiar topics…"
                         strengths: ["Good fluency on everyday topics"]
                         areas_for_improvement: ["Past participle agreement"]
                         notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
+                full:
+                  summary: detail=full (one turn shown)
+                  value:
+                    test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                    external_ref: "candidate-48213"
+                    language: fr
+                    interface_language: fr
+                    detail: full
+                    completed_at: "2026-11-10T14:07:40Z"
+                    graded_at: "2026-11-10T14:08:05Z"
+                    duration_seconds: 329
+                    answer_count: 9
+                    level: B2
+                    detailed_level: B2
+                    score: 72
+                    confidence: medium
+                    level_scale:
+                      - { level: A0, min_score: 0 }
+                      - { level: A1, min_score: 40 }
+                      - { level: A2, min_score: 50 }
+                      - { level: B1, min_score: 60 }
+                      - { level: B2, min_score: 70 }
+                      - { level: C1, min_score: 80 }
+                      - { level: C2, min_score: 90 }
+                    axes:
+                      pronunciation: 78
+                      fluency: 75
+                      vocabulary_grammar: 65
+                      communication: 75
+                    feedback:
+                      fr:
+                        translated: true
+                        axis_feedback:
+                          pronunciation: "La prononciation est claire ; quelques voyelles nasales restent hésitantes."
+                          fluency: "Le débit est régulier, avec des pauses surtout sur les sujets abstraits."
+                          vocabulary_grammar: "Le vocabulaire est varié ; les accords du participe passé restent fragiles."
+                          communication: "Le candidat répond à toutes les questions et développe ses idées."
+                        general_summary: "Le candidat s'exprime avec aisance sur des sujets familiers…"
+                        strengths: ["Bonne fluidité sur les sujets du quotidien"]
+                        areas_for_improvement: ["Accord du participe passé"]
+                        notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
+                      en:
+                        translated: false
+                        axis_feedback:
+                          pronunciation: "Pronunciation is clear; a few nasal vowels remain hesitant."
+                          fluency: "The delivery is steady, with pauses mostly on abstract topics."
+                          vocabulary_grammar: "Vocabulary is varied; past participle agreement is still fragile."
+                          communication: "The candidate answers every question and develops their ideas."
+                        general_summary: "The candidate speaks easily on familiar topics…"
+                        strengths: ["Good fluency on everyday topics"]
+                        areas_for_improvement: ["Past participle agreement"]
+                        notable_errors: ["'les choses que j'ai fait' → 'les choses que j'ai faites'"]
+                    scoring:
+                      rules_version: "2026-11-13.a41c"
+                      axes_evaluated:
+                        pronunciation: 78
+                        fluency: 7.5
+                        vocabulary_grammar: 6.5
+                        communication: 7.5
+                      axes_used:
+                        pronunciation: 7.8
+                        fluency: 7
+                        vocabulary_grammar: 6.5
+                        communication: 7.5
+                      axis_mean: 7.2
+                      base_score: 72
+                      adjustments:
+                        - rule: fluency_wpm_cap
+                          from: 7.5
+                          to: 7
+                          reason: "Speaking rate 96 wpm: fluency held at 7 at most."
+                      evidence:
+                        answer_count: 9
+                        words_per_answer: 38
+                        speaking_rate: 96
+                        c2_answers_well: 0
+                        speaker_errors: ["les choses que j'ai fait", "je suis allé à la Belgique"]
+                    turns:
+                      - index: 2
+                        question: "Qu'est-ce que vous aimez faire le week-end ?"
+                        answer: "J'aime bien aller au marché le samedi matin."
+                        question_level: B1
+                        judge_verdict: well
+                        pronunciation: 81
+                        word_count: 9
+                        speaking_rate: 112
+                        word_scores:
+                          - { word: "J'aime", score: 92 }
+                          - { word: "bien", score: 88 }
+                          - { word: "aller", score: 85 }
+                          - { word: "au", score: 90 }
+                          - { word: "marché", score: 54 }
+                          - { word: "le", score: 91 }
+                          - { word: "samedi", score: 77 }
+                          - { word: "matin", score: 83 }
+                        response_delay_seconds: 1.4
+                        answer_seconds: 4.8
+                        help:
+                          repeated: false
+                          not_understood: false
+                          skipped: false
+                    integrity:
+                      level: none
+                      reasons: []
+                      window_changes: 0
+                      away_seconds: 0
+                      long_silences: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The test is not `completed` yet (or ended in `error`). The body gives its current status.
+          description: The test is not `graded` (yet, or it ended in `error`). The body gives its current status.
           content:
             application/json:
               schema:
@@ -188,24 +363,21 @@ paths:
               example:
                 error:
                   code: result_not_available
-                  message: "The test is in_progress."
-                  status: in_progress
+                  message: "The test is completed and being graded."
+                  status: completed
 
 webhooks:
   test.completed:
     post:
       operationId: onTestCompleted
-      summary: A test has been evaluated
+      summary: The conversation is over, grading has started
       description: |
-        Sent once, when a test becomes `completed`. Carries the `summary` result; call
-        `GET /tests/{test_id}/result` for more detail.
+        Sent once, when a test becomes `completed`. `result` is null; `test.graded` (or
+        `test.error`) follows within 15 minutes.
 
-        Sent to the test's `completed_callback_url` when one was given to `POST /tests`,
-        otherwise to the default URL configured with ELAO. With neither, no webhook is sent.
-
-        Signed with HMAC-SHA256 over the raw body, using the shared secret:
-        `X-Elao-Signature: sha256=<hex>`. Retried up to 3 times (after 1 s, then 2 s) on a
-        network error or a 5xx; a 4xx is not retried. Reply with any 2xx.
+        All webhooks of a test go to its `completed_callback_url` when one was given to
+        `POST /tests`, otherwise to the default URL configured with ELAO. With neither, no webhook
+        is sent. Signature and delivery: see "Verifying a webhook" at the top.
       parameters:
         - $ref: "#/components/parameters/Signature"
       requestBody:
@@ -214,24 +386,70 @@ webhooks:
             schema:
               $ref: "#/components/schemas/WebhookEvent"
             example:
+              event_id: "evt_01JD8R4N2Q6Z7Y3K5M9P0T1V2W"
               event: test.completed
               test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
               external_ref: "candidate-48213"
               status: completed
-              sent_at: "2026-11-10T14:07:42Z"
+              sent_at: "2026-11-10T14:07:41Z"
+              result: null
+      responses:
+        "2XX":
+          description: Received.
+  test.graded:
+    post:
+      operationId: onTestGraded
+      summary: A test has been graded
+      description: |
+        Sent once, when a test becomes `graded`. `result` is the same object as
+        `GET /tests/{test_id}/result?detail=summary`; call that endpoint with `standard` or `full`
+        for more. Same URL, signature and delivery as `test.completed`.
+      parameters:
+        - $ref: "#/components/parameters/Signature"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+            example:
+              event_id: "evt_01JD8R5B7H2C4D6F8G0J1K3L5M"
+              event: test.graded
+              test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+              external_ref: "candidate-48213"
+              status: graded
+              sent_at: "2026-11-10T14:08:06Z"
               result:
+                test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+                external_ref: "candidate-48213"
+                language: fr
+                interface_language: fr
+                detail: summary
+                completed_at: "2026-11-10T14:07:40Z"
+                graded_at: "2026-11-10T14:08:05Z"
+                duration_seconds: 329
+                answer_count: 9
                 level: B2
+                detailed_level: B2
                 score: 72
                 confidence: medium
-                top_of_scale: false
+                level_scale:
+                  - { level: A0, min_score: 0 }
+                  - { level: A1, min_score: 40 }
+                  - { level: A2, min_score: 50 }
+                  - { level: B1, min_score: 60 }
+                  - { level: B2, min_score: 70 }
+                  - { level: C1, min_score: 80 }
+                  - { level: C2, min_score: 90 }
       responses:
         "2XX":
           description: Received.
   test.error:
     post:
       operationId: onTestError
-      summary: A test finished but could not be evaluated
-      description: Same URL, delivery and signature as `test.completed`; `result` is null.
+      summary: A test could not be graded
+      description: |
+        Sent once, when a test becomes `error`. `result` is null. Same URL, signature and delivery
+        as `test.completed`. Create a new test for another attempt.
       parameters:
         - $ref: "#/components/parameters/Signature"
       requestBody:
@@ -262,9 +480,10 @@ components:
       name: X-Elao-Signature
       in: header
       required: true
+      description: "`t=<unix seconds>,v1=<hex HMAC-SHA256 of \"<t>.<raw body>\">` — see \"Verifying a webhook\"."
       schema:
         type: string
-        example: "sha256=5d41402abc4b2a76b9719d911017c592…"
+        example: "t=1762783686,v1=5d41402abc4b2a76b9719d911017c592ae2f…"
 
   responses:
     BadRequest:
@@ -276,7 +495,7 @@ components:
           example:
             error:
               code: invalid_request
-              message: "language: must be one of fr, en, nl-BE, es, it, de"
+              message: "language: must be one of fr, en, nl-BE, nl-NL, es, it, de"
     Unauthorized:
       description: Missing or wrong API key.
       content:
@@ -298,25 +517,71 @@ components:
               code: not_found
               message: "No test with this id."
 
+  examples:
+    ResultSummaryValue:
+      summary: detail=summary
+      value:
+        test_id: "6f1c2a9e-3b4d-4c8a-9e21-7d5b0f3a1c44"
+        external_ref: "candidate-48213"
+        language: fr
+        interface_language: fr
+        detail: summary
+        completed_at: "2026-11-10T14:07:40Z"
+        graded_at: "2026-11-10T14:08:05Z"
+        duration_seconds: 329
+        answer_count: 9
+        level: B2
+        detailed_level: B2
+        score: 72
+        confidence: medium
+        level_scale:
+          - { level: A0, min_score: 0 }
+          - { level: A1, min_score: 40 }
+          - { level: A2, min_score: 50 }
+          - { level: B1, min_score: 60 }
+          - { level: B2, min_score: 70 }
+          - { level: C1, min_score: 80 }
+          - { level: C2, min_score: 90 }
+
   schemas:
     Language:
       type: string
-      enum: [fr, en, nl-BE, es, it, de]
-      description: Language tested.
+      enum: [fr, en, nl-BE, nl-NL, es, it, de]
+      description: Language tested. `nl-BE` is Dutch as spoken in Belgium, `nl-NL` in the Netherlands.
+
+    InterfaceLanguage:
+      type: string
+      enum: [fr, en, nl, es, it, de]
+      default: fr
+      description: |
+        Language of the screens the candidate sees, and of the written feedback in the result.
+        Independent of the language tested.
 
     Level:
       type: string
-      enum: [A0, A1, A1+, A2, A2+, B1, B1+, B2, B2+, C1, C1+]
-      description: CEFR level reported. C1+ is the highest the test reports (see `top_of_scale`).
+      enum: [A0, A1, A2, B1, B2, C1, C2]
+      description: CEFR level. The same list for the level reported, the start level and each question's level.
+
+    DetailedLevel:
+      type: string
+      enum: [A0, A1, A1+, A2, A2+, B1, B1+, B2, B2+, C1, C1+, C2]
+      description: |
+        ELAO Speaking's own finer split: each level from A1 to C1 in two halves, the upper one with
+        "+" (with the default bands, B1 is 60–64 and B1+ 65–69). A0 and C2 are not split. Always
+        agrees with `level` (`level` is this without the "+"). It is our split, not your scale's
+        sub-levels: to map onto those, use `score` and `level_scale`.
 
     StartLevel:
-      type: string
-      enum: [A1, A2, B1, B2, C1, C2]
-      description: Level of the first questions. When omitted, the default set for the language is used.
+      description: Level of the first questions (any `Level` but A0). When omitted, the default set for the language is used.
+      allOf:
+        - $ref: "#/components/schemas/Level"
+        - not:
+            const: A0
 
     Status:
       type: string
-      enum: [created, in_progress, completed, error]
+      enum: [created, in_progress, completed, graded, error]
+      description: See "Statuses" at the top.
 
     CreateTestRequest:
       type: object
@@ -324,6 +589,8 @@ components:
       properties:
         language:
           $ref: "#/components/schemas/Language"
+        interface_language:
+          $ref: "#/components/schemas/InterfaceLanguage"
         start_level:
           $ref: "#/components/schemas/StartLevel"
         external_ref:
@@ -339,12 +606,12 @@ components:
           format: uri
           pattern: "^https://"
           description: |
-            Where to send this test's `test.completed` and `test.error` webhooks, instead of the
-            default URL configured with ELAO. HTTPS only.
+            Where to send this test's webhooks (`test.completed`, `test.graded`, `test.error`),
+            instead of the default URL configured with ELAO. HTTPS only.
 
     Test:
       type: object
-      required: [test_id, status, language, test_url, created_at]
+      required: [test_id, external_ref, status, language, interface_language, start_level, test_url, completed_callback_url, created_at, started_at, completed_at, graded_at]
       properties:
         test_id:
           type: string
@@ -355,10 +622,13 @@ components:
           $ref: "#/components/schemas/Status"
         language:
           $ref: "#/components/schemas/Language"
+        interface_language:
+          $ref: "#/components/schemas/InterfaceLanguage"
         start_level:
           oneOf:
             - $ref: "#/components/schemas/StartLevel"
             - type: "null"
+          description: Null when the language's default start level is used.
         test_url:
           type: string
           format: uri
@@ -377,25 +647,71 @@ components:
         completed_at:
           type: [string, "null"]
           format: date-time
+          description: When the conversation ended.
+        graded_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the result became available.
+
+    LevelBand:
+      type: object
+      required: [level, min_score]
+      properties:
+        level:
+          $ref: "#/components/schemas/Level"
+        min_score:
+          type: integer
+          description: Lowest score of this level. The level runs up to the next band's `min_score` − 1 (C2 up to 100).
 
     Axes:
       type: object
-      description: Each axis from 0 to 100. Null when there was not enough speech to score it.
+      required: [pronunciation, fluency, vocabulary_grammar, communication]
+      description: |
+        Each axis from 0 to 100, as the evaluator scored it. The level is computed from these four,
+        after the rules listed in `scoring` (detail `full`).
       properties:
         pronunciation:
           type: [integer, "null"]
+          description: |
+            Null only when no answer could be scored for pronunciation (every answer too short, or
+            the pronunciation engine failed on all of them). The level is then computed from the
+            other three axes.
         fluency:
-          type: [integer, "null"]
+          type: integer
         vocabulary_grammar:
-          type: [integer, "null"]
+          type: integer
         communication:
-          type: [integer, "null"]
+          type: integer
+
+    AxisFeedback:
+      type: object
+      required: [pronunciation, fluency, vocabulary_grammar, communication]
+      description: A few words of appreciation per axis, one short sentence each, consistent with the axis score.
+      properties:
+        pronunciation:
+          type: string
+          description: Empty when the pronunciation could not be measured (`axes.pronunciation` null).
+        fluency:
+          type: string
+        vocabulary_grammar:
+          type: string
+        communication:
+          type: string
 
     Feedback:
       type: object
+      required: [translated, axis_feedback, general_summary, strengths, areas_for_improvement, notable_errors]
       properties:
-        summary:
+        translated:
+          type: boolean
+          description: |
+            False for `en` (the original) — and for another language whose translation failed after
+            retries, which then carries the English text.
+        axis_feedback:
+          $ref: "#/components/schemas/AxisFeedback"
+        general_summary:
           type: string
+          description: The overall appreciation, 2 to 3 sentences.
         strengths:
           type: array
           items:
@@ -410,8 +726,149 @@ components:
             type: string
           description: Candidate's words and their correction, quoted in the language tested.
 
+    FeedbackByLanguage:
+      type: object
+      required: [en, fr]
+      description: |
+        The written feedback, keyed by language: always `en` (the original) and `fr`, plus the
+        test's `interface_language` when it is another one.
+      properties:
+        en:
+          $ref: "#/components/schemas/Feedback"
+        fr:
+          $ref: "#/components/schemas/Feedback"
+        nl:
+          $ref: "#/components/schemas/Feedback"
+        es:
+          $ref: "#/components/schemas/Feedback"
+        it:
+          $ref: "#/components/schemas/Feedback"
+        de:
+          $ref: "#/components/schemas/Feedback"
+
+    Scoring:
+      type: object
+      required: [rules_version, axes_evaluated, axes_used, axis_mean, base_score, adjustments, evidence]
+      description: |
+        How `score` was computed, step by step:
+        1. `axes_evaluated` → `axes_used`: the pronunciation engine's 0–100 is brought to the 0–10
+           scale of the other axes, then the rules that act on a single axis apply (listed in
+           `adjustments`).
+        2. `axis_mean`: the mean of `axes_used`.
+        3. `base_score`: the axis mean on 100, through the scoring curve.
+        4. The rules that act on the score itself apply (listed in `adjustments`, in order). The
+           last value is `score`; `level` is the band of `level_scale` it falls in.
+      properties:
+        rules_version:
+          type: string
+          description: Identifies the scoring rules and score bands used. Two results with the same version were scored the same way.
+        axes_evaluated:
+          type: object
+          description: Before any rule. Pronunciation as the engine gave it (0–100); the other three on the evaluator's 0–10 scale, in half points.
+          properties:
+            pronunciation:
+              type: [number, "null"]
+            fluency:
+              type: number
+            vocabulary_grammar:
+              type: number
+            communication:
+              type: number
+        axes_used:
+          type: object
+          description: The four values averaged, all on 0–10.
+          properties:
+            pronunciation:
+              type: [number, "null"]
+            fluency:
+              type: number
+            vocabulary_grammar:
+              type: number
+            communication:
+              type: number
+        axis_mean:
+          type: number
+        base_score:
+          type: integer
+        adjustments:
+          type: array
+          description: Every rule that changed a value, in the order applied. Empty when none did.
+          items:
+            $ref: "#/components/schemas/Adjustment"
+        evidence:
+          type: object
+          description: The facts the rules look at.
+          properties:
+            answer_count:
+              type: integer
+            words_per_answer:
+              type: number
+            speaking_rate:
+              type: [integer, "null"]
+              description: Words per minute over the whole test, long pauses capped.
+            c2_answers_well:
+              type: integer
+              description: Answers to C2-level questions judged "well". C2 needs at least 2.
+            speaker_errors:
+              type: array
+              items:
+                type: string
+              description: The vocabulary and grammar errors counted against the candidate, quoted.
+
+    Adjustment:
+      type: object
+      required: [rule, from, to, reason]
+      properties:
+        rule:
+          type: string
+          enum:
+            - fluency_wpm_cap
+            - pronunciation_lift
+            - pronunciation_weight
+            - bonus
+            - c2_floor
+            - boundary_check
+            - c2_gate_cap
+            - c2_by_evidence
+          description: |
+            - `fluency_wpm_cap`: fluency held to what the speaking rate allows (axis, 0–10).
+            - `pronunciation_lift`: pronunciation held close to the other axes (axis, 0–10).
+            - `pronunciation_weight`: pronunciation counts less in the mean (`from`/`to` = weight).
+            - `bonus`: excellence bonus on the score.
+            - `c2_floor`: score lifted to C2 for a clearly excellent test.
+            - `boundary_check`: score moved across a level boundary by a second opinion.
+            - `c2_gate_cap`: score held below C2, the C2 evidence is missing.
+            - `c2_by_evidence`: score lifted to C2 on the C2 evidence.
+
+            Only `fluency_wpm_cap`, `c2_gate_cap` and `c2_by_evidence` are in use today; the others
+            are listed so that a change of rules does not change this list.
+        from:
+          type: number
+        to:
+          type: number
+        reason:
+          type: string
+          description: In English, for a person reading it.
+
+    WordScore:
+      type: object
+      required: [word, score]
+      properties:
+        word:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: |
+            Pronunciation of this word. As coloured on our results screen: 80 and above correct,
+            60–79 acceptable, 35–59 mispronounced, below 35 incorrect.
+
     Turn:
       type: object
+      description: |
+        One answer of the candidate. The test is a conversation, so follow-up questions are turns too.
+        There is no score per answer: the level and the axes are judged over the whole test.
       properties:
         index:
           type: integer
@@ -424,17 +881,47 @@ components:
           description: Transcript of the candidate's answer.
         question_level:
           oneOf:
-            - $ref: "#/components/schemas/StartLevel"
+            - $ref: "#/components/schemas/Level"
             - type: "null"
-          description: Level of the question asked.
+          description: Level of the question asked (never A0).
+        judge_verdict:
+          type: [string, "null"]
+          enum: [well, adequate, struggled, null]
+          description: |
+            How the candidate handled this question for its level, as judged during the test to pick
+            the next question's level. A pacing signal, not a score.
         pronunciation:
           type: [integer, "null"]
-          description: Pronunciation score of this answer, 0–100.
-        words:
+          description: Pronunciation score of this answer, 0–100. Null for an answer too short to score.
+        word_count:
           type: integer
+        speaking_rate:
+          type: [integer, "null"]
+          description: Words per minute, long pauses capped. Null for an answer too short to time.
+        word_scores:
+          type: array
+          items:
+            $ref: "#/components/schemas/WordScore"
+          description: The answer word by word, with each word's pronunciation score. Empty when the answer was not scored.
         response_delay_seconds:
           type: [number, "null"]
           description: Silence between the end of the question and the start of the answer.
+        answer_seconds:
+          type: [number, "null"]
+          description: How long the candidate spoke.
+        help:
+          type: object
+          description: What the candidate asked for on this question.
+          properties:
+            repeated:
+              type: boolean
+              description: Asked for the question to be repeated.
+            not_understood:
+              type: boolean
+              description: Said they did not understand; the question was rephrased or replaced.
+            skipped:
+              type: boolean
+              description: Skipped the question.
 
     Integrity:
       type: object
@@ -455,9 +942,9 @@ components:
         long_silences:
           type: integer
 
-    TestResult:
+    ResultSummary:
       type: object
-      required: [test_id, language, detail, completed_at, level, score, confidence]
+      required: [test_id, external_ref, language, interface_language, detail, completed_at, graded_at, duration_seconds, answer_count, level, detailed_level, score, confidence, level_scale]
       properties:
         test_id:
           type: string
@@ -466,10 +953,15 @@ components:
           type: [string, "null"]
         language:
           $ref: "#/components/schemas/Language"
+        interface_language:
+          $ref: "#/components/schemas/InterfaceLanguage"
         detail:
           type: string
           enum: [summary, standard, full]
         completed_at:
+          type: string
+          format: date-time
+        graded_at:
           type: string
           format: date-time
         duration_seconds:
@@ -478,6 +970,8 @@ components:
           type: integer
         level:
           $ref: "#/components/schemas/Level"
+        detailed_level:
+          $ref: "#/components/schemas/DetailedLevel"
         score:
           type: integer
           minimum: 0
@@ -486,40 +980,51 @@ components:
           type: string
           enum: [high, medium, low]
           description: How sure the evaluator is of the level.
-        top_of_scale:
-          type: boolean
-          description: True when the candidate reached the highest level the test reports; the real level may be higher.
-        axes:
-          $ref: "#/components/schemas/Axes"
-          description: "`standard` and `full` only."
-        feedback:
-          type: object
-          description: "`standard` and `full` only. Written feedback in French and in English. `fr` is null if the translation failed."
-          properties:
-            fr:
-              oneOf:
-                - $ref: "#/components/schemas/Feedback"
-                - type: "null"
-            en:
-              $ref: "#/components/schemas/Feedback"
-        turns:
+        level_scale:
           type: array
           items:
-            $ref: "#/components/schemas/Turn"
-          description: "`full` only."
-        integrity:
-          oneOf:
-            - $ref: "#/components/schemas/Integrity"
-            - type: "null"
-          description: "`full` only. Null when integrity tracking was off."
+            $ref: "#/components/schemas/LevelBand"
+          description: The score bands used for this test, A0 to C2. Use them with `score` to place the candidate within a level.
+
+    ResultStandard:
+      allOf:
+        - $ref: "#/components/schemas/ResultSummary"
+        - type: object
+          required: [axes, feedback]
+          properties:
+            axes:
+              $ref: "#/components/schemas/Axes"
+            feedback:
+              $ref: "#/components/schemas/FeedbackByLanguage"
+
+    ResultFull:
+      allOf:
+        - $ref: "#/components/schemas/ResultStandard"
+        - type: object
+          required: [scoring, turns, integrity]
+          properties:
+            scoring:
+              $ref: "#/components/schemas/Scoring"
+            turns:
+              type: array
+              items:
+                $ref: "#/components/schemas/Turn"
+            integrity:
+              oneOf:
+                - $ref: "#/components/schemas/Integrity"
+                - type: "null"
+              description: Null when integrity tracking was off.
 
     WebhookEvent:
       type: object
-      required: [event, test_id, status, sent_at]
+      required: [event_id, event, test_id, external_ref, status, sent_at, result]
       properties:
+        event_id:
+          type: string
+          description: Unique per event, the same on every retry of it. Use it to ignore duplicates.
         event:
           type: string
-          enum: [test.completed, test.error]
+          enum: [test.completed, test.graded, test.error]
         test_id:
           type: string
           format: uuid
@@ -530,20 +1035,11 @@ components:
         sent_at:
           type: string
           format: date-time
+          description: When this attempt was sent.
         result:
-          description: The `summary` result; null for `test.error`.
+          description: For `test.graded`, the `summary` result (same as `GET /tests/{test_id}/result?detail=summary`); otherwise null.
           oneOf:
-            - type: object
-              properties:
-                level:
-                  $ref: "#/components/schemas/Level"
-                score:
-                  type: integer
-                confidence:
-                  type: string
-                  enum: [high, medium, low]
-                top_of_scale:
-                  type: boolean
+            - $ref: "#/components/schemas/ResultSummary"
             - type: "null"
 
     Error:
