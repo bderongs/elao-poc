@@ -35,9 +35,9 @@ export interface CefrResult {
   c2_answers_well?: number;
   /** Second opinion at the level boundary, by comparison (lib/cefr-boundary.ts) — applied by ScoringRules.boundaryCheck. */
   boundary_checks?: BoundaryChecks;
-  /** The feedback above in French (lib/analysis-translation.ts). Absent before 2026-11-04 until backfilled, or when the translation failed. */
+  /** The feedback above in French (lib/analysis-translation.ts), for a French interface only since 2026-11-17 (before, always). Absent when the translation failed. */
   analysis_fr?: AnalysisTranslation;
-  /** The feedback in the other interface languages (nl, es, it, de — roadmap L-04): written at evaluation time for the session's interface language, or on first view in another one. English is the original, French is analysis_fr. */
+  /** The feedback in the other interface languages (nl, es, it, de — roadmap L-04): written at evaluation time for the session's interface language, or on first view in another one. English is the original; French, when it is the interface language, is analysis_fr. */
   analysis_i18n?: Partial<Record<"nl" | "es" | "it" | "de", AnalysisTranslation>>;
 }
 

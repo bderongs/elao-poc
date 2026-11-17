@@ -28,7 +28,6 @@ import { RECOGNITION_FORGIVENESS, evaluatorAllowance } from "@/lib/recognition-f
 import { formatDateTime } from "@/lib/format-date";
 import { computeSessionMainScore, scoreWithRules } from "@/lib/cefr-score";
 import { getLiveScoringRules } from "@/lib/scoring-settings-service";
-import { ensureFrenchAnalysis } from "@/lib/analysis-translation";
 import styles from "@/components/admin.module.css";
 
 export const dynamic = "force-dynamic";
@@ -54,10 +53,8 @@ export default async function AdminSessionDetailPage({
   // run so "our own CEFR assessment" still has something to show.
   const evalRow = session.evaluation_json ? null : evaluations.find((e) => !e.error && e.result_json) ?? null;
   const storedResult = session.evaluation_json ?? evalRow?.result_json ?? null;
-  // Evaluations from before the French feedback existed are translated (and saved) on first view.
-  const cefrResult = storedResult
-    ? await ensureFrenchAnalysis({ sessionId: session.id, result: storedResult, evaluationRowId: evalRow?.id })
-    : null;
+  // The admin reads the feedback in English, the evaluator's original.
+  const cefrResult = storedResult;
 
   // The level shown in the header and the ladder panel is the same composite
   // the CefrPanel and the session list show (computed on read with today's
@@ -206,7 +203,6 @@ export default async function AdminSessionDetailPage({
             showAllDetails
             theme="light"
             levelFloors={scoringRules.levelFloors}
-            feedbackLanguage="both"
           />
         </div>
       ) : (
