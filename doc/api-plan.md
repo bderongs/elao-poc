@@ -13,14 +13,77 @@ Contract: [`api/openapi.yaml`](api/openapi.yaml) (draft, to validate with the in
 - **The result is fixed at evaluation time.** Today the score is computed on read with the current rules (`SCORING_RULES` + the admin's level floors), so a stored session can change level when a floor moves. The API returns a snapshot written once and never recomputed. The admin keeps computing on read.
 - **No link expiry.** The link works once: when the test is `in_progress`, opening it again shows "test already started".
 
+## Round 2 — integrator review and score details (2026-11-17)
+
+Source: the integrator's written review of the published spec (`/api-docs`), plus Baptiste's ask: the API must give **every detail behind the score**, following the result changes of 2026-11-13…16 (C2 reported again — Q-05; axes on 100 and `axis_feedback` — R-03).
+
+Each line is a proposal unless marked **Decided**; ☐ = still needs Michel's answer.
+
+### API remarks
+
+| # | Remark | Proposal | Tasks |
+|---|---|---|---|
+| R2-1 | Webhook `result` ≠ `summary` result (no `language`, `detail`, `completed_at`, `duration_seconds`, `answer_count`). | One format: the webhook's `result` **is** the `detail=summary` result object, same schema (`TestResult`), built from the same snapshot. Null for `test.error`. | API-20 |
+| R2-2 | Levels inconsistent: reported stops at C1+, `start_level` accepts C2, `question_level` has no "+". ELAO uses A0–C2 without "+"; precision comes from each scale's own sub-levels. | `level`: **A0, A1, A2, B1, B2, C1, C2**, no "+" — the same list everywhere (`start_level`, `question_level` add nothing new; A0 is never a start level). C2 is reported again (Q-05), so the C1+ cap and `top_of_scale` go. Precision: `score` (0–100) plus `level_scale`, the score bands used for that test (frozen in the snapshot, since the floors are admin-editable), so ELAO maps the score onto its own sub-levels. Our "+" bands stay in our own screens only. **Decided (Baptiste, 2026-11-17): `level` without "+"; our split comes as a separate `detailed_level` (A1+…C1+), same bands, frozen in the snapshot.** | API-21 |
+| R2-3 | Are `axes` and `feedback` optional in `standard`? When absent? | Make both **required** in `standard`/`full`. Inside: the three evaluator axes are always set; `pronunciation` is null only when no answer could be scored (every answer too short, or the pronunciation engine failed on all of them) — say so in the spec. Feedback: `en`, `fr` and the interface language always present; a translation is retried, and if it still fails that language carries the English text with `translated: false` instead of null. `axis_feedback` always present (null only for pre-v10 evaluations, which API tests never are). | API-22 |
+| R2-4 | 3 retries after 1 s and 2 s is too short; e.g. 30 s apart. | Yes, longer: attempts at 0, 1 min, 5 min, 30 min, 2 h, 12 h (6 in ~15 h). Can't live in `after()` (function time limit), so: a `webhook_deliveries` table (event id, test, URL, attempts, next try, last status) and a Vercel Cron every minute that sends what is due. Also gives the admin "delivery status + resend" planned in AG. | API-23, API-24 |
+| R2-5 | Signature has no date or event id → a captured message can be replayed later. | Stripe-style: `X-Elao-Signature: t=<unix seconds>,v1=<hex>` where `v1 = HMAC-SHA256(secret, "<t>.<raw body>")`; the body carries `event_id` (stable across retries, so they can dedupe) and `sent_at`. Spec tells them: reject when `t` is more than 5 min off, ignore an `event_id` already seen. | API-25 |
+| R2-6 | No cancel, no expiry: tests created but never taken (their create call lost), tests started and never finished. | **Decided (Baptiste, 2026-11-17): none of it** — no cancel, no expiry, no `abandoned`. A test the candidate leaves stays `in_progress`; ELAO creates a new one for a new attempt. Say so in the spec. | — |
+| R2-7 | Between end of test and `completed` the test is `in_progress`: finished vs abandoned can't be told apart. Intermediate status, or max evaluation delay? | **Decided (Baptiste, 2026-11-17): `completed` = the conversation is over, `graded` = evaluated, result available.** The page tells the server the conversation is over before it evaluates. ⚠ Evaluation runs in the browser: a tab closed during it would leave the test `completed` for ever, so the cron also grades server-side any test `completed` for more than 5 min without a result (transcript and per-answer pronunciation are saved after each answer; `runCefrEvaluation` exists). Spec promises `completed` → `graded`/`error` within **15 min** (to confirm by measuring — API-29). Webhooks: `test.completed` (no result), `test.graded` (summary result), `test.error`. | API-28, API-29 |
+
+Statuses: `created` → `in_progress` → `completed` → `graded` | `error`. A test left before the end stays `in_progress`. `completed_callback_url` keeps its name and receives all three webhooks.
+
+### Score details (Baptiste)
+
+Today `full` gives the axes, the feedback and per-answer facts, but not **how the score was made**. Add a `scoring` block to `full`, frozen in the snapshot:
+
+- `axes_evaluated`: the evaluator's three axes on its own 0–10 scale (half points) and the pronunciation engine's session average (0–100), before any rule.
+- `axes_used`: the four values actually averaged (after the speaking-rate cap on fluency, etc.).
+- `axis_mean`, `base_score` (axis mean through the axis curve), final `score`.
+- `adjustments`: every rule that moved the number, typed — `{ rule, from, to, reason }`, rules `fluency_wpm_cap`, `c2_gate_cap`, `c2_by_evidence` (and the ones off today: `bonus`, `c2_floor`, `boundary_check`, `pronunciation_lift`, `pronunciation_weight`). Empty when nothing moved it.
+- `evidence`: `answer_count`, `words_per_answer`, `speaking_rate` (session, wpm), `c2_answers_well`, `speaker_errors` (the counted errors, quoted).
+- `level_scale` (same as R2-2) and `rules_version` (a short hash of `SCORING_RULES` + floors, so two results can be compared).
+
+Code: `scoreWithRules` (`lib/cefr-score.ts`) returns only `notes` (free text). It gets a typed `adjustments` list next to them, and the intermediate values (`axisMean`, `baseScore`, the used axes). Notes stay for the replay reports. → API-30.
+
+### Other questions (for Michel, not API)
+
+Answers to give back, ☐ each one Michel's call:
+
+1. **Failed evaluation / repeated abandonment.** The retry policy belongs to ELAO's platform (it creates the tests). Our part: `error` should be rare (server-side retry of the evaluation before `error`, API-28), and every attempt is a separate test, so ELAO can count attempts per `external_ref`. Suggestion: 3 attempts, then trainer grading.
+2. **Deferred trainer score.** Possible from `full` (transcript, per-answer facts, feedback). If a trainer is to grade, the audio helps a lot: ☐ offer signed audio links in `full` (2 h expiry, as in admin)? That reopens the GDPR question (retention, `DELETE /tests/{id}`).
+3. **What to show, where.** Their call. Correction to their note: feedback is no longer FR + EN only — it exists in the six interface languages (fr, en, nl, es, it, de; L-04). ☐ Proposal: always send all six, so ELAO picks at display time (5 small translation calls per test).
+4. **Redirect vs display inside ELAO's page.** Still open. Inside an iframe works but needs: their iframe with `allow="microphone"`, our `Content-Security-Policy: frame-ancestors` listing their domain (API-31), and our page not relying on third-party cookies (API tests have no account step, so fine). Redirect needs nothing new (`redirect_url`).
+
+### Round 2 tasks
+
+- [ ] **API-19** Decisions above — taken 2026-11-17 (no "+"; no cancel/expiry/abandoned; `completed` then `graded`). Spec updated the same day; left: republish `/api-docs` and reply to the integrator.
+- [ ] **API-20** Spec: webhook `result` = `TestResult` at `summary`.
+- [ ] **API-21** Spec + snapshot: `level` A0–C2 without "+", `level_scale`, drop `top_of_scale`; `Level` enum shared by `start_level` / `question_level`.
+- [ ] **API-22** Spec: `axes`, `feedback` required; nullability documented; translation retry + `translated: false` fallback.
+- [ ] **API-23** Migration `webhook_deliveries` (+ in `0021_api_tests.sql`).
+- [ ] **API-24** `app/api/cron/webhooks/route.ts` + `vercel.json` cron (every minute), protected by `CRON_SECRET`; retry schedule 0 / 1 min / 5 min / 30 min / 2 h / 12 h.
+- [ ] **API-25** Signature `t=…,v1=…` over `"<t>.<body>"`, `event_id` in the body; spec section "Verifying a webhook" with a code sample.
+- [x] ~~**API-26**~~ Cancel / expiry — dropped (Baptiste, 2026-11-17).
+- [x] ~~**API-27**~~ `abandoned` status — dropped (Baptiste, 2026-11-17).
+- [ ] **API-28** `completed` / `graded`: the page reports the end of the conversation (`PATCH /api/sessions/live { finished: true }`) → `completed` + `test.completed`; the final save writes the snapshot → `graded` + `test.graded`. The cron grades server-side what has been `completed` > 5 min without a result; two failures → `error`.
+- [ ] **API-29** Measure evaluation time (end of conversation → final save) on recent sessions; set the documented maximum.
+- [ ] **API-30** `scoreWithRules`: typed `adjustments` + intermediate values; `scoring` block in the `full` snapshot and spec.
+- [ ] **API-31** If the iframe option is chosen: `frame-ancestors` header for ELAO's domain in `next.config.js`.
+
+Order: API-19 first (decisions), then the spec (API-20…22, 25, 28 and 30 spec parts) and republish `/api-docs` — the integrator reviews the contract before any code. Then code with step 2 below; the migration (API-23, columns for the new statuses) joins `0021_api_tests.sql`.
+
 ## Status mapping
+
+Updated 2026-11-17 (round 2: `completed` then `graded`).
 
 | API status | `sessions` row |
 |---|---|
 | `created` | `status = 'created'` (new value), inserted by `POST /api/v1/tests` |
-| `in_progress` | `status = 'in_progress'` — set at the first answer, as today. Abandoned tests stay here. |
-| `completed` | `status = 'completed'` and `result_snapshot` not null |
-| `error` | `status = 'completed'` and `evaluation_json` null (the save already goes through when the evaluation fails) |
+| `in_progress` | `status = 'in_progress'` — set at the first answer, as today. A test the candidate leaves stays here. |
+| `completed` | `status = 'completed'`, `result_snapshot` null — the page reported the end of the conversation (API-28) |
+| `graded` | `status = 'completed'` and `result_snapshot` not null |
+| `error` | `status = 'completed'`, no evaluation, and grading given up (two failed tries, API-28) — needs a marker column, e.g. `grading_failed_at` |
 
 ## Steps
 
