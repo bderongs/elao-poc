@@ -161,9 +161,10 @@ export function getSystemConfig(): CapabilityConfig[] {
     },
     {
       // lib/analysis-translation.ts — not behind a registry: it calls mistralTranslationModel() directly.
+      // The id stays FEEDBACK_FR: sessions' providers_json snapshots store it (French-only until 2026-11-17).
       capability: "FEEDBACK_FR",
-      capabilityLabel: "Feedback translation (French)",
-      description: "Translates the evaluation's strengths, areas to improve, notable errors and summary into French, for the results screen, the candidate's dashboard and the admin report. The candidate's quoted words are left as spoken.",
+      capabilityLabel: "Feedback translation (interface language)",
+      description: "The evaluator writes the feedback in English. When the candidate's interface language is not English, its summary, axis feedback, strengths, areas to improve and notable errors are translated into it at the end of the session (another language is translated on first view). The admin report shows the English original. The candidate's quoted words are left as spoken.",
       providerId: "mistral",
       providerLabel: "Mistral",
       modelLabel: mistralTranslationModel(),

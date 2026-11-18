@@ -68,6 +68,8 @@ const MISTRAL_TEXT_PRICE_PER_M: Record<string, { in: number; out: number }> = {
   "mistral-large-latest": { in: 0.5, out: 1.5 },
   "mistral-large-2512": { in: 0.5, out: 1.5 },
   "mistral-small-latest": { in: 0.15, out: 0.6 },
+  // The pronunciation judge's pinned name (lib/mistral.ts, 2026-11-17) — same model as small-latest.
+  "mistral-small-2603": { in: 0.15, out: 0.6 },
 };
 const MISTRAL_TEXT_PRICE_FALLBACK = MISTRAL_TEXT_PRICE_PER_M["mistral-large-latest"];
 
@@ -253,12 +255,13 @@ export function estimateCefrEvalCostUsd(providerId: string, modelLabel: string):
 
 export function estimateFeedbackTranslationCostUsd(providerId: string, modelLabel: string): CostEstimate | null {
   if (providerId !== "mistral") return null;
-  // The feedback goes in as JSON and comes back the same size, in French (~15 % longer).
+  // The feedback goes in as JSON and comes back the same size, translated (~15 % longer).
+  // Since 2026-11-17 only when the interface is not English: priced as one call (the non-English case).
   const inputChars = ANALYSIS_TRANSLATION_SYSTEM_PROMPT.length + AVG_SESSION.cefrEvalResultChars;
   const outputChars = Math.round(AVG_SESSION.cefrEvalResultChars * 1.15);
   return {
     usdPerSession: mistralTextCostUsd(modelLabel, inputChars, outputChars),
-    note: `1 call × ~${tokens(inputChars)} tok in / ~${tokens(outputChars)} tok out (${modelLabel})`,
+    note: `1 call when the interface is not English (none in English) × ~${tokens(inputChars)} tok in / ~${tokens(outputChars)} tok out (${modelLabel})`,
   };
 }
 
