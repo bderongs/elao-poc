@@ -43,7 +43,8 @@ export default function SystemConfigPage() {
         intentional code change (see the LIVE_..._PROVIDER_ID constant in
         each capability's registry: <code>lib/stt/registry.ts</code>,{" "}
         <code>lib/tts/registry.ts</code>, <code>lib/et/registry.ts</code>,{" "}
-        <code>lib/pronunciation-rollup.ts</code>, <code>lib/cefr-eval.ts</code>),
+        <code>lib/pronunciation-rollup.ts</code>, <code>lib/llm/live-provider.ts</code>;
+        the Mistral model behind each step is set in <code>lib/mistral.ts</code>),
         not something changeable from here. Every completed session records
         its own snapshot of this same table — see that session&apos;s detail
         page for what it actually used.
