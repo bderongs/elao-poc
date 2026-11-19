@@ -145,8 +145,8 @@
 
 .instructionsFacts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px 24px;
+  grid-template-columns: repeat(2, max-content);
+  gap: 16px 56px;
   margin: 0;
   padding: 16px 0;
   border-top: 1px solid #E4E0D7;
@@ -154,11 +154,6 @@
   max-width: 520px;
 }
 
-@media (max-width: 480px) {
-  .instructionsFacts {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 
 /* ─── 3. conversation ──────────────────────────────────────────────────── */
 

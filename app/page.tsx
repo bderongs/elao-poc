@@ -2413,13 +2413,12 @@ export default function Home() {
         <>
           <TopBar
             right={
+              // A link that set the language (`?lang=`): nothing here — the facts below already say it.
+              languageLocked ? undefined : (
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#6B6F7D" }}>
                 {/* Divider: the interface-language menu sits just left of this one. */}
                 <span aria-hidden="true" style={{ width: 1, height: 18, background: "#DDD9D0", marginRight: 8 }} />
-                {/* Lets a misclicked language be fixed without going back to the picker — not when the link set it. */}
-                {languageLocked ? (
-                  <span style={{ color: "#141D33" }}>{capitalize(t.langName[language])}</span>
-                ) : (
+                {/* Lets a misclicked language be fixed without going back to the picker. */}
                 <select
                   aria-label={t.instructions.changeLanguageAria}
                   value={language}
@@ -2441,16 +2440,16 @@ export default function Home() {
                     </option>
                   ))}
                 </select>
-                )}
                 <span className={styles.hideMobile}>{t.instructions.topBarSuffix}</span>
               </span>
+              )
             }
           />
           <div className={styles.instructionsGrid}>
             <div className={styles.instructionsIntro} style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                  {t.welcome.eyebrow}
+                <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#6B6F7D" }}>
+                  {t.instructions.welcome}
                 </span>
                 <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
                   {t.instructions.title(t.sessionLength)}
@@ -2459,7 +2458,7 @@ export default function Home() {
                   {t.instructions.lead(AVATAR_NAME)}
                 </p>
               </div>
-              {/* The test at a glance — the welcome screen's facts, for a link that lands here directly. */}
+              {/* The test at a glance (duration, language) — for a link that lands here directly. */}
               <dl className={styles.instructionsFacts}>
                 {t.instructions.facts(capitalize(t.langName[language])).map(([label, value]) => (
                   <div key={label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -2513,7 +2512,6 @@ export default function Home() {
               >
                 {t.instructions.ready}
               </button>
-              <span style={{ fontSize: 14, color: "#8A8F9C", maxWidth: 420 }}>{t.instructions.prepare} {t.instructions.noGrades}</span>
             </div>
           </div>
         </>

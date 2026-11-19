@@ -113,10 +113,9 @@ const fr = {
     micDetecting: "Détection du micro…",
     defaultMic: "Micro par défaut",
     ready: "Je suis prêt",
-    noGrades: "Aucune note n'est affichée pendant l'épreuve.",
-    /** The test at a glance — label / value pairs on the mic-check screen. */
-    facts: (lang: string): [string, string][] => [["Durée", ADAPTIVE ? "Quelques minutes" : `${MIN} minutes`], ["Langue", lang], ["Résultat", "Niveau CECRL, de A0 à C2"]],
-    prepare: "Installez-vous dans un endroit calme et restez sur cette page jusqu'à la fin du test.",
+    /** Greeting above the title, and the test at a glance (label / value) on the mic-check screen. */
+    welcome: "Bienvenue sur Elao+",
+    facts: (lang: string): [string, string][] => [["Durée", "5 à 7 minutes"], ["Langue", lang]],
   },
 
   session: {
@@ -341,9 +340,8 @@ const en: UiStrings = {
     micDetecting: "Detecting the microphone…",
     defaultMic: "Default microphone",
     ready: "I'm ready",
-    noGrades: "No marks are shown during the test.",
-    facts: (lang: string): [string, string][] => [["Duration", ADAPTIVE ? "A few minutes" : `${MIN} minutes`], ["Language", lang], ["Result", "CEFR level, A0 to C2"]],
-    prepare: "Find a quiet place and stay on this page until the end of the test.",
+    welcome: "Welcome to Elao+",
+    facts: (lang: string): [string, string][] => [["Duration", "5 to 7 minutes"], ["Language", lang]],
   },
 
   session: {
@@ -566,9 +564,8 @@ const nl: UiStrings = {
     micDetecting: "Microfoon zoeken…",
     defaultMic: "Standaardmicrofoon",
     ready: "Ik ben klaar",
-    noGrades: "Tijdens de test worden geen scores getoond.",
-    facts: (lang: string): [string, string][] => [["Duur", ADAPTIVE ? "Enkele minuten" : `${MIN} minuten`], ["Taal", lang], ["Resultaat", "ERK-niveau, van A0 tot C2"]],
-    prepare: "Zoek een rustige plek op en blijf op deze pagina tot het einde van de test.",
+    welcome: "Welkom bij Elao+",
+    facts: (lang: string): [string, string][] => [["Duur", "5 tot 7 minuten"], ["Taal", lang]],
   },
 
   session: {
@@ -791,9 +788,8 @@ const es: UiStrings = {
     micDetecting: "Detectando el micrófono…",
     defaultMic: "Micrófono predeterminado",
     ready: "Estoy listo",
-    noGrades: "No se muestra ninguna nota durante la prueba.",
-    facts: (lang: string): [string, string][] => [["Duración", ADAPTIVE ? "Unos minutos" : `${MIN} minutos`], ["Idioma", lang], ["Resultado", "Nivel MCER, de A0 a C2"]],
-    prepare: "Busque un lugar tranquilo y permanezca en esta página hasta el final de la prueba.",
+    welcome: "Le damos la bienvenida a Elao+",
+    facts: (lang: string): [string, string][] => [["Duración", "De 5 a 7 minutos"], ["Idioma", lang]],
   },
 
   session: {
@@ -1016,9 +1012,8 @@ const it: UiStrings = {
     micDetecting: "Rilevamento del microfono…",
     defaultMic: "Microfono predefinito",
     ready: "Sono pronto",
-    noGrades: "Durante la prova non viene mostrato alcun voto.",
-    facts: (lang: string): [string, string][] => [["Durata", ADAPTIVE ? "Qualche minuto" : `${MIN} minuti`], ["Lingua", lang], ["Risultato", "Livello QCER, da A0 a C2"]],
-    prepare: "Si sistemi in un luogo tranquillo e resti su questa pagina fino alla fine della prova.",
+    welcome: "Benvenuti su Elao+",
+    facts: (lang: string): [string, string][] => [["Durata", "Da 5 a 7 minuti"], ["Lingua", lang]],
   },
 
   session: {
@@ -1242,9 +1237,8 @@ const de: UiStrings = {
     micDetecting: "Mikrofon wird gesucht…",
     defaultMic: "Standardmikrofon",
     ready: "Ich bin bereit",
-    noGrades: "Während der Prüfung werden keine Noten angezeigt.",
-    facts: (lang: string): [string, string][] => [["Dauer", ADAPTIVE ? "Wenige Minuten" : `${MIN} Minuten`], ["Sprache", lang], ["Ergebnis", "GER-Niveau, von A0 bis C2"]],
-    prepare: "Suchen Sie sich einen ruhigen Ort und bleiben Sie bis zum Ende der Prüfung auf dieser Seite.",
+    welcome: "Willkommen bei Elao+",
+    facts: (lang: string): [string, string][] => [["Dauer", "5 bis 7 Minuten"], ["Sprache", lang]],
   },
 
   session: {
