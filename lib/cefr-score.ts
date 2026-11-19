@@ -158,13 +158,21 @@ export interface ScoringRules {
  * 2026-11-05 (Baptiste, after an A1 candidate was rated A0): the curve's low
  * end — an axis mean of 3, the evaluator's "A1", is 40 (A1's floor) instead
  * of 30; unchanged from 5 (A2) up.
+ * 2026-11-19 (Baptiste, after Michel's feedback on beginners scored too high):
+ * `pronunciationLift: 2` — in the axis mean, pronunciation counts at most 2
+ * points above the mean of the other axes (it can still pull down). The
+ * engines rate how clearly a beginner's few simple words were said, not what
+ * they can say. Calibration (150 candidates): oral within one level 79 → 80 %,
+ * global unchanged (83 %), A1 bias vs global +0.8 → +0.5 levels. Replay on 80
+ * live sessions: 13 down one step, almost all A1/A2, none up
+ * (`--scenario no-pron-lift` replays the rule it replaced).
  */
 export const SCORING_RULES: ScoringRules = {
   baseScore: "axis-mean",
   axisCurve: [[0, 0], [3, 40], [5, 50], [8, 80], [9.5, 90], [10, 100]],
   pronunciationCurve: null,
   pronunciationWeight: null,
-  pronunciationLift: null,
+  pronunciationLift: 2,
   fluencyFromWpm: "cap",
   bonus: null,
   c2Floor: null,

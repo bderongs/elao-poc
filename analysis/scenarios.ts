@@ -27,6 +27,10 @@ export const SCENARIOS: Record<string, Scenario> = {
     description: "The rules live 2026-10-18 → 2026-11-13: no C2 — scores stop at 89 (C1+), \"top of scale\" note on C2 evidence (≥ 2 C2 answers \"well\", axis mean ≥ 8.75).",
     overrides: { c2Gate: null, ceiling: { cap: 89, topOfScale: { minC2AnswersWell: 2, minAxisMean: 8.75 } } },
   },
+  "no-pron-lift": {
+    description: "The rules live until 2026-11-19: pronunciation counts at its full value in the axis mean, however far above the other axes.",
+    overrides: { pronunciationLift: null },
+  },
   "llm-base": {
     description: "Go back to the evaluator's holistic score_percent as the base score (what the app did before 2026-10-08).",
     ref: "Track V finding 5",

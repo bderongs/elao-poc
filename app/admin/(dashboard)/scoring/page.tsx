@@ -111,6 +111,12 @@ export default function ScoringGuidePage() {
           the average.
         </p>
         <p style={label}>
+          In that average, Pronunciation counts at most 2 points above the mean of the other three (since
+          2026-11-19): a beginner who says a few simple words clearly gets a high pronunciation score, which must not
+          lift their level. Poor pronunciation still pulls the average down in full. The pronunciation score shown is
+          unchanged.
+        </p>
+        <p style={label}>
           Fluency, Vocab &amp; Gram. and Communication are scored in half points (e.g. 7.5/10). Up to an average of 8
           the scale is simply × 10 (7 → 70, B2; 8 → 80, C1). Above 8 it is stretched, because the AI scores a C1
           speaker 8-9 on each dimension: an average of 9 gives 87 (C1+). Example above: average 8.5 →{" "}
