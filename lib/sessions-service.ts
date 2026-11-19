@@ -5,18 +5,22 @@ import {
   computePronunciationAvg,
   liveConversationPronunciationProviderId,
   COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS,
+  isPlaceholderPronunciation,
+  weakPronunciationWords,
 } from "@/lib/pronunciation-rollup";
 import { getSystemConfig } from "@/lib/system-config";
 import { isCefrRung } from "@/lib/cefr-rung";
-import { verifyEvaluation } from "@/lib/evaluation-signature";
+import { evaluateLiveConversation, type PronunciationContext } from "@/lib/live-evaluation";
+import { exchangesFromHistory } from "@/lib/cefr-boundary";
+import { isConvLang } from "@/lib/conversation-prompts";
 import { signRecordingUrls } from "@/lib/recordings";
 import { logServerEvent } from "@/lib/server-log";
-import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult } from "@/lib/types";
+import type { SessionSummary, SessionDetailRow, TurnRow, EvaluationRow, TurnEvaluationRow, CefrResult, PronunciationAvg } from "@/lib/types";
 import type { PronunciationResult } from "@/lib/pronunciation/types";
 import type { LadderRecord } from "@/lib/session-length";
 import { sanitizeIntegrity, type IntegrityRecord } from "@/lib/integrity";
 import { isProfileId } from "@/lib/test-profile-types";
-import { isUiLang } from "@/lib/ui-strings";
+import { DEFAULT_UI_LANG, isUiLang } from "@/lib/ui-strings";
 import type { SimulationRecord } from "@/lib/simulation-record";
 
 // Single source of truth for reading/writing sessions — used by both the
@@ -329,38 +333,20 @@ function parseJsonField<T>(form: FormData, key: string, fallback: T): T {
  * separate guest→signup claim flow) and that account's remembered
  * language/rung preference (profiles.last_language/last_rung) is updated —
  * see upsertProfilePreference below.
+ *
+ * Once saved, the session gets its final CEFR evaluation here, server-side
+ * (evaluateAndStore) — the browser sends no score, it displays the
+ * evaluation this returns, which is the one stored.
  */
-export async function createSessionFromForm(form: FormData, userId?: string | null): Promise<{ id: string }> {
+export async function createSessionFromForm(form: FormData, userId?: string | null): Promise<{ id: string; evaluation: CefrResult | null }> {
   const supabase = getSupabaseServer();
 
   const language = (form.get("language") as string | null) ?? "en";
   const durationSeconds = parseInt((form.get("durationSeconds") as string | null) ?? "0", 10);
-  const pronunciationScores = parseJsonField(form, "pronunciationScores", null);
+  const pronunciationScores = parseJsonField<PronunciationAvg | null>(form, "pronunciationScores", null);
   const turns = parseJsonField<TurnMeta[]>(form, "turns", []);
   const ladder = sanitizeLadder(parseJsonField<unknown>(form, "ladder", null));
   const integrity = sanitizeIntegrity(parseJsonField<unknown>(form, "integrity", null));
-
-  // This route is public, so the evaluation is kept only if /api/evaluate
-  // signed it for these answers (lib/evaluation-signature.ts); level, score
-  // and dimensions are read from it rather than from separate form fields.
-  // An unverified one is dropped, not the session — an admin can still
-  // re-run the evaluation from the eval lab.
-  const claimedEvaluation = parseJsonField<CefrResult | null>(form, "evaluation", null);
-  const evaluationVerified =
-    claimedEvaluation !== null &&
-    verifyEvaluation(form.get("evaluationSignature") as string | null, {
-      language,
-      evaluation: claimedEvaluation,
-      pronunciation: pronunciationScores,
-      userTurns: turns.filter((t) => t.role === "user").map((t) => t.content),
-    });
-  if (claimedEvaluation && !evaluationVerified) {
-    logServerEvent("session_evaluation_unverified", { language, claimedLevel: claimedEvaluation.level ?? null });
-  }
-  const evaluation = evaluationVerified ? claimedEvaluation : null;
-  const cefrLevel = evaluation?.level || null;
-  const globalScore = typeof evaluation?.score_percent === "number" ? Math.trunc(evaluation.score_percent) : null;
-  const scores = evaluation?.dimensions ?? null;
 
   // ── whole-session recording (listen-back) — already uploaded by the browser ──
   const publicUrl = (path: string) => supabase.storage.from("recordings").getPublicUrl(path).data.publicUrl;
@@ -370,10 +356,6 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   const sessionFields = {
     language,
     duration_seconds: durationSeconds,
-    cefr_level: cefrLevel,
-    global_score: globalScore,
-    scores,
-    evaluation_json: evaluation,
     transcript: turns.map(({ role, content, pronunciation }) => ({ role, content, pronunciation })),
     audio_url: audioUrl,
     pronunciation_scores: pronunciationScores,
@@ -424,8 +406,6 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
   await saveUiLanguage(sessionId, form.get("uiLanguage") as string | null);
   await saveTestProfile(sessionId, form.get("testProfile") as string | null);
 
-  if (userId) await upsertProfilePreference(userId, language, cefrLevel);
-
   // ── per-turn recordings (answer-level replay) ──
   const turnRows: Array<{
     session_id: string;
@@ -456,7 +436,80 @@ export async function createSessionFromForm(form: FormData, userId?: string | nu
     if (turnsError) console.error("[sessions] turn insert failed:", turnsError.message);
   }
 
-  return { id: sessionId };
+  // ── the final evaluation — run here, by the server, from what was just stored ──
+  const evaluation = await evaluateAndStore(sessionId, {
+    language,
+    turns,
+    pronunciationScores,
+    ladder,
+    uiLanguage: form.get("uiLanguage") as string | null,
+  });
+
+  if (userId) await upsertProfilePreference(userId, language, evaluation?.level || null);
+
+  return { id: sessionId, evaluation };
+}
+
+/**
+ * Evaluates a just-saved live conversation and writes the result onto its
+ * row — the only evaluation a live session gets (lib/live-evaluation.ts).
+ * Runs after the row is saved, so a failing evaluation never loses the
+ * session: it stays without a level, and an admin can re-run it from the
+ * eval lab. Returns null in that case.
+ */
+async function evaluateAndStore(
+  sessionId: string,
+  input: {
+    language: string;
+    turns: TurnMeta[];
+    pronunciationScores: PronunciationAvg | null;
+    ladder: LadderRecord | null;
+    uiLanguage: string | null;
+  },
+): Promise<CefrResult | null> {
+  const userTurns = input.turns.filter((t) => t.role === "user").map((t) => t.content);
+  if (!userTurns.length || !isConvLang(input.language)) return null;
+
+  const scoredAnswers = input.turns
+    .filter((t) => t.role === "user" && t.pronunciation)
+    .map((t) => t.pronunciation as PronunciationResult)
+    .filter((p) => !isPlaceholderPronunciation(p));
+  const pronunciationContext: PronunciationContext | null = input.pronunciationScores && {
+    ...input.pronunciationScores,
+    weakWords: weakPronunciationWords(scoredAnswers),
+  };
+
+  let evaluation: CefrResult;
+  try {
+    evaluation = await evaluateLiveConversation({
+      language: input.language,
+      userTurns,
+      pronunciationContext,
+      ladderSteps: input.ladder?.steps ?? [],
+      exchanges: exchangesFromHistory(input.turns),
+      uiLang: isUiLang(input.uiLanguage) ? input.uiLanguage : DEFAULT_UI_LANG,
+    });
+  } catch (e) {
+    console.error("[sessions] final evaluation failed:", e);
+    logServerEvent("session_evaluation_failed", { sessionId, error: String(e).slice(0, 300) });
+    return null;
+  }
+
+  const { error } = await getSupabaseServer()
+    .from("sessions")
+    .update({
+      cefr_level: evaluation.level || null,
+      global_score: typeof evaluation.score_percent === "number" ? Math.trunc(evaluation.score_percent) : null,
+      scores: evaluation.dimensions ?? null,
+      evaluation_json: evaluation,
+    })
+    .eq("id", sessionId);
+  if (error) {
+    console.error("[sessions] evaluation not stored:", error.message);
+    logServerEvent("session_evaluation_not_stored", { sessionId, error: error.message });
+    return null;
+  }
+  return evaluation;
 }
 
 /**

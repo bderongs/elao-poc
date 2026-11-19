@@ -1,6 +1,6 @@
 /**
  * Which lib/llm/registry.ts provider is live for the end-of-session CEFR
- * evaluation — app/api/evaluate/route.ts calls
+ * evaluation — lib/live-evaluation.ts calls
  * getProvider(LIVE_CONVERSATION_MODEL_ID) directly, so this constant IS the
  * switch, not just a label for one. Was "mistral" since the original prompts
  * were tuned against it (see lib/llm/providers/anthropic.ts).

@@ -8,6 +8,14 @@ async function isAdmin(userId: string): Promise<boolean> {
   return data?.role === "admin";
 }
 
+function clientIp(req: NextRequest): string {
+  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
+}
+
+function rateLimited(retryAfter: number): NextResponse {
+  return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": String(retryAfter) } });
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -15,10 +23,14 @@ export async function middleware(req: NextRequest) {
   // nothing else (lib/rate-limit.ts) — checked before the Supabase client, so
   // these calls pay no auth round trip.
   if (RATE_LIMITED_PATHS.includes(pathname)) {
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
-    const retryAfter = rateLimit(pathname, ip);
-    if (retryAfter === null) return NextResponse.next();
-    return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": String(retryAfter) } });
+    const retryAfter = rateLimit(pathname, clientIp(req));
+    return retryAfter === null ? NextResponse.next() : rateLimited(retryAfter);
+  }
+
+  // The final save runs the session's CEFR evaluation — limited like the routes above.
+  if (pathname === "/api/sessions" && req.method === "POST") {
+    const retryAfter = rateLimit("POST /api/sessions", clientIp(req));
+    if (retryAfter !== null) return rateLimited(retryAfter);
   }
 
   const { supabase, response } = getSupabaseMiddlewareClient(req);
@@ -32,7 +44,7 @@ export async function middleware(req: NextRequest) {
 
   if (pathname === "/admin/login") return response;
 
-  // Public: the live conversation UI posts here to save a completed session.
+  // Public: the live conversation UI posts here to save (and have evaluated) a completed session.
   // Every other /api/sessions* route (list, detail, replay-evaluate) is
   // admin-only.
   if (pathname === "/api/sessions" && req.method === "POST") return response;
@@ -95,6 +107,5 @@ export const config = {
     "/api/classify-topic",
     "/api/realtime-token",
     "/api/gradium-token",
-    "/api/evaluate",
   ],
 };

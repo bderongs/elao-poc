@@ -4,7 +4,7 @@
  *
  * The two calls on MISTRAL_MODEL / MISTRAL_PRONUNCIATION_MODEL:
  *   - the pronunciation judge (lib/pronunciation/providers/azure-ensemble.ts)
- *   - the end-of-session CEFR evaluation (app/api/evaluate/route.ts)
+ *   - the end-of-session CEFR evaluation (lib/live-evaluation.ts)
  *
  * Each turn's evidence (Voxtral transcription + Azure acoustic) is gathered
  * ONCE, then the same judge message goes to every model, so score gaps come
