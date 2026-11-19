@@ -7,6 +7,7 @@ import { ThinkingIndicator } from "@/components/ThinkingIndicator";
 import { RecomputeRollupButton } from "@/components/RecomputeRollupButton";
 import { PromoteHeadlineButton } from "@/components/PromoteHeadlineButton";
 import { adminColors } from "@/lib/admin-theme";
+import { OPT_IN_PRONUNCIATION_PROVIDER_IDS } from "@/lib/pronunciation-rollup";
 import styles from "./admin.module.css";
 
 export interface ProviderOption {
@@ -124,10 +125,12 @@ export function FullEvaluationPanel({
   // selectable by default — every run is a fresh, uncached, paid call
   // (lib/pronunciation/assess.ts), so re-checking something already scored
   // or already running should be a deliberate choice, not the default.
+  // Opt-in providers (OPT_IN_PRONUNCIATION_PROVIDER_IDS) start unchecked too.
   const [selectedPron, setSelectedPron] = useState<Set<string>>(
     new Set(
       pronunciationProviders
         .filter((p) => !alreadyScoredPronunciationIds.includes(p.id) && !pendingPronunciationIds.includes(p.id))
+        .filter((p) => !OPT_IN_PRONUNCIATION_PROVIDER_IDS.includes(p.id))
         .map((p) => p.id)
     )
   );

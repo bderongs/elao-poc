@@ -335,6 +335,7 @@ async function assess({
       wpm,
       words,
       source: "azure",
+      evidence: { verbatim: dg?.engine ?? null, azure: !!az, judge: true },
     };
   }
 
@@ -357,6 +358,7 @@ async function assess({
       wpm,
       words,
       source: "azure",
+      evidence: { verbatim: dg?.engine ?? null, azure: true, judge: false },
     };
   }
 
