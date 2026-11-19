@@ -99,9 +99,8 @@ Navigateur (app/page.tsx — micro, détection de fin de parole, avatar, déroul
   ├─ /api/classify-topic            → suivi des thèmes
   ├─ /api/pronunciation             → prononciation (Voxtral + Azure + juge Mistral)
   ├─ /api/sessions/live             → sauvegarde de la session après chaque réponse
-  ├─ /api/evaluate                  → évaluation CEFR finale (signée, voir Sécurité)
   ├─ Supabase Storage               ← envoi direct de l'audio, via URLs signées (/api/sessions/audio-urls)
-  └─ POST /api/sessions             → enregistrement final
+  └─ POST /api/sessions             → enregistrement final + évaluation CEFR finale (côté serveur)
 ```
 
 - **Next.js 15** (App Router), React 19, hébergé sur Vercel.
@@ -125,22 +124,22 @@ publique Supabase que pour la connexion et l'envoi de l'audio par URL signée.
 - **Données des candidats** : un candidat connecté ne voit que ses propres
   sessions. Les enregistrements audio sont dans un bucket privé ; les pages
   reçoivent des liens qui expirent après 2 heures (`lib/recordings.ts`).
-- **Résultat** : l'enregistrement final ne garde l'évaluation que si elle
-  porte la signature de `/api/evaluate` pour ces réponses
-  (`lib/evaluation-signature.ts`). Le niveau, le score et les axes sont lus
-  dans cette évaluation, jamais dans des champs envoyés à part par le
-  navigateur. Une évaluation non vérifiée n'est pas enregistrée (événement
-  `session_evaluation_unverified` dans les logs) ; un admin peut relancer
-  l'évaluation depuis la page de la session.
+- **Résultat** : l'évaluation finale est faite par le serveur, au moment de
+  l'enregistrement final (`POST /api/sessions`, `lib/live-evaluation.ts`), à
+  partir des réponses qu'il vient d'enregistrer. Il la stocke et la renvoie ;
+  l'écran de fin affiche exactement ce résultat. Le navigateur n'envoie aucun
+  score. Si l'évaluation échoue, la session reste enregistrée sans niveau
+  (événement `session_evaluation_failed` dans les logs) ; un admin peut
+  relancer l'évaluation depuis la page de la session.
 - **Limite** : la transcription et le déroulé (niveaux des questions, avis du
   juge par réponse) sont produits dans le navigateur. Un candidat très
   déterminé pourrait donc faire évaluer une transcription inventée. Ce qui
   est garanti, c'est que le score stocké vient bien de notre évaluateur et
-  correspond à la transcription stockée, relisible dans l'admin.
+  porte sur la transcription stockée, relisible dans l'admin.
 - **Limite de débit** : les API publiques qui appellent les modèles
   (`/api/chat`, `/api/transcribe`, `/api/pronunciation`,
   `/api/assess-transcript`, `/api/classify-topic`, jetons de transcription,
-  `/api/evaluate`) sont limitées par adresse IP sur 10 minutes : 1 000 appels
+  enregistrement final qui lance l'évaluation) sont limitées par adresse IP sur 10 minutes : 1 000 appels
   en tout, dont 30 évaluations finales (`lib/rate-limit.ts`). Une session
   complète en fait 100 à 120, ce qui laisse passer environ 8 sessions en même
   temps derrière une même adresse (réseau d'entreprise ou d'école). Au-delà,
@@ -216,7 +215,6 @@ Le détail de chaque variable est dans `.env.example`.
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Connexion des utilisateurs depuis le navigateur | Obligatoire |
 | `MISTRAL_MODEL`, `MISTRAL_CHAT_MODEL`, `MISTRAL_PRONUNCIATION_MODEL`, `MISTRAL_TRANSCRIBE_MODEL`, `MISTRAL_REALTIME_TRANSCRIBE_MODEL`, `MISTRAL_VOXTRAL_MODEL` | Choix des modèles (voir « Modèles utilisés ») | Facultatif |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | Comparaisons et simulateur (admin) | Facultatif |
-| `EVALUATION_SIGNING_SECRET` | Clé de signature des évaluations (dérivée de la clé service-role par défaut) | Facultatif |
 | `SCORE_CALLBACK_URL`, `SCORE_CALLBACK_SECRET` | Envoi du score à un système externe (désactivé dans `lib/score-callback.ts`) | Facultatif |
 | `NEXT_PUBLIC_SATISFACTION_MODAL` | `1` = questionnaire de satisfaction après le résultat | Facultatif |
 | `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | `true` = bouton « Continuer avec Google » actif | Facultatif |

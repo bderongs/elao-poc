@@ -14,19 +14,23 @@ export const runtime = "nodejs";
  * exactly as before, and the post-session ClaimResultsForm remains the way
  * to attach it later.
  *
+ * The save also runs the session's final CEFR evaluation (server-side, from
+ * the answers it stores) and returns it, `null` if it failed — the results
+ * screen shows exactly what was stored.
+ *
  * Once saved, the score callback (lib/score-callback.ts, Track AG) runs
  * after the response is sent — it never delays or fails the save.
  */
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
-    const { id } = await createSessionFromForm(await req.formData(), user?.id ?? null);
+    const { id, evaluation } = await createSessionFromForm(await req.formData(), user?.id ?? null);
     const reportUrl = `${new URL(req.url).origin}/admin/${id}`;
     after(async () => {
       const session = await getSessionForScoreCallback(id);
       if (session) await sendScoreCallback(session, reportUrl);
     });
-    return Response.json({ id });
+    return Response.json({ id, evaluation });
   } catch (e) {
     console.error("[sessions] create failed:", e);
     return Response.json({ error: String(e) }, { status: 500 });

@@ -6,7 +6,7 @@ import styles from "@/components/candidate.module.css";
 import { useUi } from "@/lib/ui-lang";
 
 interface EvaluatingScreenProps {
-  /** Flips true once /api/evaluate + saveSession have both settled (success or failure). */
+  /** Flips true once saveSession (which runs the final evaluation) has settled (success or failure). */
   done: boolean;
   /** Called exactly once, after the min-visible-duration and completion animation. */
   onDone: () => void;
@@ -22,7 +22,7 @@ const COMPLETE_ANIM_MS = 400;
  * Full-screen takeover shown while a session is being scored — screen 4
  * ("Fin de l'épreuve / analyse") of the "Salle claire" design
  * (doc/new_design). There is no incremental server-side progress to report
- * (a single /api/evaluate call), so the bar eases toward CAP_PERCENT and only
+ * (a single save-and-evaluate call), so the bar eases toward CAP_PERCENT and only
  * jumps to 100% once the caller flips `done` — with a minimum visible
  * duration so it never just flashes.
  */

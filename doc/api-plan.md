@@ -9,7 +9,7 @@ Contract: [`api/openapi.yaml`](api/openapi.yaml) (draft, to validate with the in
 - **One client only.** One API key in an environment variable, no `api_clients` table.
 - **No new table.** A test is a row in `sessions`, created by the API before the candidate opens the link.
 - **Four statuses:** `created` | `in_progress` | `completed` | `error`.
-- **Abandoned tests stay `in_progress`.** No server-side evaluation of a session the browser didn't finish, for now. ⚠ Today the evaluation is run by the browser (`/api/evaluate`, then `POST /api/sessions`): a candidate who closes the tab after the last answer is never scored, and the integrator will see that test `in_progress` forever.
+- **Abandoned tests stay `in_progress`.** No server-side evaluation of a session the browser didn't finish, for now. ⚠ The evaluation runs server-side but is triggered by the browser's final save (`POST /api/sessions`): a candidate who closes the tab after the last answer is never scored, and the integrator will see that test `in_progress` forever.
 - **The result is fixed at evaluation time.** Today the score is computed on read with the current rules (`SCORING_RULES` + the admin's level floors), so a stored session can change level when a floor moves. The API returns a snapshot written once and never recomputed. The admin keeps computing on read.
 - **No link expiry.** The link works once: when the test is `in_progress`, opening it again shows "test already started".
 

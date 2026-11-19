@@ -32,8 +32,7 @@ import { DebugPanel, MinimalDebugPanel, type DebugEvent } from "@/components/Deb
 import { AVATAR_NAME, SESSION_DURATION_MINUTES, SESSION_LENGTH_MODE, SESSION_MIN_SECONDS, SESSION_MAX_SECONDS } from "@/lib/session-config";
 import { evaluateStop, MIN_ANSWERS, shouldCloseSession, countWords, type LadderStep, type LadderRecord, type StopDecision } from "@/lib/session-length";
 import { questionById } from "@/lib/question-bank";
-import { substantiveAnswers, weakPronunciationWords } from "@/lib/pronunciation-rollup";
-import { exchangesFromHistory } from "@/lib/cefr-boundary";
+import { isPlaceholderPronunciation, substantiveAnswers } from "@/lib/pronunciation-rollup";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import { UI_STRINGS } from "@/lib/ui-strings";
 import { UiLangProvider, useUiLangFromBrowser } from "@/lib/ui-lang";
@@ -171,16 +170,6 @@ function capitalize(s: string): string {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-/**
- * Pass-1 stand-in attached to a turn until its real score arrives (see the
- * two-pass note above callPronunciationAPI) — score 0, no words. Must never
- * be averaged in: a turn whose pass 2 is still in flight (or failed) would
- * otherwise drag the session's pronunciation down by 1/N of its real score.
- */
-function isPlaceholderPronunciation(p: PronunciationResult): boolean {
-  return p.pronunciationScore === 0 && (p.words?.length ?? 0) === 0;
-}
-
 /** Average pronunciation scores across all really-scored user turns. */
 function computePronunciationAvgFromHistory(history: Msg[]): PronunciationAvg | null {
   const withPron = history.filter((m) => m.role === "user" && m.pronunciation);
@@ -251,9 +240,9 @@ export default function Home() {
   const [cefrResult, setCefrResult] = useState<CefrResult | null>(null);
   /** "active": conversation + single end button. "evaluating": full-screen takeover. "done": results. */
   const [phase, setPhase] = useState<"active" | "evaluating" | "done">("active");
-  /** Flips once /api/evaluate + saveSession have both settled (success or failure). */
+  /** Flips once saveSession (which runs the final evaluation) has settled (success or failure). */
   const [evalDone, setEvalDone] = useState(false);
-  /** True only if /api/evaluate itself errored — session is still saved either way. */
+  /** True when the save returned no evaluation (evaluation or save failed) — the session is saved whenever the save itself succeeded. */
   const [evalFailed, setEvalFailed] = useState(false);
   /** Id returned by POST /api/sessions, once the save succeeds — lets the results screen offer claiming the session on sign-up. */
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
@@ -715,13 +704,14 @@ export default function Home() {
   }, [sessionActive]);
 
   // ── save session via the server API (no direct Supabase access from the browser) ──
+  // The save also runs the final CEFR evaluation, server-side, and returns it —
+  // null when it failed or the save itself did. This is the only evaluation a
+  // session gets: the results screen shows exactly what was stored.
   const saveSession = async (
     audioBlob: Blob | null,
-    result?: typeof cefrResult,
     pronunciationScores: PronunciationAvg | null = pronunciationAvg,
-    evaluationSignature: string | null = null,
-  ) => {
-    if (sessionSavedRef.current) return;
+  ): Promise<CefrResult | null> => {
+    if (sessionSavedRef.current) return null;
     sessionSavedRef.current = true;
 
     // Let a still-in-flight row creation land so we finalise it instead of
@@ -734,9 +724,6 @@ export default function Home() {
     form.append("uiLanguage", uiLangRef.current);
     if (profileIdRef.current) form.append("testProfile", profileIdRef.current);
     form.append("durationSeconds", String(elapsed));
-    // Level, score and dimensions are read server-side from the (verified) evaluation itself.
-    form.append("evaluation", JSON.stringify(result ?? null));
-    if (evaluationSignature) form.append("evaluationSignature", evaluationSignature);
     form.append("pronunciationScores", JSON.stringify(pronunciationScores));
     form.append("ladder", JSON.stringify(buildLadderRecord()));
     if (integrityRef.current) form.append("integrity", JSON.stringify(integrityRef.current.record()));
@@ -825,12 +812,14 @@ export default function Home() {
         const detail = await res.text();
         console.error("Session save error:", detail);
         logClientEvent("session_save_failed", { status: res.status, detail: detail.slice(0, 300) });
-        return;
+        return null;
       }
-      const { id } = (await res.json()) as { id: string };
+      const { id, evaluation } = (await res.json()) as { id: string; evaluation: CefrResult | null };
       setSavedSessionId(id);
+      return evaluation ?? null;
     } catch (e) {
       console.error("Session save error:", e);
+      return null;
     }
   };
 
@@ -2138,43 +2127,10 @@ export default function Home() {
     }
     const finalPronunciationAvg = computePronunciationAvgFromHistory(historyRef.current);
 
-    let result: CefrResult | null = null;
-    let evaluationSignature: string | null = null;
-    try {
-      const userTurns = historyRef.current
-        .filter((m) => m.role === "user")
-        .map((m) => m.content);
-
-      const res = await fetch("/api/evaluate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language,
-          userTurns,
-          pronunciationContext: finalPronunciationAvg && {
-            ...finalPronunciationAvg,
-            weakWords: weakPronunciationWords(
-              historyRef.current.filter((m) => m.role === "user" && m.pronunciation && !isPlaceholderPronunciation(m.pronunciation)).map((m) => m.pronunciation!)
-            ),
-          },
-          ladderSteps: ladderStepsRef.current,
-          exchanges: exchangesFromHistory(historyRef.current),
-          uiLanguage: uiLangRef.current,
-        }),
-      });
-      if (!res.ok) throw new Error(`evaluate HTTP ${res.status}`);
-      result = await res.json();
-      // Sent back with the save, which only stores an evaluation it can verify (lib/evaluation-signature.ts).
-      evaluationSignature = res.headers.get("X-Evaluation-Signature");
-    } catch (e) {
-      console.error("Evaluation failed:", e);
-      setEvalFailed(true);
-    }
+    // Saving runs the final evaluation on the server and returns it (see saveSession).
+    const result = await saveSession(blob ?? audioBlob, finalPronunciationAvg);
+    if (!result) setEvalFailed(true);
     setCefrResult(result);
-
-    // Persist regardless of whether evaluation succeeded — this is the only
-    // place a session is ever saved, so it must always run.
-    await saveSession(blob ?? audioBlob, result ?? undefined, finalPronunciationAvg, evaluationSignature);
 
     setEvalDone(true); // EvaluatingScreen takes it from here (min-visible-duration, then phase -> "done")
   };
@@ -2457,13 +2413,12 @@ export default function Home() {
         <>
           <TopBar
             right={
+              // A link that set the language (`?lang=`): nothing here — the facts below already say it.
+              languageLocked ? undefined : (
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#6B6F7D" }}>
                 {/* Divider: the interface-language menu sits just left of this one. */}
                 <span aria-hidden="true" style={{ width: 1, height: 18, background: "#DDD9D0", marginRight: 8 }} />
-                {/* Lets a misclicked language be fixed without going back to the picker — not when the link set it. */}
-                {languageLocked ? (
-                  <span style={{ color: "#141D33" }}>{capitalize(t.langName[language])}</span>
-                ) : (
+                {/* Lets a misclicked language be fixed without going back to the picker. */}
                 <select
                   aria-label={t.instructions.changeLanguageAria}
                   value={language}
@@ -2485,16 +2440,16 @@ export default function Home() {
                     </option>
                   ))}
                 </select>
-                )}
                 <span className={styles.hideMobile}>{t.instructions.topBarSuffix}</span>
               </span>
+              )
             }
           />
           <div className={styles.instructionsGrid}>
             <div className={styles.instructionsIntro} style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                  {t.welcome.eyebrow}
+                <span style={{ fontFamily: "'Outfit',sans-serif", fontSize: 17, color: "#6B6F7D" }}>
+                  {t.instructions.welcome}
                 </span>
                 <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
                   {t.instructions.title(t.sessionLength)}
@@ -2503,7 +2458,7 @@ export default function Home() {
                   {t.instructions.lead(AVATAR_NAME)}
                 </p>
               </div>
-              {/* The test at a glance — the welcome screen's facts, for a link that lands here directly. */}
+              {/* The test at a glance (duration, language) — for a link that lands here directly. */}
               <dl className={styles.instructionsFacts}>
                 {t.instructions.facts(capitalize(t.langName[language])).map(([label, value]) => (
                   <div key={label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -2557,7 +2512,6 @@ export default function Home() {
               >
                 {t.instructions.ready}
               </button>
-              <span style={{ fontSize: 14, color: "#8A8F9C", maxWidth: 420 }}>{t.instructions.prepare} {t.instructions.noGrades}</span>
             </div>
           </div>
         </>

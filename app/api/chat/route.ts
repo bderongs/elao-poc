@@ -7,7 +7,7 @@ import { getLiveProfile } from "@/lib/test-profiles";
 import { profileQuestionReply, withTurnNote } from "@/lib/conversation-prompts";
 import type { CefrRung } from "@/lib/cefr-rung";
 import { chatProcessLabel } from "@/lib/turn-labels";
-import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
+import { getProvider as getTtsProvider, isBetaTts, liveTtsProviderId } from "@/lib/tts/registry";
 
 export const runtime = "nodejs";
 
@@ -75,8 +75,8 @@ const NORMAL_RATE = "-3%";
  *  1. TTS is fired immediately on each sentence boundary — NO await inside the LLM loop.
  *  2. All TTS requests run in parallel with LLM generation.
  *  3. The TTS response is streamed (chunks forwarded as they arrive) — Gradium
- *     for en/fr/es/de, Azure for nl-BE/it (see lib/tts/registry.ts's
- *     LIVE_TTS_PROVIDER_BY_LANG).
+ *     for en/fr/es/de/nl-NL, Azure for nl-BE/it (see lib/tts/registry.ts's
+ *     liveTtsProviderId).
  *  4. By the time the LLM finishes, sentence-1 TTS is already done or nearly done.
  */
 export async function POST(req: Request) {
@@ -122,15 +122,22 @@ export async function POST(req: Request) {
       // Promises are pushed immediately when a sentence boundary is hit — no await.
       const ttsQueue: { text: string; readerPromise: Promise<ReadableStreamDefaultReader<Uint8Array> | null> }[] = [];
 
-      // Gradium for en/fr/es/de, Azure for nl-BE/it (Gradium doesn't cover
-      // them) — see lib/tts/registry.ts's LIVE_TTS_PROVIDER_BY_LANG.
-      const fireTTS = (sentence: string) =>
+      // Gradium for en/fr/es/de and nl-NL (beta voices), Azure for nl-BE/it
+      // (Gradium doesn't cover them) — see lib/tts/registry.ts's
+      // liveTtsProviderId. A beta failure falls back to Azure so the
+      // sentence isn't silently dropped.
+      const ttsProvider = getTtsProvider(liveTtsProviderId(language));
+      const betaTts = isBetaTts(language);
+      const fireTTS = (sentence: string) => {
+        const params = { text: sentence, language, rate, turnLogId: logId };
+        const primary = ttsProvider.synthesize(params);
         ttsQueue.push({
           text: sentence,
-          readerPromise: getTtsProvider(LIVE_TTS_PROVIDER_BY_LANG[language]).synthesize({
-            text: sentence, language, rate, turnLogId: logId,
-          }),
+          readerPromise: betaTts
+            ? primary.catch(() => null).then((r) => r ?? getTtsProvider("azure").synthesize(params))
+            : primary,
         });
+      };
 
       // Forward text: to the caption channel, accumulate into fullText, and
       // fire TTS on each complete sentence.

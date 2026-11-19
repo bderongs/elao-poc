@@ -7,7 +7,7 @@
  * Everything except the learner reuses the live pipeline's own pieces —
  * buildExaminerPrompt (same as app/api/chat/route.ts, minus TTS), ET
  * (lib/et/registry.ts), TT (lib/topic-tracking.ts), CEFR_SYSTEM_PROMPT (same
- * as app/api/evaluate/route.ts) — and mirrors app/page.tsx's orchestration
+ * as lib/live-evaluation.ts) — and mirrors app/page.tsx's orchestration
  * (rung stepping, domain streak → avoidDomain/switchToDomain, __START__/__END__).
  *
  * Deliberate differences from a live session:
@@ -418,7 +418,7 @@ export async function* runConversationSimulation(
     return;
   }
 
-  // End-of-session CEFR evaluation — same call as app/api/evaluate/route.ts.
+  // End-of-session CEFR evaluation — same call as lib/live-evaluation.ts.
   try {
     const userTurns = history.filter((m) => m.role === "user").map((m) => m.content);
     const provider = getLlmProvider(LIVE_CONVERSATION_MODEL_ID);
@@ -433,7 +433,7 @@ export async function* runConversationSimulation(
         context: `${runId}:${tag}`,
       });
       let result = withC2Evidence(withAnswerEvidence(parseCefrEvaluation(raw), userTurns), steps);
-      // As app/api/evaluate/route.ts: the speaking rate caps fluency.
+      // As lib/live-evaluation.ts: the speaking rate caps fluency.
       if (proxy && result.dimensions.fluency !== null) {
         result.dimensions.fluency = fluencyFromWpm(result.dimensions.fluency, proxy.wpm, result.answer_count ?? null, result.words_per_answer ?? null);
       }

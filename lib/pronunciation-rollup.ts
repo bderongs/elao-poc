@@ -87,6 +87,17 @@ export function substantiveAnswers<T>(items: T[], wordsOf: (item: T) => number):
 }
 
 /**
+ * Pass-1 stand-in attached to a live turn until its real score arrives (see
+ * the two-pass note above app/page.tsx's callPronunciationAPI) — score 0, no
+ * words. Must never be averaged in: a turn whose pass 2 is still in flight
+ * (or failed) would otherwise drag the session's pronunciation down by 1/N
+ * of its real score.
+ */
+export function isPlaceholderPronunciation(p: Pick<PronunciationResult, "pronunciationScore" | "words">): boolean {
+  return p.pronunciationScore === 0 && (p.words?.length ?? 0) === 0;
+}
+
+/**
  * The words most often scored as mispronounced over a session (accuracy
  * below 60, the "mispronounced" colour of the transcript; forgiven words
  * left out), most frequent first — fed to the final evaluator for the

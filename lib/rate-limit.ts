@@ -26,17 +26,20 @@ const LIMITS: Record<string, { group: string; max: number }> = {
   "/api/classify-topic": { group: "ai", max: 1000 },
   "/api/realtime-token": { group: "ai", max: 1000 },
   "/api/gradium-token": { group: "ai", max: 1000 },
-  // The most expensive single call (whole transcript on the large model).
-  "/api/evaluate": { group: "evaluate", max: 30 },
+  // The final save runs the most expensive call (whole transcript on the large
+  // model). Keyed by method too: GET /api/sessions is the admin list, which
+  // goes through the auth check, not this early exit (see middleware.ts).
+  "POST /api/sessions": { group: "evaluate", max: 30 },
 };
 
-export const RATE_LIMITED_PATHS = Object.keys(LIMITS);
+/** Paths limited whatever the method — middleware.ts lets these through after the check alone. */
+export const RATE_LIMITED_PATHS = Object.keys(LIMITS).filter((k) => !k.includes(" "));
 
 const counts = new Map<string, { windowStart: number; count: number }>();
 
-/** Seconds until the caller may retry, or null when the request is allowed. */
-export function rateLimit(pathname: string, ip: string): number | null {
-  const limit = LIMITS[pathname];
+/** Seconds until the caller may retry, or null when the request is allowed. `route` is a path, or "METHOD path". */
+export function rateLimit(route: string, ip: string): number | null {
+  const limit = LIMITS[route];
   if (!limit) return null;
 
   const now = Date.now();

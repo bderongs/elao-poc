@@ -269,7 +269,7 @@ Assess now and return the JSON object.`;
 
 /**
  * Parses the evaluator's raw reply into a CefrResult. Single place every
- * caller (live /api/evaluate, eval lab, simulator) goes through, so the
+ * caller (live final evaluation, eval lab, simulator) goes through, so the
  * dimensions are always on the half-point scale the prompt asks for (Track
  * AE): clamped to 0-10 and rounded to the nearest 0.5, whatever decimals or
  * strings the model actually returned. score_percent is rounded to an integer.

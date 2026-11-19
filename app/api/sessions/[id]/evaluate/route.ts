@@ -10,7 +10,7 @@ interface EvaluateRequest {
  * POST /api/sessions/:id/evaluate
  * Re-runs a stored session's transcript through one or more LLM providers
  * and persists each result to session_evaluations — the eval lab's replay
- * path, separate from the live in-session /api/evaluate call.
+ * path, separate from the live final evaluation run by the save (lib/live-evaluation.ts).
  * Gated by middleware.ts (admin cookie required), since this triggers paid
  * LLM calls and returns transcript data.
  */
