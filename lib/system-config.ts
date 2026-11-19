@@ -16,7 +16,7 @@
 import type { ConvLang } from "@/lib/conversation-prompts";
 import { getProvider as getSttProvider, LIVE_STT_PROVIDER_ID } from "@/lib/stt/registry";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, REALTIME_STT_PROVIDER_LABELS, type RealtimeSttProviderId } from "@/lib/realtime-stt-config";
-import { getProvider as getTtsProvider, LIVE_TTS_PROVIDER_BY_LANG } from "@/lib/tts/registry";
+import { getProvider as getTtsProvider, liveTtsProviderId } from "@/lib/tts/registry";
 import { getProvider as getEtProvider, LIVE_ET_PROVIDER_ID } from "@/lib/et/registry";
 import { getProvider as getPronunciationProvider } from "@/lib/pronunciation/registry";
 import { LIVE_CONVERSATION_PRONUNCIATION_PROVIDER_BY_LANG } from "@/lib/pronunciation-rollup";
@@ -69,7 +69,7 @@ export function getSystemConfig(): CapabilityConfig[] {
 
   const ttsPerLanguage: Partial<Record<ConvLang, ProviderConfig>> = {};
   for (const lang of ALL_LANGUAGES) {
-    const provider = getTtsProvider(LIVE_TTS_PROVIDER_BY_LANG[lang]);
+    const provider = getTtsProvider(liveTtsProviderId(lang));
     ttsPerLanguage[lang] = {
       providerId: provider.id,
       providerLabel: provider.label,
