@@ -7,7 +7,7 @@ import { SileroVad } from "@/lib/silero-vad";
 import { IntegrityTracker } from "@/lib/integrity-tracker";
 import { RealtimeStt, type StreamingStt } from "@/lib/realtime-stt";
 import { GradiumRealtimeStt } from "@/lib/realtime-stt-gradium";
-import type { ConvLang } from "@/lib/conversation-prompts";
+import { isConvLang, type ConvLang } from "@/lib/conversation-prompts";
 import { isProfileId } from "@/lib/test-profile-types";
 import { WelcomeListenButton } from "@/components/WelcomeListenButton";
 import { REALTIME_STT_ENABLED, REALTIME_STT_PROVIDER_BY_LANG, TRUNCATION_CHECK_MIN_SPOKEN_MS, TRUNCATION_CHECK_MAX_WPM } from "@/lib/realtime-stt-config";
@@ -124,6 +124,16 @@ function getProfileFromUrl(): string | null {
   return isProfileId(raw) ? raw : null;
 }
 
+/** `?lang=en` (a test language) means the link was made for one test (by the
+ *  integrator API later, `?test=<id>`): the candidate skips the welcome, account
+ *  and language screens and lands on the instructions + mic check, with the test
+ *  language locked. Combines with `?profile=`, `?level=`, `?ui=`, `?minutes=`. */
+function getTestLangFromUrl(): ConvLang | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("lang");
+  return isConvLang(raw) ? raw : null;
+}
+
 /** A profile question still missing this close to the minimum length is asked even out of its level range. */
 const PROFILE_URGENT_SECONDS = SESSION_MIN_SECONDS - 60;
 
@@ -153,6 +163,10 @@ function getMinutesOverrideFromUrl(): number | null {
   if (typeof window === "undefined") return null;
   const n = Number(new URLSearchParams(window.location.search).get("minutes"));
   return Number.isInteger(n) && n >= 1 && n <= 15 ? n : null;
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -212,6 +226,8 @@ export default function Home() {
    *  -> "language" (today's picker) -> "instructions" (mic check, doc/new_design screen 2). A returning
    *  signed-in user skips the first two, landing on "confirm-preference" (stored language+rung) or "language". */
   const [preSessionStep, setPreSessionStep] = useState<"welcome" | "auth" | "confirm-preference" | "language" | "instructions">("welcome");
+  /** True when the link set the test language (`?lang=`): no picker, no way to change it. */
+  const [languageLocked, setLanguageLocked] = useState(false);
   const [micStatus, setMicStatus] = useState<"pending" | "granted" | "denied">("pending");
   const [micDeviceLabel, setMicDeviceLabel] = useState<string | null>(null);
   /** 0-1, sampled from the real mic input — drives both the mic-check meter and the live "userSpeaking" bars. */
@@ -577,6 +593,13 @@ export default function Home() {
   // gone through the guest/claim flow) fall through straight to "language",
   // today's picker. A signed-out visitor stays on "welcome".
   useEffect(() => {
+    const testLang = getTestLangFromUrl();
+    if (testLang) {
+      setLanguage(testLang);
+      setLanguageLocked(true);
+      setPreSessionStep("instructions");
+      return;
+    }
     let cancelled = false;
     (async () => {
       const { data } = await getSupabaseBrowser().auth.getUser();
@@ -2437,7 +2460,10 @@ export default function Home() {
               <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#6B6F7D" }}>
                 {/* Divider: the interface-language menu sits just left of this one. */}
                 <span aria-hidden="true" style={{ width: 1, height: 18, background: "#DDD9D0", marginRight: 8 }} />
-                {/* Lets a misclicked language be fixed without going back to the picker. */}
+                {/* Lets a misclicked language be fixed without going back to the picker — not when the link set it. */}
+                {languageLocked ? (
+                  <span style={{ color: "#141D33" }}>{capitalize(t.langName[language])}</span>
+                ) : (
                 <select
                   aria-label={t.instructions.changeLanguageAria}
                   value={language}
@@ -2455,10 +2481,11 @@ export default function Home() {
                 >
                   {LANGUAGES.map((l) => (
                     <option key={l.code} value={l.code}>
-                      {t.langName[l.code].charAt(0).toUpperCase() + t.langName[l.code].slice(1)}
+                      {capitalize(t.langName[l.code])}
                     </option>
                   ))}
                 </select>
+                )}
                 <span className={styles.hideMobile}>{t.instructions.topBarSuffix}</span>
               </span>
             }
@@ -2466,6 +2493,9 @@ export default function Home() {
           <div className={styles.instructionsGrid}>
             <div className={styles.instructionsIntro} style={{ display: "flex", flexDirection: "column", gap: 36 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                  {t.welcome.eyebrow}
+                </span>
                 <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
                   {t.instructions.title(t.sessionLength)}
                 </h2>
@@ -2473,6 +2503,15 @@ export default function Home() {
                   {t.instructions.lead(AVATAR_NAME)}
                 </p>
               </div>
+              {/* The test at a glance — the welcome screen's facts, for a link that lands here directly. */}
+              <dl className={styles.instructionsFacts}>
+                {t.instructions.facts(capitalize(t.langName[language])).map(([label, value]) => (
+                  <div key={label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <dt style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#8A8F9C", letterSpacing: "0.12em", textTransform: "uppercase" }}>{label}</dt>
+                    <dd style={{ margin: 0, fontSize: 16, color: "#141D33" }}>{value}</dd>
+                  </div>
+                ))}
+              </dl>
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 {[...t.instructions.steps(AVATAR_NAME), ...(integrityEnabled ? [t.instructions.integrityStep] : [])].map(([title, desc], i) => (
                   <div key={title} style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
@@ -2518,7 +2557,7 @@ export default function Home() {
               >
                 {t.instructions.ready}
               </button>
-              <span style={{ fontSize: 14, color: "#8A8F9C" }}>{t.instructions.noGrades}</span>
+              <span style={{ fontSize: 14, color: "#8A8F9C", maxWidth: 420 }}>{t.instructions.prepare} {t.instructions.noGrades}</span>
             </div>
           </div>
         </>

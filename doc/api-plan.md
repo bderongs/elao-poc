@@ -130,7 +130,7 @@ One migration (`0021_api_tests.sql`; 0018 is the interface language, 0019 nl-NL,
 
 ### 5. Candidate link
 
-- [ ] **API-11** `app/page.tsx`: read `?test=<id>` (same read-once pattern as `?level=`). A public endpoint returns the test's language and start level and whether it can still be taken; the language choice is locked to it.
+- [ ] **API-11** `app/page.tsx`: read `?test=<id>` (same read-once pattern as `?level=`). A public endpoint returns the test's language and start level and whether it can still be taken; the language choice is locked to it. Lands straight on the instructions + mic-check screen, like `?lang=` (`getTestLangFromUrl`, decided 2026-11-18: the reception screen is ours); point 4 below (redirect vs iframe) still stands for how the candidate reaches it.
 - [ ] **API-12** `POST /api/sessions/live` with `testId`: instead of inserting, flip that row `created` → `in_progress` (atomic `update … where status = 'created'`), set `started_at`. A second opening finds no `created` row → "test already started" screen.
 - [ ] **API-13** End of test: no account / claim step for API tests; go to `redirect_url` if set.
 

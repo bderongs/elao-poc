@@ -52,7 +52,7 @@ Follow [`api-plan.md`](api-plan.md), with these additions from the roadmap:
 - [ ] **API-04b** Migration: `test_profile` on `sessions` — done in 0020 (`sessions.test_profile`); the API migration is now `0021_api_tests.sql`.
 - [ ] **API-06b** The result snapshot carries `report_url` (phase 5) and the feedback in the interface language (L-04).
 - [ ] **API round 2** (2026-11-17): the integrator's review of the spec + every detail behind the score — proposals, decisions to take and tasks API-19…31 in [`api-plan.md` §Round 2](api-plan.md#round-2--integrator-review-and-score-details-2026-11-17).
-- [ ] **Open question for Michel**: where the "receive the call" screen lives — ELAO or ELAO Speaking. The current spec assumes ELAO Speaking (the candidate opens our `test_url`); if ELAO wants its own screen, we only need the API and a link straight into the test.
+- [x] **Reception screen** — decided 2026-11-18 (Baptiste): it lives in ELAO Speaking. It is our instructions + mic-check screen, with more about the test (duration, language, result A0–C2, what to prepare). A link that sets the test (`?lang=`, later the API's `?test=<id>`) lands straight on it, language locked, skipping welcome / account / language. Done for `?lang=` 2026-11-18; API-11 reuses it.
 
 ## Phase 3 — per-client questions (Safran)
 
@@ -84,7 +84,7 @@ Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Spe
 ## Waiting on Michel
 
 1. Mistral API key (Q-01).
-2. Where the call-reception screen lives (phase 2).
+2. ~~Where the call-reception screen lives~~ — ours (2026-11-18).
 
 ## Log
 
@@ -107,3 +107,4 @@ Reframed 2026-11-16 (Baptiste): Michel does not want ELAO Speaking to show a Spe
 | 2026-11-16 | R-05: API spec carries the report details (axis feedback, general summary, interface language, per-answer words / rate / help) | Phase 2 code still waits on the integrator (API-02) | Send the updated spec to the integrator |
 | 2026-11-16 | P-01 to P-03: test profiles in the DB + `/admin/profiles`, Safran seeded (migration 0020 applied), forced questions with level ranges, `?profile=` | Safran ranges to confirm with Michel; the examiner model also skips standard C1 bank questions half the time in a synthetic check (mistral-small) | Test a Safran session (`/?profile=safran`, English) |
 | 2026-11-17 | API round 2 planned: integrator review (webhook format, levels without "+", required fields, retries, signature, cancel/expiry/abandoned, `evaluating`) + score details (`scoring` block) — `api-plan.md` §Round 2 | Decisions ☐ in §Round 2 (Baptiste; questions 1–4 for Michel) | API-19, then the spec |
+| 2026-11-18 | Reception screen decided (ours). `?lang=` lands on the instructions + mic check, language locked; that screen shows duration, language, result and what to prepare (6 languages) | Native review of the new strings | API-11 on top of it |
