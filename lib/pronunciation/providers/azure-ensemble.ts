@@ -266,14 +266,23 @@ export function scoreFromVerdict(liveWords: string[], verdict: JudgeResult) {
   const wordAvg = words.length
     ? Math.round(words.reduce((s, w) => s + w.accuracyScore, 0) / words.length)
     : 0;
-  let score = Math.max(0, Math.min(100, Math.round(verdict.turn_score), wordAvg));
+  const turnScore = Math.max(0, Math.min(100, Math.round(verdict.turn_score)));
+  let score = Math.min(turnScore, wordAvg);
   // Jokers (Track AD): a strong answer's one or two worst words are presumed
-  // to be recognition errors — score the answer without them. The judge's own
-  // turn_score is not used then (it caps the turn on a single word-changing error).
+  // to be recognition errors — the word average is taken without them. They
+  // lift the score up to the judge's turn_score, never above it.
+  // Until 2026-11-19 the jokers replaced the judge's score: on a long answer
+  // most words are simple and rated "good", so with the two worst left out the
+  // rest averaged ~90 and overrode a judge who heard a strong accent (Speechace
+  // import b8a89a15: judge 55/55/45, scored 90/91/87; Speechace 65.6).
+  // Calibration replay (scripts/judge-calibration-replay.ts, 30 Speechace
+  // sessions / 149 turns, Small 4 judge, same evidence), old → new: bias vs
+  // Speechace +9.2 → +5.0, ρ oral level 0.72 → 0.74, ρ global level 0.52 →
+  // 0.62; B1 87.8 → 80.2, B2 83.2 → 77.0, C1 89.2 → 87.0, C2 91.4 → 89.8.
   const forgiveness = applyPronunciationForgiveness(words);
   if (forgiveness.score !== null) {
     for (const i of forgiveness.forgivenIndices) words[i].forgiven = true;
-    score = Math.max(score, forgiveness.score);
+    score = Math.max(score, Math.min(turnScore, forgiveness.score));
   }
   return { score, words, forgiveness };
 }

@@ -13,7 +13,9 @@
  * edit them here (in code, not in admin):
  *
  *   1. Pronunciation (applyPronunciationForgiveness) — per answer, the worst
- *      flagged words are left out of that answer's score.
+ *      flagged words are left out of that answer's word average; the result
+ *      never exceeds the judge's own turn score (azure-ensemble.ts
+ *      scoreFromVerdict, since 2026-11-19).
  *   2. Final evaluator (buildEvaluatorForgivenessNote) — a note in the user
  *      message tells the model how many apparent errors to presume are
  *      recognition errors.
