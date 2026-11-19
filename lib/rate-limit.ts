@@ -30,6 +30,8 @@ const LIMITS: Record<string, { group: string; max: number }> = {
   // model). Keyed by method too: GET /api/sessions is the admin list, which
   // goes through the auth check, not this early exit (see middleware.ts).
   "POST /api/sessions": { group: "evaluate", max: 30 },
+  // Written test (/ecrit): each call is a whole evaluation on the large model (4 to 8 calls).
+  "/api/writing/evaluate": { group: "writing", max: 20 },
 };
 
 /** Paths limited whatever the method — middleware.ts lets these through after the check alone. */

@@ -88,6 +88,45 @@ consignes envoyées aux modèles. Le poste principal est la prononciation
 remettre à jour si un fournisseur change ses prix. Le tarif Gradium dépend de
 l'abonnement (calcul fait sur le tarif de l'offre S).
 
+## Test écrit (MVP, `/ecrit`)
+
+Test d'expression écrite indépendant du test oral : trois productions libres
+de 50 à 100 mots (mêmes sujets pour tous), en français ou en anglais. **Rien
+n'est enregistré en base** : le brouillon et le résultat restent dans le
+navigateur (sessionStorage), et chaque évaluation est écrite dans les logs
+serveur (événement `writing_evaluation`) pour la calibration.
+
+L'évaluation (`POST /api/writing/evaluate`, `lib/writing/`) se fait en deux
+temps séparés, sur `mistral-large-2512` (`MISTRAL_WRITING_MODEL` pour changer),
+température 0 :
+
+1. **Relevé** (un appel par texte) : l'IA décrit sans évaluer les faits de
+   langue (subordonnées, temps, connecteurs, vocabulaire, accords,
+   orthographe, ponctuation, reprises…), chacun avec l'extrait exact, plus
+   les points de la consigne traités et les passages qu'elle a dû
+   interpréter. Le code écarte tout fait dont l'extrait n'est pas dans le
+   texte, et toute formulation évaluative ou mention de niveau (une relance
+   corrective, puis suppression).
+2. **Bandes** (un appel) : à partir du seul relevé (l'IA ne voit pas les
+   textes), une bande A1–C2 par critère — adéquation à la tâche, étendue
+   lexicale, étendue et contrôle grammaticaux, correction formelle, cohésion —
+   avec les identifiants des faits qui la justifient. Le code ne garde que
+   les identifiants existants, retient la bande la plus basse en cas
+   d'hésitation, et la plus basse s'il n'y a aucune preuve.
+3. **Niveau** (code, sans IA) : moyenne pondérée des bandes (arrondi vers le
+   bas à la demi-bande), puis plafonds : message pas intelligible sans effort
+   (plus de 2 passages interprétés pour 100 mots → A2 au plus), au plus une
+   bande au-dessus de l'adéquation à la tâche et du critère le plus bas.
+
+La grille (descripteurs, pondérations, plafonds, limites de mots) est
+**provisoire** et regroupée dans `lib/writing/grid.ts` ; les trois sujets sont
+dans `lib/writing/tasks.ts`. `tsx scripts/writing-eval.ts` rejoue
+l'évaluation sur des copies types et écrit le détail dans `sim-runs/`.
+
+Une évaluation fait 4 à 8 appels au grand modèle (40 à 50 s) ; limite de 20
+évaluations par adresse IP sur 10 minutes. Interface en français et en
+anglais (les autres langues d'interface affichent l'anglais).
+
 ## Architecture
 
 ```

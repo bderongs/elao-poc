@@ -107,5 +107,6 @@ export const config = {
     "/api/classify-topic",
     "/api/realtime-token",
     "/api/gradium-token",
+    "/api/writing/evaluate",
   ],
 };

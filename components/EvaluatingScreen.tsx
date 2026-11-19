@@ -11,6 +11,12 @@ interface EvaluatingScreenProps {
   /** Called exactly once, after the min-visible-duration and completion animation. */
   onDone: () => void;
   labels?: string[];
+  /** Overrides of the speaking test's copy — the written test (/ecrit) passes its own. footnote null = no footnote. */
+  title?: string;
+  lead?: string;
+  footnote?: string | null;
+  /** Typical wait, for the "~N S" countdown. The written test's analysis takes about 45 s. */
+  expectedSeconds?: number;
 }
 
 const MIN_VISIBLE_MS = 2500;
@@ -26,7 +32,7 @@ const COMPLETE_ANIM_MS = 400;
  * jumps to 100% once the caller flips `done` — with a minimum visible
  * duration so it never just flashes.
  */
-export function EvaluatingScreen({ done, onDone, labels: labelsProp }: EvaluatingScreenProps) {
+export function EvaluatingScreen({ done, onDone, labels: labelsProp, title, lead, footnote, expectedSeconds = 20 }: EvaluatingScreenProps) {
   const { t } = useUi();
   const labels = labelsProp ?? t.evaluating.labels;
   const [progress, setProgress] = useState(6);
@@ -39,10 +45,12 @@ export function EvaluatingScreen({ done, onDone, labels: labelsProp }: Evaluatin
   useEffect(() => {
     if (done) return;
     const id = setInterval(() => {
-      setProgress((p) => (p >= CAP_PERCENT ? p : Math.min(CAP_PERCENT, p + (CAP_PERCENT - p) * 0.15 + 1)));
+      // Slower easing for a longer expected wait (the default 20 s keeps the original pace).
+      const pace = 20 / expectedSeconds;
+      setProgress((p) => (p >= CAP_PERCENT ? p : Math.min(CAP_PERCENT, p + ((CAP_PERCENT - p) * 0.15 + 1) * pace)));
     }, 200);
     return () => clearInterval(id);
-  }, [done]);
+  }, [done, expectedSeconds]);
 
   useEffect(() => {
     if (done) return;
@@ -65,7 +73,7 @@ export function EvaluatingScreen({ done, onDone, labels: labelsProp }: Evaluatin
     return () => clearTimeout(t1);
   }, [done]);
 
-  const secondsLeft = Math.max(1, Math.round(((100 - progress) / 100) * 20));
+  const secondsLeft = Math.max(1, Math.round(((100 - progress) / 100) * expectedSeconds));
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#F7F5F0" }}>
@@ -92,10 +100,10 @@ export function EvaluatingScreen({ done, onDone, labels: labelsProp }: Evaluatin
         </div>
         <div style={{ textAlign: "center", maxWidth: 560, display: "flex", flexDirection: "column", gap: 14 }}>
           <h2 className={styles.titleL} style={{ margin: 0, fontFamily: "'Outfit',sans-serif", fontWeight: 400, color: "#141D33", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
-            {t.evaluating.title}
+            {title ?? t.evaluating.title}
           </h2>
           <p className={styles.lead} style={{ margin: 0, color: "#5A5F6E", lineHeight: 1.6 }}>
-            {t.evaluating.lead}
+            {lead ?? t.evaluating.lead}
           </p>
         </div>
         <div style={{ width: 420, maxWidth: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -116,9 +124,11 @@ export function EvaluatingScreen({ done, onDone, labels: labelsProp }: Evaluatin
             <span>{done ? t.evaluating.done : `~${secondsLeft} S`}</span>
           </div>
         </div>
-        <span style={{ fontSize: 14, color: "#8A8F9C", textAlign: "center" }}>
-          {t.evaluating.canClose}
-        </span>
+        {footnote !== null && (
+          <span style={{ fontSize: 14, color: "#8A8F9C", textAlign: "center" }}>
+            {footnote ?? t.evaluating.canClose}
+          </span>
+        )}
       </div>
     </div>
   );

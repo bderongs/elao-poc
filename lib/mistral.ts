@@ -249,6 +249,8 @@ export async function mistralComplete(params: {
   messages: MistralMessage[];
   maxTokens?: number;
   json?: boolean;
+  /** Sampling temperature; omitted = the model's default. The written test (lib/writing) sends 0. */
+  temperature?: number;
   /** Label for the log timeline, e.g. "pronunciation-judge" or "cefr-eval". */
   context?: string;
 }): Promise<string> {
@@ -260,6 +262,7 @@ export async function mistralComplete(params: {
         max_tokens: params.maxTokens ?? 1500,
         stream: false,
         ...(params.json ? { response_format: { type: "json_object" } } : {}),
+        ...(params.temperature != null ? { temperature: params.temperature } : {}),
       },
       params.context ?? "complete"
     );
