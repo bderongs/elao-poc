@@ -48,6 +48,16 @@ const DEFAULT_PRONUNCIATION_PROVIDER_ID = "azure-ensemble";
 export const COMPARISON_ONLY_PRONUNCIATION_PROVIDER_IDS: readonly string[] = ["azure-intended"];
 
 /**
+ * Providers left unchecked by default in "Run full evaluation"
+ * (components/FullEvaluationPanel.tsx) — still one click away. voxtral
+ * (voxtral-small-latest, admin comparison since 2026-09-09) ran alongside the
+ * two judges and exhausted its rate limit: on 2026-11-18 every voxtral run of
+ * session b8a89a15 ended in a 429, which read as "Voxtral transcription is
+ * failing" although the live second hearing is a different model.
+ */
+export const OPT_IN_PRONUNCIATION_PROVIDER_IDS: readonly string[] = ["voxtral"];
+
+/**
  * Resolves the live pronunciation provider id for a session/turn's language.
  * Accepts a loose string (form-data language codes, nullable session.language
  * columns on older rows) and falls back to the non-en/fr default for

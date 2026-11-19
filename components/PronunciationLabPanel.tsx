@@ -7,6 +7,19 @@ import { UserWords } from "@/components/ScoreDisplay";
 import { formatDateTime, formatTime } from "@/lib/format-date";
 import styles from "./admin.module.css";
 
+/** The evidence a judge run went without (both engines fail silently) — nothing when complete or not recorded. */
+function MissingEvidence({ result }: { result: TurnEvaluationRow["result_json"] }) {
+  const ev = result?.evidence;
+  if (!ev) return null;
+  const missing = [!ev.verbatim && "second hearing", !ev.azure && "Azure", !ev.judge && "judge (Azure alone)"].filter(Boolean);
+  if (!missing.length) return null;
+  return (
+    <div style={{ color: "#fbbf24", fontSize: 11 }} title="This engine failed during the run; the score was computed without it">
+      without {missing.join(", ")}
+    </div>
+  );
+}
+
 export interface PronunciationProviderOption {
   id: string;
   label: string;
@@ -132,7 +145,10 @@ export function PronunciationLabPanel({
                     </td>
                   ) : (
                     <>
-                      <td data-label="Score">{e.result_json?.pronunciationScore ?? "—"}</td>
+                      <td data-label="Score">
+                        {e.result_json?.pronunciationScore ?? "—"}
+                        <MissingEvidence result={e.result_json} />
+                      </td>
                       <td data-label="WPM">{e.result_json?.wpm ?? "—"}</td>
                       <td data-label="Words">
                         {e.result_json?.words?.length ? <UserWords words={e.result_json.words} /> : "—"}

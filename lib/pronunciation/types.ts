@@ -28,6 +28,21 @@ export interface PronunciationResult {
    * 'voxtral'  = single-call direct audio assessment (lib/pronunciation/providers/voxtral.ts).
    */
   source?: "deepgram" | "azure" | "voxtral";
+  /**
+   * Which evidence the score was built on (azure-ensemble, azure-intended).
+   * Both engines fail silently — the judge then runs without that evidence —
+   * so this is the only record of it. Absent on results before 2026-11-19.
+   */
+  evidence?: PronunciationEvidence;
+}
+
+export interface PronunciationEvidence {
+  /** Second-hearing engine that answered (lib/pronunciation/verbatim.ts); null = it failed, the judge ran without it. */
+  verbatim: VerbatimEngine | null;
+  /** Azure free-speech acoustic scores came back. */
+  azure: boolean;
+  /** The Mistral judge answered; false = the score is Azure acoustic alone (fallback). */
+  judge: boolean;
 }
 
 export interface PronunciationAssessParams {

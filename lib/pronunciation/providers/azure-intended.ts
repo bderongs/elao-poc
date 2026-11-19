@@ -153,6 +153,8 @@ async function assess({
     wpm,
     words,
     source: "azure",
+    // The judge here is the intended-text reconstruction; it throws on failure, so reaching this line means it answered.
+    evidence: { verbatim: dg?.engine ?? null, azure: !!azFree, judge: true },
   };
 }
 
